@@ -1,0 +1,12 @@
+services:
+  litellm:
+    image: docker.litellm.ai/berriai/litellm:main-latest
+    container_name: agentbuilder-litellm
+    ports:
+      - "4000:4000"
+    env_file:
+      - .env.local
+    volumes:
+      - ./litellm_config.yaml:/app/config.yaml:ro
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    restart: unless-stopped

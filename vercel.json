@@ -1,0 +1,16 @@
+{
+  "crons": [
+    {
+      "path": "/api/workers/rag",
+      "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/workers/webhooks",
+      "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/workers/deletion",
+      "schedule": "*/5 * * * *"
+    }
+  ]
+}
