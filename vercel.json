@@ -11,6 +11,10 @@
     {
       "path": "/api/workers/deletion",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/workers/integrations",
+      "schedule": "*/5 * * * *"
     }
   ]
 }

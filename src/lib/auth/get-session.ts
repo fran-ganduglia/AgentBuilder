@@ -1,4 +1,5 @@
-﻿import { redirect } from "next/navigation";
+﻿import { cache } from "react";
+import { redirect } from "next/navigation";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import type { AppUser, Organization, Role, UserProfile } from "@/types/app";
 
@@ -15,7 +16,7 @@ type SessionProfile = Pick<
 
 type SessionOrganization = Pick<Organization, "id" | "is_active" | "deleted_at">;
 
-export async function getSession(): Promise<SessionResult> {
+const getCachedSession = cache(async (): Promise<SessionResult> => {
   const supabase = await createServerSupabaseClient();
 
   const {
@@ -75,6 +76,10 @@ export async function getSession(): Promise<SessionResult> {
     organizationId: profile.organization_id,
     role,
   };
+});
+
+export async function getSession(): Promise<SessionResult> {
+  return getCachedSession();
 }
 
 export async function signOut(): Promise<never> {

@@ -41,7 +41,7 @@ export async function createDocument(
   agentId: string,
   organizationId: string
 ): Promise<DbResult<AgentDocument>> {
-  const supabase = await createServerSupabaseClient();
+  const supabase = createServiceSupabaseClient();
 
   const insertPayload: AgentDocumentInsert = {
     agent_id: agentId,

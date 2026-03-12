@@ -1,9 +1,10 @@
 import "server-only";
 
-import { createServiceSupabaseClient } from "@/lib/supabase/service";
+import { enqueueEvent } from "@/lib/db/event-queue";
 import { generateEmbedding } from "@/lib/llm/embeddings";
-import { extractText } from "@/lib/workers/text-extractor";
+import { createServiceSupabaseClient } from "@/lib/supabase/service";
 import { chunkText } from "@/lib/workers/text-chunker";
+import { extractText } from "@/lib/workers/text-extractor";
 
 type RagEvent = {
   eventId: string;
@@ -21,7 +22,6 @@ export async function processDocument(event: RagEvent): Promise<void> {
   const supabase = createServiceSupabaseClient();
   const { document_id, agent_id, storage_path, file_type, file_name } = event.payload;
 
-  // Download file from Storage
   const { data: fileData, error: downloadError } = await supabase.storage
     .from("agent-documents")
     .download(storage_path);
@@ -33,7 +33,6 @@ export async function processDocument(event: RagEvent): Promise<void> {
 
   const buffer = Buffer.from(await fileData.arrayBuffer());
 
-  // Extract text
   let text: string;
   try {
     text = await extractText(buffer, file_type);
@@ -49,7 +48,6 @@ export async function processDocument(event: RagEvent): Promise<void> {
     throw new Error(`El archivo ${file_name} no contiene texto extraible`);
   }
 
-  // Chunk text
   const chunks = chunkText(text);
 
   if (chunks.length === 0) {
@@ -57,7 +55,6 @@ export async function processDocument(event: RagEvent): Promise<void> {
     throw new Error(`No se generaron chunks para ${file_name}`);
   }
 
-  // Generate embeddings and insert chunks
   for (const chunk of chunks) {
     const embedding = await generateEmbedding(chunk.content);
 
@@ -81,8 +78,24 @@ export async function processDocument(event: RagEvent): Promise<void> {
     }
   }
 
-  // Update document status
   await updateDocumentStatus(document_id, event.organizationId, "ready", chunks.length);
+
+  await enqueueEvent({
+    organizationId: event.organizationId,
+    eventType: "document.ready",
+    entityType: "agent_document",
+    entityId: document_id,
+    idempotencyKey: `document.ready:${document_id}`,
+    payload: {
+      document_id,
+      agent_id,
+      organization_id: event.organizationId,
+      storage_path,
+      file_type,
+      file_name,
+      chunk_count: chunks.length,
+    },
+  });
 }
 
 async function updateDocumentStatus(

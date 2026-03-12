@@ -14,7 +14,7 @@ const WEBHOOK_EVENT_TYPES = [
   "plan.limit_reached",
 ];
 
-export async function POST(request: Request) {
+export async function GET(request: Request) {
   if (!validateCronRequest(request)) {
     return NextResponse.json({ error: "No autorizado" }, { status: 401 });
   }
@@ -52,3 +52,4 @@ export async function POST(request: Request) {
 
   return NextResponse.json({ data: { processed, failed } });
 }
+

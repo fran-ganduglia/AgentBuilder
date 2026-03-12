@@ -1,4 +1,5 @@
-﻿import { NextResponse } from "next/server";
+import { NextResponse } from "next/server";
+import { isAgentDeletionDeadlineReached } from "@/lib/agents/agent-deletion";
 import { validateCronRequest } from "@/lib/workers/auth";
 import { createServiceSupabaseClient } from "@/lib/supabase/service";
 import { processDeletionRequest } from "@/lib/workers/deletion-processor";
@@ -9,30 +10,50 @@ type DeletionRow = {
   entity_type: string;
   entity_id: string;
   requested_by: string;
+  created_at: string | null;
 };
+
+const CLAIM_BATCH_LIMIT = 5;
+const FETCH_CANDIDATES_LIMIT = 50;
+
+function canProcessDeletionRequest(row: DeletionRow): boolean {
+  if (row.entity_type !== "agent") {
+    return true;
+  }
+
+  return isAgentDeletionDeadlineReached(row.created_at);
+}
 
 async function claimDeletionRequests(limit: number): Promise<DeletionRow[]> {
   const supabase = createServiceSupabaseClient();
-
-  // Since deletion_requests may not be in generated types, use type assertion.
-  const fromTable = supabase.from as (table: string) => ReturnType<typeof supabase.from>;
+  const fromTable = ((table: string) => supabase.from(table as never)) as (
+    table: string
+  ) => ReturnType<typeof supabase.from>;
 
   const { data: pending, error: fetchError } = await fromTable("deletion_requests")
-    .select("id")
+    .select("id, organization_id, entity_type, entity_id, requested_by, created_at")
     .eq("status", "pending")
     .order("created_at", { ascending: true })
-    .limit(limit);
+    .limit(Math.max(limit * 10, FETCH_CANDIDATES_LIMIT));
 
   if (fetchError || !pending || pending.length === 0) {
     return [];
   }
 
-  const ids = (pending as Array<{ id: string }>).map((row) => row.id);
+  const eligibleRows = (pending as DeletionRow[])
+    .filter(canProcessDeletionRequest)
+    .slice(0, limit);
+
+  if (eligibleRows.length === 0) {
+    return [];
+  }
+
+  const ids = eligibleRows.map((row) => row.id);
   const { data: claimed, error: claimError } = await fromTable("deletion_requests")
     .update({ status: "processing" })
     .in("id", ids)
     .eq("status", "pending")
-    .select("id, organization_id, entity_type, entity_id, requested_by");
+    .select("id, organization_id, entity_type, entity_id, requested_by, created_at");
 
   if (claimError || !claimed) {
     return [];
@@ -41,12 +62,12 @@ async function claimDeletionRequests(limit: number): Promise<DeletionRow[]> {
   return claimed as unknown as DeletionRow[];
 }
 
-export async function POST(request: Request) {
+export async function GET(request: Request) {
   if (!validateCronRequest(request)) {
     return NextResponse.json({ error: "No autorizado" }, { status: 401 });
   }
 
-  const rows = await claimDeletionRequests(5);
+  const rows = await claimDeletionRequests(CLAIM_BATCH_LIMIT);
   if (rows.length === 0) {
     return NextResponse.json({ data: { processed: 0 } });
   }
@@ -54,7 +75,9 @@ export async function POST(request: Request) {
   console.info("worker.deletion.claimed", { count: rows.length });
 
   const supabase = createServiceSupabaseClient();
-  const fromTable = supabase.from as (table: string) => ReturnType<typeof supabase.from>;
+  const fromTable = ((table: string) => supabase.from(table as never)) as (
+    table: string
+  ) => ReturnType<typeof supabase.from>;
 
   let processed = 0;
   let failed = 0;
@@ -72,7 +95,7 @@ export async function POST(request: Request) {
       });
 
       await fromTable("deletion_requests")
-        .update({ status: "failed", error_message: errorMessage })
+        .update({ status: "failed", error_message: errorMessage, processed_at: new Date().toISOString() })
         .eq("id", row.id);
 
       failed++;

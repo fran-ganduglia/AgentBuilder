@@ -1,4 +1,4 @@
-﻿import "server-only";
+import "server-only";
 
 import net from "node:net";
 import tls from "node:tls";
@@ -220,6 +220,25 @@ export async function incrementRateLimit(
   });
 }
 
+export async function incrementCounter(
+  key: string,
+  windowSeconds: number,
+  incrementBy = 1
+): Promise<number> {
+  return withRedisConnection(async (socket) => {
+    const currentCount = await sendCommand(socket, ["INCRBY", key, String(incrementBy)]);
+
+    if (typeof currentCount !== "number") {
+      throw new Error("Redis devolvio un contador invalido");
+    }
+
+    if (currentCount === incrementBy) {
+      await sendCommand(socket, ["EXPIRE", key, String(windowSeconds)]);
+    }
+
+    return currentCount;
+  });
+}
 export async function getJsonValue<T>(key: string): Promise<T | null> {
   return withRedisConnection(async (socket) => {
     const value = await sendCommand(socket, ["GET", key]);
@@ -251,3 +270,4 @@ export async function setJsonValue(
     ]);
   });
 }
+

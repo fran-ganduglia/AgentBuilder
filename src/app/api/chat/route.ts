@@ -1,8 +1,16 @@
-﻿import { after, NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { z } from "zod";
+import { resolveConversationChatMode } from "@/lib/chat/conversation-metadata";
+import { chatPreviewConfigSchema } from "@/lib/chat/session-draft";
+import { orchestrateSalesforceForChat } from "@/lib/chat/salesforce-tool-orchestrator";
+import {
+  detectSalesforcePromptConflict,
+  stripSalesforcePromptConflicts,
+} from "@/lib/integrations/salesforce-selection";
+import { isWhatsAppChannelAgent } from "@/lib/agents/agent-setup-state";
+import { assertAgentAccess } from "@/lib/auth/agent-access";
 import { getSession } from "@/lib/auth/get-session";
 import { hasReadyDocuments } from "@/lib/db/agent-documents";
-import { getAgentById } from "@/lib/db/agents";
 import { getConversationById, getOrCreateConversation } from "@/lib/db/conversations";
 import { insertMessage, insertMessageWithServiceRole, listMessages } from "@/lib/db/messages";
 import { insertPlanLimitNotification } from "@/lib/db/notifications-writer";
@@ -12,12 +20,11 @@ import { generateEmbedding } from "@/lib/llm/embeddings";
 import { LiteLLMError, sendStreamingChatCompletion } from "@/lib/llm/litellm";
 import { getJsonValue, incrementRateLimit, setJsonValue } from "@/lib/redis";
 import { createServiceSupabaseClient } from "@/lib/supabase/service";
-import { createServerSupabaseClient } from "@/lib/supabase/server";
 import {
   parseJsonRequestBody,
   validateJsonMutationRequest,
 } from "@/lib/utils/request-security";
-import type { Conversation, Organization } from "@/types/app";
+import type { Conversation, Organization, Role } from "@/types/app";
 import type { Tables } from "@/types/database";
 
 const CHAT_RATE_LIMIT_MAX_REQUESTS = 30;
@@ -26,6 +33,8 @@ const CHAT_MEMORY_TTL_SECONDS = 6 * 60 * 60;
 const CHAT_MEMORY_MAX_MESSAGES = 20;
 const CHAT_RAG_TIMEOUT_MS = 1200;
 const CHAT_REDIS_TIMEOUT_MS = 150;
+const CHAT_REQUEST_MODES = ["sandbox", "live_local"] as const;
+const CHAT_EXECUTION_MODES = ["saved", "preview"] as const;
 
 const chatSchema = z.object({
   agentId: z.string().uuid("agentId debe ser un UUID valido"),
@@ -34,6 +43,9 @@ const chatSchema = z.object({
     .string()
     .min(1, "El mensaje no puede estar vacio")
     .max(4000, "El mensaje no puede superar 4000 caracteres"),
+  chatMode: z.enum(CHAT_REQUEST_MODES).default("live_local"),
+  mode: z.enum(CHAT_EXECUTION_MODES).default("saved"),
+  preview: chatPreviewConfigSchema.optional(),
 });
 
 type PlanLimits = Pick<Tables<"plans">, "max_messages_month">;
@@ -43,10 +55,22 @@ type ChatMessage = {
   role: "user" | "assistant";
   content: string;
 };
+type ChatRequestMode = (typeof CHAT_REQUEST_MODES)[number];
+type ChatExecutionMode = (typeof CHAT_EXECUTION_MODES)[number];
 
 type ConversationResult = {
   data: Conversation | null;
   error: string | null;
+  created?: boolean;
+};
+
+type ChatExecutionConfig = {
+  systemPrompt: string;
+  llmModel: string;
+  llmTemperature: number;
+  maxTokens: number;
+  llmProvider: string;
+  executionMode: ChatExecutionMode;
 };
 
 function getSafeChatErrorMessage(error: LiteLLMError, model: string): string {
@@ -127,6 +151,61 @@ async function withTimeout<T>(
         reject(error);
       });
   });
+}
+
+function resolveLlmProvider(model: string): string {
+  if (model.startsWith("gpt-")) {
+    return "openai";
+  }
+
+  if (model.startsWith("claude-")) {
+    return "anthropic";
+  }
+
+  if (model.startsWith("gemini-") || model === "gemini-pro") {
+    return "gemini";
+  }
+
+  return "custom";
+}
+
+function canUseSandbox(role: Role): boolean {
+  return role === "admin" || role === "editor";
+}
+
+function getAllowedStatuses(chatMode: ChatRequestMode, role: Role): Array<"draft" | "active"> {
+  if (chatMode === "sandbox" && canUseSandbox(role)) {
+    return ["draft", "active"];
+  }
+
+  return ["active"];
+}
+
+function resolveExecutionConfig(
+  agent: ConversationResult extends never ? never : { system_prompt: string; llm_model: string; llm_temperature: number | null; max_tokens: number | null; llm_provider: string },
+  chatMode: ChatRequestMode,
+  mode: ChatExecutionMode,
+  preview?: z.infer<typeof chatPreviewConfigSchema>
+): ChatExecutionConfig {
+  if (chatMode === "sandbox" && mode === "preview" && preview) {
+    return {
+      systemPrompt: preview.systemPrompt,
+      llmModel: preview.llmModel,
+      llmTemperature: preview.llmTemperature,
+      maxTokens: preview.maxTokens ?? agent.max_tokens ?? 1000,
+      llmProvider: resolveLlmProvider(preview.llmModel),
+      executionMode: "preview",
+    };
+  }
+
+  return {
+    systemPrompt: agent.system_prompt,
+    llmModel: agent.llm_model,
+    llmTemperature: agent.llm_temperature ?? 0.7,
+    maxTokens: agent.max_tokens ?? 1000,
+    llmProvider: agent.llm_provider,
+    executionMode: "saved",
+  };
 }
 
 async function isChatRateLimited(organizationId: string): Promise<boolean> {
@@ -307,15 +386,76 @@ async function resolveConversation(
   agentId: string,
   organizationId: string,
   initiatedBy: string,
+  chatMode: ChatRequestMode,
   conversationId?: string
 ): Promise<ConversationResult> {
   if (conversationId) {
-    return getConversationById(conversationId, agentId, organizationId, initiatedBy);
+    const existingConversation = await getConversationById(
+      conversationId,
+      agentId,
+      organizationId,
+      initiatedBy
+    );
+
+    if (!existingConversation.data || existingConversation.error) {
+      return existingConversation;
+    }
+
+    if (resolveConversationChatMode(existingConversation.data) !== chatMode) {
+      return { data: null, error: "La conversacion no coincide con el modo solicitado", created: false };
+    }
+
+    return existingConversation;
   }
 
-  return getOrCreateConversation(agentId, organizationId, initiatedBy);
+  return getOrCreateConversation(agentId, organizationId, initiatedBy, {
+    chatMode,
+    channel: "web",
+  });
 }
 
+async function createImmediateAssistantResponse(input: {
+  agentId: string;
+  conversationId: string;
+  organizationId: string;
+  chatMode: ChatRequestMode;
+  content: string;
+  nextMemory: ChatMessage[];
+}): Promise<Response> {
+  const assistantInsertResult = await insertMessageWithServiceRole({
+    agentId: input.agentId,
+    conversationId: input.conversationId,
+    organizationId: input.organizationId,
+    role: "assistant",
+    content: input.content,
+  });
+
+  if (assistantInsertResult.error) {
+    console.error("chat.immediate_assistant_message_error", {
+      conversationId: input.conversationId,
+      error: assistantInsertResult.error,
+    });
+  }
+
+  await persistConversationMemory(input.organizationId, input.conversationId, [
+    ...input.nextMemory,
+    { role: "assistant", content: input.content },
+  ]);
+
+  return new Response(input.content, {
+    headers: {
+      "Content-Type": "text/plain; charset=utf-8",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+      "X-Conversation-Id": input.conversationId,
+      "X-Chat-Mode": input.chatMode,
+    },
+  });
+}
+
+function buildSalesforceOrchestrationFailureMessage(): string {
+  return "No pude completar la operacion con Salesforce por un error interno del agente. Revisa la integracion activa, la tool CRM del agente y el system prompt antes de volver a intentarlo.";
+}
 export async function POST(request: Request): Promise<Response> {
   const requestStart = Date.now();
 
@@ -341,36 +481,61 @@ export async function POST(request: Request): Promise<Response> {
     return parsedBody.errorResponse;
   }
 
-  const { agentId, conversationId, content } = parsedBody.data;
+  const { agentId, conversationId, content, preview } = parsedBody.data;
+  const chatMode = parsedBody.data.chatMode ?? "live_local";
+  const mode = parsedBody.data.mode ?? "saved";
 
-  const { data: agent } = await getAgentById(agentId, session.organizationId);
-  if (!agent) {
-    return NextResponse.json({ error: "Agente no encontrado" }, { status: 404 });
+  if (mode === "preview" && chatMode !== "sandbox") {
+    return NextResponse.json(
+      { error: "El modo preview solo esta disponible en sandbox." },
+      { status: 400 }
+    );
   }
 
-  if (agent.status !== "active") {
-    return NextResponse.json({ error: "El agente no esta activo" }, { status: 403 });
+  if (chatMode === "sandbox" && !canUseSandbox(session.role)) {
+    return NextResponse.json(
+      { error: "Solo admin y editor pueden usar el sandbox del agente." },
+      { status: 403 }
+    );
   }
 
-  if (session.role === "operador" || session.role === "viewer") {
-    const supabaseAuth = await createServerSupabaseClient();
-    const { data: permission } = await supabaseAuth
-      .from("user_agent_permissions")
-      .select("can_use")
-      .eq("user_id", session.user.id)
-      .eq("agent_id", agentId)
-      .eq("organization_id", session.organizationId)
-      .maybeSingle();
+  const access = await assertAgentAccess({
+    session,
+    agentId,
+    capability: "use",
+    allowedStatuses: getAllowedStatuses(chatMode, session.role),
+  });
 
-    if (!permission || permission.can_use !== true) {
-      return NextResponse.json({ error: "Agente no encontrado" }, { status: 404 });
-    }
+  if (!access.ok) {
+    return NextResponse.json({ error: access.message }, { status: access.status });
   }
 
-  const [planCheck, conversationResult] = await Promise.all([
-    checkPlanLimits(session.organizationId),
-    resolveConversation(agentId, session.organizationId, session.user.id, conversationId),
-  ]);
+  if (access.connectionSummary.classification === "remote_managed") {
+    return NextResponse.json(
+      { error: "Este agente esta gestionado por OpenAI y no usa el chat local." },
+      { status: 403 }
+    );
+  }
+
+  const whatsappIntent = isWhatsAppChannelAgent(access.agent);
+
+  if (access.connectionSummary.classification === "channel_connected" && chatMode === "live_local") {
+    return NextResponse.json(
+      { error: "Los agentes con WhatsApp conectado no usan chat operativo local. Usa sandbox o QA." },
+      { status: 403 }
+    );
+  }
+
+  if (whatsappIntent && chatMode === "live_local") {
+    return NextResponse.json(
+      { error: "Este agente esta orientado a WhatsApp y no usa chat operativo local. Usa sandbox hasta conectar el canal real." },
+      { status: 403 }
+    );
+  }
+
+  const agent = access.agent;
+  const executionConfig = resolveExecutionConfig(agent, chatMode, mode, preview);
+  const planCheck = await checkPlanLimits(session.organizationId);
 
   if (!planCheck.allowed) {
     return NextResponse.json(
@@ -379,10 +544,22 @@ export async function POST(request: Request): Promise<Response> {
     );
   }
 
+  const conversationResult = await resolveConversation(
+    agentId,
+    session.organizationId,
+    session.user.id,
+    chatMode,
+    conversationId
+  );
+
   const { data: conversation, error: conversationError } = conversationResult;
 
   if (conversationError) {
-    return NextResponse.json({ error: "No se pudo cargar la conversacion" }, { status: 500 });
+    const status = conversationError === "La conversacion no coincide con el modo solicitado" ? 400 : 500;
+    return NextResponse.json(
+      { error: status === 400 ? conversationError : "No se pudo cargar la conversacion" },
+      { status }
+    );
   }
 
   if (!conversation) {
@@ -392,6 +569,7 @@ export async function POST(request: Request): Promise<Response> {
   const cachedHistoryPromise = loadConversationMemory(session.organizationId, conversation.id);
   const historyPromise = listMessages(conversation.id, session.organizationId);
   const userMessagePromise = insertMessage({
+    agentId,
     conversationId: conversation.id,
     organizationId: session.organizationId,
     role: "user",
@@ -419,40 +597,88 @@ export async function POST(request: Request): Promise<Response> {
   const nextMemory = trimChatMemory([...previousMessages, { role: "user", content }]);
   void persistConversationMemory(session.organizationId, conversation.id, nextMemory);
 
+  let salesforceToolContext: string | undefined;
+
+  try {
+    const orchestration = await orchestrateSalesforceForChat({
+      agent,
+      conversation,
+      organizationId: session.organizationId,
+      userId: session.user.id,
+      latestUserMessage: content,
+      recentMessages: nextMemory,
+    });
+
+    if (orchestration.kind === "respond_now") {
+      return createImmediateAssistantResponse({
+        agentId,
+        conversationId: conversation.id,
+        organizationId: session.organizationId,
+        chatMode,
+        content: orchestration.content,
+        nextMemory,
+      });
+    }
+
+    salesforceToolContext = orchestration.toolContext;
+
+    if (salesforceToolContext && detectSalesforcePromptConflict(executionConfig.systemPrompt).hasConflict) {
+      executionConfig.systemPrompt = stripSalesforcePromptConflicts(executionConfig.systemPrompt);
+    }
+  } catch (error) {
+    console.error("chat.salesforce_orchestration_error", {
+      conversationId: conversation.id,
+      organizationId: session.organizationId,
+      error: error instanceof Error ? error.message : "unknown",
+    });
+
+    return createImmediateAssistantResponse({
+      agentId,
+      conversationId: conversation.id,
+      organizationId: session.organizationId,
+      chatMode,
+      content: buildSalesforceOrchestrationFailureMessage(),
+      nextMemory,
+    });
+  }
+
   console.info("chat.pre_stream_ready", {
     conversationId: conversation.id,
     organizationId: session.organizationId,
     latencyMs: Date.now() - requestStart,
     usedCachedHistory: cachedHistory !== null,
     usedRag: Boolean(ragContext),
+    usedSalesforceTool: Boolean(salesforceToolContext),
+    chatMode,
+    executionMode: executionConfig.executionMode,
   });
-
   let streamResult;
   try {
     streamResult = sendStreamingChatCompletion({
-      model: agent.llm_model,
-      systemPrompt: agent.system_prompt,
+      model: executionConfig.llmModel,
+      systemPrompt: executionConfig.systemPrompt,
       messages: nextMemory,
-      temperature: agent.llm_temperature ?? 0.7,
-      maxTokens: agent.max_tokens ?? 1000,
+      temperature: executionConfig.llmTemperature,
+      maxTokens: executionConfig.maxTokens,
       organizationId: session.organizationId,
       agentId: agent.id,
       conversationId: conversation.id,
       context: ragContext,
+      toolContext: salesforceToolContext,
     });
 
     await streamResult.onReady;
   } catch (error) {
     if (error instanceof LiteLLMError) {
       console.error("chat.llm_error", {
-        model: agent.llm_model,
+        model: executionConfig.llmModel,
         errorType: error.errorType,
         message: error.message,
       });
 
       const status = error.status === "rate_limited" ? 429 : 502;
       return NextResponse.json(
-        { error: getSafeChatErrorMessage(error, agent.llm_model) },
+        { error: getSafeChatErrorMessage(error, executionConfig.llmModel) },
         { status }
       );
     }
@@ -466,13 +692,14 @@ export async function POST(request: Request): Promise<Response> {
   const orgId = session.organizationId;
   const convId = conversation.id;
   const currentAgentId = agent.id;
-  const currentLlmProvider = agent.llm_provider;
+  const currentLlmProvider = executionConfig.llmProvider;
 
   after(async () => {
     try {
       const output = await streamResult.onComplete;
 
       const assistantInsertResult = await insertMessageWithServiceRole({
+        agentId: currentAgentId,
         conversationId: convId,
         organizationId: orgId,
         role: "assistant",
@@ -525,6 +752,14 @@ export async function POST(request: Request): Promise<Response> {
       "Cache-Control": "no-cache",
       Connection: "keep-alive",
       "X-Conversation-Id": conversation.id,
+      "X-Chat-Mode": chatMode,
     },
   });
 }
+
+
+
+
+
+
+

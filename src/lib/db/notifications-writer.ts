@@ -1,5 +1,6 @@
 import "server-only";
 
+import { enqueueEvent } from "@/lib/db/event-queue";
 import { createServiceSupabaseClient } from "@/lib/supabase/service";
 
 type PlanLimitNotificationInput = {
@@ -27,7 +28,6 @@ export async function insertPlanLimitNotification(
 
     const serviceClient = createServiceSupabaseClient();
 
-    // Deduplicate: check if notification of same type exists this month
     const now = new Date();
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
 
@@ -54,7 +54,23 @@ export async function insertPlanLimitNotification(
         type,
         error: error.message,
       });
+      return;
     }
+
+    await enqueueEvent({
+      organizationId: input.organizationId,
+      eventType: type,
+      entityType: "plan",
+      entityId: input.organizationId,
+      idempotencyKey: `${type}:${input.organizationId}:${monthStart}`,
+      payload: {
+        organization_id: input.organizationId,
+        current_usage: input.currentUsage,
+        plan_limit: input.planLimit,
+        usage_percentage: Math.round(percentage * 100) / 100,
+        period_start: monthStart,
+      },
+    });
   } catch (error) {
     console.error("notifications.unexpected_error", {
       error: error instanceof Error ? error.message : "unknown",

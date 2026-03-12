@@ -24,57 +24,62 @@ function formatPrice(value: number): string {
 
 export function PlanComparison({ plans, currentPlanId }: PlanComparisonProps) {
   return (
-    <div className="rounded-lg border border-gray-200 bg-white">
-      <div className="border-b border-gray-200 px-6 py-4">
-        <h2 className="text-lg font-semibold text-gray-900">Comparacion de planes</h2>
-      </div>
-      <div className="overflow-x-auto">
-        <table className="w-full text-left text-sm">
-          <thead className="border-b border-gray-200 bg-gray-50">
-            <tr>
-              <th className="px-6 py-3 font-medium text-gray-500">Plan</th>
-              <th className="px-6 py-3 font-medium text-gray-500 text-right">Precio</th>
-              <th className="px-6 py-3 font-medium text-gray-500 text-right">Agentes</th>
-              <th className="px-6 py-3 font-medium text-gray-500 text-right">Usuarios</th>
-              <th className="px-6 py-3 font-medium text-gray-500 text-right">Mensajes/mes</th>
-              <th className="px-6 py-3 font-medium text-gray-500"></th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100">
-            {plans.map((plan) => {
-              const isCurrent = plan.id === currentPlanId;
-              return (
-                <tr key={plan.id} className={isCurrent ? "bg-blue-50" : "hover:bg-gray-50"}>
-                  <td className="px-6 py-4">
-                    <span className="font-medium text-gray-900 capitalize">{plan.name}</span>
-                    {isCurrent && (
-                      <span className="ml-2 rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700">
-                        Actual
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-6 py-4 text-right text-gray-600">{formatPrice(plan.priceMonthly)}</td>
-                  <td className="px-6 py-4 text-right text-gray-600">{formatNumber(plan.maxAgents)}</td>
-                  <td className="px-6 py-4 text-right text-gray-600">{formatNumber(plan.maxUsers)}</td>
-                  <td className="px-6 py-4 text-right text-gray-600">{formatNumber(plan.maxMessages)}</td>
-                  <td className="px-6 py-4 text-right">
-                    {!isCurrent && plan.priceMonthly > 0 && (
-                      <button
-                        type="button"
-                        className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700"
-                        disabled
-                        title="Proximamente"
-                      >
-                        Upgrade
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+    <div className="overflow-x-auto">
+      <table className="w-full text-left text-sm">
+        <thead className="border-b border-slate-200 bg-slate-50">
+          <tr>
+            <th className="px-7 py-4 text-[11px] font-bold uppercase tracking-widest text-slate-500">Plan</th>
+            <th className="px-7 py-4 text-[11px] font-bold uppercase tracking-widest text-slate-500 text-right">Precio</th>
+            <th className="px-7 py-4 text-[11px] font-bold uppercase tracking-widest text-slate-500 text-right">Agentes</th>
+            <th className="px-7 py-4 text-[11px] font-bold uppercase tracking-widest text-slate-500 text-right">Usuarios</th>
+            <th className="px-7 py-4 text-[11px] font-bold uppercase tracking-widest text-slate-500 text-right">Mensajes/mes</th>
+            <th className="col-span-1"></th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100">
+          {plans.map((plan) => {
+            const isCurrent = plan.id === currentPlanId;
+            return (
+              <tr key={plan.id} className={`transition-colors ${isCurrent ? "bg-emerald-50/50" : "hover:bg-slate-50"}`}>
+                <td className="px-7 py-5">
+                  <span className={`font-bold capitalize ${isCurrent ? "text-emerald-900" : "text-slate-900"}`}>
+                    {plan.name}
+                  </span>
+                  {isCurrent && (
+                    <span className="ml-3 inline-flex items-center rounded-md bg-emerald-100 px-2 py-0.5 text-xs font-bold text-emerald-700 ring-1 ring-inset ring-emerald-600/20">
+                      Vigente
+                    </span>
+                  )}
+                </td>
+                <td className={`px-7 py-5 text-right font-medium ${isCurrent ? "text-emerald-800" : "text-slate-600"}`}>
+                  {formatPrice(plan.priceMonthly)}
+                </td>
+                <td className={`px-7 py-5 text-right font-medium ${isCurrent ? "text-emerald-800" : "text-slate-600"}`}>
+                  {formatNumber(plan.maxAgents)}
+                </td>
+                <td className={`px-7 py-5 text-right font-medium ${isCurrent ? "text-emerald-800" : "text-slate-600"}`}>
+                  {formatNumber(plan.maxUsers)}
+                </td>
+                <td className={`px-7 py-5 text-right font-medium ${isCurrent ? "text-emerald-800" : "text-slate-600"}`}>
+                  {formatNumber(plan.maxMessages)}
+                </td>
+                <td className="px-7 py-5 text-right">
+                  {!isCurrent && plan.priceMonthly > 0 && (
+                    <button
+                      type="button"
+                      className="inline-flex items-center justify-center rounded-lg bg-slate-900 px-4 py-2 text-xs font-bold text-white shadow-sm transition-all hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-900 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-slate-900"
+                      disabled
+                      title="Contactar a ventas para gestionar cambio"
+                    >
+                      Solicitar Upgrade
+                    </button>
+                  )}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
     </div>
   );
 }

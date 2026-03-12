@@ -1,29 +1,45 @@
-import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
+import { AgentDetailWorkspace } from "@/components/agents/agent-detail-workspace";
+import { buildAgentConnectionSummary } from "@/lib/agents/connection-policy";
+import { readAgentSetupState } from "@/lib/agents/agent-setup-state";
+import {
+  buildSalesforceSetupResolutionContext,
+  getSalesforceAgentIntegrationState,
+  getSalesforceIntegrationCta,
+} from "@/lib/agents/salesforce-agent-integration";
+import {
+  assertAgentAccess,
+  canEditAgents,
+  canManageAgentDocuments,
+} from "@/lib/auth/agent-access";
 import { getSession } from "@/lib/auth/get-session";
-import { getAgentById } from "@/lib/db/agents";
-import { getAgentUsage } from "@/lib/db/usage";
-import { AgentForm } from "@/components/agents/agent-form";
+import { hasReadyDocuments, listDocuments } from "@/lib/db/agent-documents";
+import {
+  getAgentConnectionByAgentId,
+  getAgentConnectionSummaryByAgentId,
+} from "@/lib/db/agent-connections";
+import { getPrimaryWhatsAppIntegration } from "@/lib/db/whatsapp-integrations";
+
+type AgentDetailSearchParams = {
+  tab?: string | string[];
+};
 
 type AgentDetailPageProps = {
   params: Promise<{ agentId: string }>;
+  searchParams?: Promise<AgentDetailSearchParams>;
 };
 
-function formatNumber(value: number): string {
-  return value.toLocaleString("es-ES");
+function resolveInitialTab(rawTab: string | string[] | undefined) {
+  const candidate = Array.isArray(rawTab) ? rawTab[0] : rawTab;
+
+  if (candidate === "config" || candidate === "knowledge" || candidate === "setup" || candidate === "qa") {
+    return candidate;
+  }
+
+  return "setup" as const;
 }
 
-function formatCost(value: number): string {
-  return `$${value.toFixed(2)}`;
-}
-
-function formatLatency(ms: number | null): string {
-  if (ms === null) return "Sin datos";
-  if (ms < 1000) return `${ms}ms`;
-  return `${(ms / 1000).toFixed(1)}s`;
-}
-
-export default async function AgentDetailPage({ params }: AgentDetailPageProps) {
+export default async function AgentDetailPage({ params, searchParams }: AgentDetailPageProps) {
   const session = await getSession();
 
   if (!session) {
@@ -31,70 +47,97 @@ export default async function AgentDetailPage({ params }: AgentDetailPageProps) 
   }
 
   const { agentId } = await params;
-  const { data: agent } = await getAgentById(agentId, session.organizationId);
+  const resolvedSearchParams = searchParams ? await searchParams : undefined;
+  const access = await assertAgentAccess({
+    session,
+    agentId,
+    capability: "read",
+  });
 
-  if (!agent) {
+  if (!access.ok) {
     notFound();
   }
 
-  const canChat = agent.status === "active";
+  const agent = access.agent;
+  const canEditAgent = canEditAgents(session.role);
+  const canManageDocuments = canManageAgentDocuments(session.role);
+  const canViewConnectionDetails = canEditAgent;
 
-  const { data: usage } = await getAgentUsage(agentId, session.organizationId);
+  const [documentsResult, connectionResult, connectionSummaryResult, hasReadyDocumentsResult, whatsappIntegrationResult] = await Promise.all([
+    canManageDocuments
+      ? listDocuments(agentId, session.organizationId)
+      : Promise.resolve({ data: [], error: null }),
+    canViewConnectionDetails
+      ? getAgentConnectionByAgentId(agentId, session.organizationId)
+      : Promise.resolve({ data: null, error: null }),
+    canViewConnectionDetails
+      ? Promise.resolve({ data: null, error: null })
+      : getAgentConnectionSummaryByAgentId(agentId, session.organizationId),
+    hasReadyDocuments(agentId, session.organizationId),
+    canEditAgent
+      ? getPrimaryWhatsAppIntegration(session.organizationId)
+      : Promise.resolve({ data: null, error: null }),
+  ]);
+
+  const documents = documentsResult.data ?? [];
+  const baseSetupState = readAgentSetupState(agent, {
+    hasReadyDocuments: hasReadyDocumentsResult,
+  });
+  const salesforceIntegrationStateResult = baseSetupState
+    ? await getSalesforceAgentIntegrationState({
+      agentId,
+      organizationId: session.organizationId,
+      setupState: baseSetupState,
+    })
+    : { data: null, error: null };
+  const salesforceIntegrationState = salesforceIntegrationStateResult.error
+    ? null
+    : salesforceIntegrationStateResult.data;
+  const setupState = readAgentSetupState(agent, {
+    hasReadyDocuments: hasReadyDocumentsResult,
+    providerIntegrations: buildSalesforceSetupResolutionContext(salesforceIntegrationState),
+  });
+  const salesforceIntegrationCta = salesforceIntegrationState
+    ? getSalesforceIntegrationCta(salesforceIntegrationState)
+    : null;
+  const salesforceIntegrationNotice =
+    salesforceIntegrationState?.expectsSalesforceIntegration && !salesforceIntegrationState.isLinked
+      ? {
+        title: salesforceIntegrationState.integration
+          ? `Salesforce: ${salesforceIntegrationState.integrationView.label}`
+          : "Salesforce pendiente",
+        message: salesforceIntegrationState.message,
+        tone: salesforceIntegrationState.integrationView.tone,
+        href: salesforceIntegrationCta?.href ?? "/settings/integrations",
+        label: salesforceIntegrationCta?.label ?? "Abrir integraciones",
+      }
+      : null;
+  const connection = canViewConnectionDetails ? connectionResult.data : null;
+  const connectionSummary = buildAgentConnectionSummary(connection ?? connectionSummaryResult.data);
+  const isWhatsAppChannelIntent = setupState?.channel === "whatsapp";
+  const canChat =
+    session.role !== "viewer" &&
+    agent.status === "active" &&
+    connectionSummary.classification === "local" &&
+    !isWhatsAppChannelIntent;
+  const initialTab = resolveInitialTab(resolvedSearchParams?.tab);
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between gap-4">
-        <h1 className="text-2xl font-bold text-gray-900">Editar agente</h1>
-        {canChat ? (
-          <Link
-            href={`/agents/${agent.id}/chat`}
-            className="inline-flex rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
-          >
-            Abrir chat
-          </Link>
-        ) : (
-          <span className="inline-flex rounded-md bg-gray-100 px-4 py-2 text-sm font-medium text-gray-600">
-            Activalo para habilitar el chat
-          </span>
-        )}
-      </div>
-
-      {usage && (
-        <div className="rounded-lg border border-gray-200 bg-white p-6">
-          <h2 className="text-sm font-semibold text-gray-900">Uso del mes actual</h2>
-          <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <div>
-              <p className="text-xs font-medium text-gray-500">Mensajes</p>
-              <p className="mt-1 text-2xl font-bold text-gray-900">
-                {formatNumber(usage.totalMessages)}
-              </p>
-            </div>
-            <div>
-              <p className="text-xs font-medium text-gray-500">Tokens</p>
-              <p className="mt-1 text-2xl font-bold text-gray-900">
-                {formatNumber(usage.totalTokensInput + usage.totalTokensOutput)}
-              </p>
-              <p className="text-xs text-gray-400">
-                {formatNumber(usage.totalTokensInput)} in / {formatNumber(usage.totalTokensOutput)} out
-              </p>
-            </div>
-            <div>
-              <p className="text-xs font-medium text-gray-500">Latencia promedio</p>
-              <p className="mt-1 text-2xl font-bold text-gray-900">
-                {formatLatency(usage.averageLatencyMs)}
-              </p>
-            </div>
-            <div>
-              <p className="text-xs font-medium text-gray-500">Costo estimado</p>
-              <p className="mt-1 text-2xl font-bold text-gray-900">
-                {formatCost(usage.estimatedCostUsd)}
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <AgentForm agent={agent} />
-    </div>
+    <AgentDetailWorkspace
+      agent={agent}
+      connection={connection}
+      connectionSummary={connectionSummary}
+      documents={documents}
+      setupState={setupState}
+      userRole={session.role}
+      canEditAgent={canEditAgent}
+      canManageDocuments={canManageDocuments}
+      canChat={canChat}
+      initialTab={initialTab}
+      whatsappIntegrationId={whatsappIntegrationResult.data?.id ?? null}
+      salesforceIntegrationNotice={salesforceIntegrationNotice}
+    />
   );
 }
+
+

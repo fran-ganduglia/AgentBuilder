@@ -1,4 +1,4 @@
-﻿export type Json =
+export type Json =
   | string
   | number
   | boolean
@@ -12,33 +12,78 @@ export type Database = {
   __InternalSupabase: {
     PostgrestVersion: "14.4"
   }
-  graphql_public: {
-    Tables: {
-      [_ in never]: never
-    }
-    Views: {
-      [_ in never]: never
-    }
-    Functions: {
-      graphql: {
-        Args: {
-          extensions?: Json
-          operationName?: string
-          query?: string
-          variables?: Json
-        }
-        Returns: Json
-      }
-    }
-    Enums: {
-      [_ in never]: never
-    }
-    CompositeTypes: {
-      [_ in never]: never
-    }
-  }
   public: {
     Tables: {
+      agent_connections: {
+        Row: {
+          agent_id: string
+          created_at: string | null
+          id: string
+          integration_id: string
+          last_sync_error: string | null
+          last_synced_at: string | null
+          metadata: Json | null
+          organization_id: string
+          provider_agent_id: string
+          provider_type: string
+          remote_updated_at: string | null
+          sync_status: string
+          updated_at: string | null
+        }
+        Insert: {
+          agent_id: string
+          created_at?: string | null
+          id?: string
+          integration_id: string
+          last_sync_error?: string | null
+          last_synced_at?: string | null
+          metadata?: Json | null
+          organization_id: string
+          provider_agent_id: string
+          provider_type: string
+          remote_updated_at?: string | null
+          sync_status?: string
+          updated_at?: string | null
+        }
+        Update: {
+          agent_id?: string
+          created_at?: string | null
+          id?: string
+          integration_id?: string
+          last_sync_error?: string | null
+          last_synced_at?: string | null
+          metadata?: Json | null
+          organization_id?: string
+          provider_agent_id?: string
+          provider_type?: string
+          remote_updated_at?: string | null
+          sync_status?: string
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agent_connections_agent_id_organization_id_fkey"
+            columns: ["agent_id", "organization_id"]
+            isOneToOne: false
+            referencedRelation: "agents"
+            referencedColumns: ["id", "organization_id"]
+          },
+          {
+            foreignKeyName: "agent_connections_integration_id_organization_id_fkey"
+            columns: ["integration_id", "organization_id"]
+            isOneToOne: false
+            referencedRelation: "integrations"
+            referencedColumns: ["id", "organization_id"]
+          },
+          {
+            foreignKeyName: "agent_connections_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       agent_documents: {
         Row: {
           agent_id: string
@@ -222,6 +267,7 @@ export type Database = {
           memory_window: number | null
           name: string
           organization_id: string
+          setup_state: Json | null
           status: string
           system_prompt: string
           tone: string | null
@@ -245,6 +291,7 @@ export type Database = {
           memory_window?: number | null
           name: string
           organization_id: string
+          setup_state?: Json | null
           status?: string
           system_prompt: string
           tone?: string | null
@@ -268,6 +315,7 @@ export type Database = {
           memory_window?: number | null
           name?: string
           organization_id?: string
+          setup_state?: Json | null
           status?: string
           system_prompt?: string
           tone?: string | null
@@ -856,6 +904,53 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "users"
             referencedColumns: ["id", "organization_id"]
+          },
+        ]
+      }
+      deletion_requests: {
+        Row: {
+          created_at: string
+          entity_id: string
+          entity_type: string
+          error_message: string | null
+          id: string
+          organization_id: string
+          processed_at: string | null
+          reason: string | null
+          requested_by: string | null
+          status: string
+        }
+        Insert: {
+          created_at?: string
+          entity_id: string
+          entity_type: string
+          error_message?: string | null
+          id?: string
+          organization_id: string
+          processed_at?: string | null
+          reason?: string | null
+          requested_by?: string | null
+          status?: string
+        }
+        Update: {
+          created_at?: string
+          entity_id?: string
+          entity_type?: string
+          error_message?: string | null
+          id?: string
+          organization_id?: string
+          processed_at?: string | null
+          reason?: string | null
+          requested_by?: string | null
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "deletion_requests_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
           },
         ]
       }
@@ -2503,6 +2598,33 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      claim_event_queue_events: {
+        Args: { p_event_types: string[]; p_limit?: number }
+        Returns: {
+          attempts: number | null
+          correlation_id: string | null
+          created_at: string | null
+          entity_id: string | null
+          entity_type: string | null
+          error_message: string | null
+          event_type: string
+          id: string
+          idempotency_key: string | null
+          max_attempts: number | null
+          organization_id: string
+          payload: Json
+          process_after: string | null
+          processed_at: string | null
+          status: string | null
+          trace_id: string | null
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "event_queue"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
       get_user_organization_id: { Args: never; Returns: string }
       get_user_role: { Args: never; Returns: string }
       search_document_chunks: {
@@ -2650,9 +2772,6 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
-  graphql_public: {
-    Enums: {},
-  },
   public: {
     Enums: {},
   },

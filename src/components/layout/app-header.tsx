@@ -26,6 +26,13 @@ const roleLabels: Record<Role, string> = {
   operador: "Operador",
 };
 
+const roleStyles: Record<Role, string> = {
+  admin: "bg-emerald-100 text-emerald-700 ring-emerald-600/20",
+  editor: "bg-blue-100 text-blue-700 ring-blue-600/20",
+  viewer: "bg-slate-100 text-slate-700 ring-slate-600/20",
+  operador: "bg-amber-100 text-amber-700 ring-amber-600/20",
+};
+
 function timeAgo(dateString: string): string {
   const now = Date.now();
   const date = new Date(dateString).getTime();
@@ -130,20 +137,20 @@ export function AppHeader({ userName, role, initialUnreadCount }: AppHeaderProps
   }, []);
 
   return (
-    <header className="sticky top-0 z-20 flex h-14 items-center justify-between border-b border-gray-200 bg-white px-6">
+    <header className="sticky top-0 z-20 flex h-14 items-center justify-between border-b border-slate-200 bg-white/80 px-6 backdrop-blur-md">
       <div />
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-4">
         <div className="relative" ref={dropdownRef}>
           <button
             onClick={handleToggle}
-            className="relative rounded-lg p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+            className="relative flex h-8 w-8 items-center justify-center rounded-full text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-200"
             aria-label="Notificaciones"
           >
             <svg
               xmlns="http://www.w3.org/2000/svg"
               viewBox="0 0 24 24"
               fill="currentColor"
-              className="h-5 w-5"
+              className="h-[18px] w-[18px]"
             >
               <path
                 fillRule="evenodd"
@@ -152,36 +159,42 @@ export function AppHeader({ userName, role, initialUnreadCount }: AppHeaderProps
               />
             </svg>
             {unreadCount > 0 && (
-              <span className="absolute -top-0.5 -right-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">
+              <span className="absolute right-0 top-0 flex h-4 min-w-[16px] items-center justify-center rounded-full border-2 border-white bg-rose-500 px-1 text-[9px] font-bold text-white">
                 {unreadCount > 99 ? "99+" : unreadCount}
               </span>
             )}
           </button>
 
           {isOpen && (
-            <div className="absolute right-0 mt-2 w-80 rounded-lg border border-gray-200 bg-white shadow-lg">
-              <div className="flex items-center justify-between border-b border-gray-100 px-4 py-3">
-                <h3 className="text-sm font-semibold text-gray-900">Notificaciones</h3>
+            <div className="absolute right-0 mt-3 w-80 origin-top-right rounded-xl border border-slate-200 bg-white shadow-xl shadow-slate-200/50 ring-1 ring-black/5 focus:outline-none">
+              <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+                <h3 className="text-sm font-semibold text-slate-900">Notificaciones</h3>
                 {unreadCount > 0 && (
                   <button
                     onClick={handleMarkAllAsRead}
-                    className="text-xs font-medium text-blue-600 hover:text-blue-700"
+                    className="text-xs font-medium text-emerald-600 transition-colors hover:text-emerald-700"
                   >
-                    Marcar todas como leidas
+                    Marcar todo como leído
                   </button>
                 )}
               </div>
 
-              <div className="max-h-80 overflow-y-auto">
+              <div className="max-h-80 overflow-y-auto overscroll-contain">
                 {isLoadingList && notifications.length === 0 && (
-                  <div className="px-4 py-6 text-center text-sm text-gray-400">
-                    Cargando...
+                  <div className="px-4 py-8 text-center text-sm text-slate-400">
+                    Cargando notificaciones...
                   </div>
                 )}
 
                 {!isLoadingList && notifications.length === 0 && (
-                  <div className="px-4 py-6 text-center text-sm text-gray-400">
-                    Sin notificaciones
+                  <div className="flex flex-col items-center justify-center px-4 py-8 text-center">
+                    <div className="mb-3 rounded-full bg-slate-50 p-3">
+                      <svg className="h-6 w-6 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+                      </svg>
+                    </div>
+                    <p className="text-sm font-medium text-slate-900">Estás al día</p>
+                    <p className="mt-1 text-xs text-slate-500">No tienes notificaciones pendientes.</p>
                   </div>
                 )}
 
@@ -193,25 +206,25 @@ export function AppHeader({ userName, role, initialUnreadCount }: AppHeaderProps
                         handleMarkAsRead(notification.id);
                       }
                     }}
-                    className={`flex w-full flex-col gap-1 border-b border-gray-50 px-4 py-3 text-left transition-colors hover:bg-gray-50 ${
-                      !notification.is_read ? "bg-blue-50/50" : ""
+                    className={`group flex w-full flex-col gap-1 border-b border-slate-50 px-4 py-3 text-left transition-colors hover:bg-slate-50 focus:bg-slate-50 focus:outline-none ${
+                      !notification.is_read ? "bg-emerald-50/30" : ""
                     }`}
                   >
                     <div className="flex items-start justify-between gap-2">
-                      <p className="text-sm font-medium text-gray-900">
+                      <p className={`text-sm ${!notification.is_read ? "font-semibold text-slate-900" : "font-medium text-slate-700"}`}>
                         {notification.title}
                       </p>
                       {!notification.is_read && (
-                        <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-blue-500" />
+                        <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" />
                       )}
                     </div>
                     {notification.body && (
-                      <p className="text-xs text-gray-500 line-clamp-2">
+                      <p className="text-xs text-slate-500 line-clamp-2">
                         {notification.body}
                       </p>
                     )}
                     {notification.created_at && (
-                      <p className="text-[11px] text-gray-400">
+                      <p className="mt-1 text-[10px] font-medium tracking-wide text-slate-400">
                         {timeAgo(notification.created_at)}
                       </p>
                     )}
@@ -222,10 +235,14 @@ export function AppHeader({ userName, role, initialUnreadCount }: AppHeaderProps
           )}
         </div>
 
-        <span className="text-sm text-gray-600">{userName}</span>
-        <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">
-          {roleLabels[role]}
-        </span>
+        <div className="h-4 w-px bg-slate-200"></div>
+
+        <div className="flex items-center gap-3">
+          <span className="text-sm font-medium text-slate-700">{userName}</span>
+          <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ring-1 ring-inset ${roleStyles[role]}`}>
+            {roleLabels[role]}
+          </span>
+        </div>
       </div>
     </header>
   );

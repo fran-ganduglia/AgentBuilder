@@ -1,4 +1,4 @@
-﻿import { env } from "@/lib/utils/env";
+import { env } from "@/lib/utils/env";
 
 const DEFAULT_MAX_TOKENS = 1000;
 const MAX_MAX_TOKENS = 4000;
@@ -20,6 +20,7 @@ export type ChatCompletionInput = {
   agentId: string;
   conversationId: string;
   context?: string;
+  toolContext?: string;
 };
 
 type CompletionStatus = "success" | "error" | "timeout" | "rate_limited";
@@ -76,9 +77,17 @@ type ObservabilityLog = {
 };
 
 function buildOpenAIMessages(input: ChatCompletionInput): OpenAIChatMessage[] {
-  const systemContent = input.context
-    ? `${input.systemPrompt}\n\nRETRIEVED_CONTEXT\n<retrieved_context>\n${input.context}\n</retrieved_context>`
-    : input.systemPrompt;
+  const sections = [input.systemPrompt];
+
+  if (input.context) {
+    sections.push(`RETRIEVED_CONTEXT\n<retrieved_context>\n${input.context}\n</retrieved_context>`);
+  }
+
+  if (input.toolContext) {
+    sections.push(`TOOL_OUTPUTS\n<tool_outputs>\n${input.toolContext}\n</tool_outputs>`);
+  }
+
+  const systemContent = sections.join("\n\n");
 
   return [
     { role: "system", content: systemContent },
@@ -536,3 +545,4 @@ export async function sendChatCompletion(
     clearTimeout(requestTimer);
   }
 }
+

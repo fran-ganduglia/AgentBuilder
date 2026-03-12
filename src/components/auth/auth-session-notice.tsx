@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 type AuthSessionNoticeProps = {
@@ -28,7 +27,6 @@ function getIntentCopy(intent: "login" | "register") {
 }
 
 export function AuthSessionNotice({ email, intent }: AuthSessionNoticeProps) {
-  const router = useRouter();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const copy = getIntentCopy(intent);
@@ -50,7 +48,7 @@ export function AuthSessionNotice({ email, intent }: AuthSessionNoticeProps) {
         return;
       }
 
-      router.refresh();
+      window.location.assign(intent === "register" ? "/register" : "/login");
     } catch {
       setError("No se pudo cerrar la sesion actual.");
     } finally {

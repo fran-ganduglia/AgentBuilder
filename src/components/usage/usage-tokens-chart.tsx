@@ -19,9 +19,12 @@ type UsageTokensChartProps = {
 export function UsageTokensChart({ history }: UsageTokensChartProps) {
   if (history.length === 0) {
     return (
-      <div className="rounded-lg border border-gray-200 bg-white p-6">
-        <h2 className="text-lg font-semibold text-gray-900">Tokens in/out por mes</h2>
-        <p className="mt-4 text-sm text-gray-500">No hay datos historicos disponibles.</p>
+      <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-10 text-center shadow-sm">
+        <svg className="mx-auto h-10 w-10 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+        </svg>
+        <h3 className="mt-4 text-sm font-bold text-slate-900">Tokens IN / OUT</h3>
+        <p className="mt-1 text-xs font-medium text-slate-500">No hay datos históricos reportados aún para procesar.</p>
       </div>
     );
   }
@@ -40,34 +43,34 @@ export function UsageTokensChart({ history }: UsageTokensChartProps) {
   const ticks = getTickValues(maxCombinedTokens);
 
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
+    <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+      <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h2 className="text-lg font-semibold text-gray-900">Tokens in/out por mes</h2>
-          <p className="mt-1 text-sm text-gray-500">
-            Comparacion mensual entre tokens de entrada y de salida.
+          <h2 className="text-base font-bold text-slate-900">Tokens Computados</h2>
+          <p className="mt-0.5 text-xs text-slate-500">
+            Comparativa de volumen apilado IN vs OUT.
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3 text-xs text-gray-600">
-          <span className="inline-flex items-center gap-2 rounded-full bg-gray-100 px-3 py-1">
-            <span className="h-2.5 w-2.5 rounded-full bg-sky-500" />
+        <div className="flex flex-wrap items-center gap-3 text-[11px] font-bold uppercase tracking-widest text-slate-600">
+          <span className="flex items-center gap-2 rounded-md bg-slate-100 px-2.5 py-1 ring-1 ring-inset ring-slate-900/5">
+            <span className="h-2 w-2 rounded-full bg-slate-800" />
             Input: {formatNumber(totalInput)}
           </span>
-          <span className="inline-flex items-center gap-2 rounded-full bg-gray-100 px-3 py-1">
-            <span className="h-2.5 w-2.5 rounded-full bg-indigo-500" />
+          <span className="flex items-center gap-2 rounded-md bg-slate-100 px-2.5 py-1 ring-1 ring-inset ring-slate-900/5">
+            <span className="h-2 w-2 rounded-full bg-blue-500" />
             Output: {formatNumber(totalOutput)}
           </span>
         </div>
       </div>
 
-      <div className="mt-6 overflow-x-auto">
+      <div className="mt-8 overflow-x-auto">
         <div className="min-w-[680px]">
           <svg
             viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`}
             className="h-auto w-full"
             role="img"
-            aria-label="Grafico de barras apiladas con tokens de entrada y salida por mes"
+            aria-label="Gráfico de barars apiladas de Tokens de entrada y salida."
           >
             {ticks.map((tick, index) => {
               const y =
@@ -80,14 +83,14 @@ export function UsageTokensChart({ history }: UsageTokensChartProps) {
                     x2={CHART_WIDTH - CHART_PADDING_RIGHT}
                     y1={y}
                     y2={y}
-                    className="stroke-gray-200"
-                    strokeDasharray="4 6"
+                    className="stroke-slate-100"
+                    strokeDasharray="4 4"
                   />
                   <text
-                    x={CHART_PADDING_LEFT - 10}
-                    y={y + 4}
+                    x={CHART_PADDING_LEFT - 12}
+                    y={y + 3}
                     textAnchor="end"
-                    className="fill-gray-400 text-[11px]"
+                    className="fill-slate-400 text-[10px] font-bold tracking-widest"
                   >
                     {formatNumber(tick)}
                   </text>
@@ -113,14 +116,14 @@ export function UsageTokensChart({ history }: UsageTokensChartProps) {
               const inputY = outputY - inputHeight;
 
               return (
-                <g key={month.monthKey}>
+                <g key={month.monthKey} className="group">
                   <rect
                     x={barX}
                     y={CHART_PADDING_TOP}
                     width={barWidth}
                     height={chartInnerHeight}
-                    rx={10}
-                    className="fill-gray-100"
+                    rx={6}
+                    className="fill-slate-50 transition-colors group-hover:fill-slate-100"
                   />
 
                   {outputHeight > 0 && (
@@ -129,8 +132,8 @@ export function UsageTokensChart({ history }: UsageTokensChartProps) {
                       y={outputY}
                       width={barWidth}
                       height={outputHeight}
-                      rx={inputHeight > 0 ? 0 : 10}
-                      className="fill-indigo-500"
+                      rx={inputHeight > 0 ? 0 : 6}
+                      className="fill-blue-500 transition-colors group-hover:fill-blue-600"
                     />
                   )}
 
@@ -140,18 +143,18 @@ export function UsageTokensChart({ history }: UsageTokensChartProps) {
                       y={inputY}
                       width={barWidth}
                       height={inputHeight}
-                      rx={10}
-                      className="fill-sky-500"
+                      rx={6}
+                      className="fill-slate-800 transition-colors group-hover:fill-slate-900"
                     >
-                      <title>{`${month.label}: ${formatNumber(month.totalTokensInput)} input / ${formatNumber(month.totalTokensOutput)} output`}</title>
+                      <title>{`${month.label}: ${formatNumber(month.totalTokensInput)} IN / ${formatNumber(month.totalTokensOutput)} OUT`}</title>
                     </rect>
                   )}
 
                   <text
                     x={centerX}
-                    y={CHART_PADDING_TOP + chartInnerHeight + 18}
+                    y={CHART_PADDING_TOP + chartInnerHeight + 20}
                     textAnchor="middle"
-                    className="fill-gray-500 text-[11px]"
+                    className="fill-slate-500 text-[10px] font-bold uppercase tracking-widest"
                   >
                     {month.label}
                   </text>
@@ -159,9 +162,9 @@ export function UsageTokensChart({ history }: UsageTokensChartProps) {
                   {stackHeight > 0 && (
                     <text
                       x={centerX}
-                      y={stackBaseY - stackHeight - 8}
+                      y={stackBaseY - stackHeight - 12}
                       textAnchor="middle"
-                      className="fill-gray-700 text-[10px]"
+                      className="fill-slate-700 text-[10px] font-bold tracking-widest"
                     >
                       {formatNumber(totalMonthTokens)}
                     </text>

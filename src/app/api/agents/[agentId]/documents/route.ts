@@ -1,26 +1,37 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { assertAgentAccess } from "@/lib/auth/agent-access";
 import { getSession } from "@/lib/auth/get-session";
-import { getAgentById } from "@/lib/db/agents";
 import { listDocuments, createDocument } from "@/lib/db/agent-documents";
+import { enqueueEvent } from "@/lib/db/event-queue";
 import { incrementRateLimit } from "@/lib/redis";
 import { createServiceSupabaseClient } from "@/lib/supabase/service";
 import { isValidSameOriginMutationRequest } from "@/lib/utils/request-security";
-import type { TablesInsert } from "@/types/database";
 
-type EventQueueInsert = TablesInsert<"event_queue">;
+const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
 
-const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024; // 10MB
+const FILE_TYPE_CONFIG = {
+  ".pdf": {
+    documentType: "pdf",
+    mimeTypes: new Set(["application/pdf"]),
+  },
+  ".txt": {
+    documentType: "txt",
+    mimeTypes: new Set(["text/plain"]),
+  },
+  ".csv": {
+    documentType: "csv",
+    mimeTypes: new Set(["text/csv", "application/vnd.ms-excel"]),
+  },
+  ".docx": {
+    documentType: "docx",
+    mimeTypes: new Set([
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ]),
+  },
+} as const;
 
-const ALLOWED_EXTENSIONS: Record<string, string> = {
-  "application/pdf": ".pdf",
-  "text/plain": ".txt",
-  "text/markdown": ".md",
-  "text/csv": ".csv",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
-};
-
-const ALLOWED_FILE_EXTENSIONS = new Set([".pdf", ".txt", ".md", ".csv", ".docx"]);
+const ALLOWED_FILE_EXTENSIONS = new Set(Object.keys(FILE_TYPE_CONFIG));
 
 function getFileExtension(fileName: string): string {
   const lastDot = fileName.lastIndexOf(".");
@@ -38,9 +49,14 @@ function sanitizeFileName(fileName: string): string {
 
 function validateFile(
   file: File
-): { valid: true } | { valid: false; message: string } {
+):
+  | { valid: true; documentType: string }
+  | { valid: false; message: string } {
   if (file.size > MAX_FILE_SIZE_BYTES) {
-    return { valid: false, message: `El archivo no puede superar ${MAX_FILE_SIZE_BYTES / (1024 * 1024)}MB` };
+    return {
+      valid: false,
+      message: `El archivo no puede superar ${MAX_FILE_SIZE_BYTES / (1024 * 1024)}MB`,
+    };
   }
 
   if (file.size === 0) {
@@ -55,23 +71,15 @@ function validateFile(
     };
   }
 
-  // Validate MIME type matches extension
-  const expectedExtension = ALLOWED_EXTENSIONS[file.type];
-  if (!expectedExtension) {
+  const config = FILE_TYPE_CONFIG[extension as keyof typeof FILE_TYPE_CONFIG];
+  if (!config.mimeTypes.has(file.type)) {
     return {
       valid: false,
-      message: `Tipo de archivo no permitido: ${file.type}`,
+      message: `Tipo de archivo no permitido: ${file.type || "desconocido"}`,
     };
   }
 
-  if (expectedExtension !== extension) {
-    return {
-      valid: false,
-      message: `La extension del archivo (${extension}) no coincide con su tipo (${file.type})`,
-    };
-  }
-
-  return { valid: true };
+  return { valid: true, documentType: config.documentType };
 }
 
 type RouteContext = {
@@ -91,19 +99,22 @@ export async function GET(
     return NextResponse.json({ error: "agentId invalido" }, { status: 400 });
   }
 
-  const agentId = agentIdParsed.data;
-
   const session = await getSession();
   if (!session) {
     return NextResponse.json({ error: "No autenticado" }, { status: 401 });
   }
 
-  const { data: agent } = await getAgentById(agentId, session.organizationId);
-  if (!agent) {
-    return NextResponse.json({ error: "Agente no encontrado" }, { status: 404 });
+  const access = await assertAgentAccess({
+    session,
+    agentId: agentIdParsed.data,
+    capability: "manage_documents",
+  });
+
+  if (!access.ok) {
+    return NextResponse.json({ error: access.message }, { status: access.status });
   }
 
-  const { data, error } = await listDocuments(agentId, session.organizationId);
+  const { data, error } = await listDocuments(agentIdParsed.data, session.organizationId);
 
   if (error) {
     return NextResponse.json(
@@ -137,7 +148,16 @@ export async function POST(
     return NextResponse.json({ error: "No autenticado" }, { status: 401 });
   }
 
-  // Rate limit: 20 uploads per hour per organization
+  const access = await assertAgentAccess({
+    session,
+    agentId,
+    capability: "manage_documents",
+  });
+
+  if (!access.ok) {
+    return NextResponse.json({ error: access.message }, { status: access.status });
+  }
+
   try {
     const uploadCount = await incrementRateLimit(
       `rate_limit:upload:${session.organizationId}`,
@@ -154,11 +174,6 @@ export async function POST(
       organizationId: session.organizationId,
       error: rateLimitError instanceof Error ? rateLimitError.message : "unknown",
     });
-  }
-
-  const { data: agent } = await getAgentById(agentId, session.organizationId);
-  if (!agent) {
-    return NextResponse.json({ error: "Agente no encontrado" }, { status: 404 });
   }
 
   let formData: FormData;
@@ -186,14 +201,11 @@ export async function POST(
     return NextResponse.json({ error: validation.message }, { status: 400 });
   }
 
-  // Generate server-side storage path — never use client-provided path
   const fileId = crypto.randomUUID();
   const sanitizedName = sanitizeFileName(file.name);
   const storagePath = `${session.organizationId}/${agentId}/${fileId}-${sanitizedName}`;
 
-  // Upload to Supabase Storage (private bucket) using service_role
   const serviceClient = createServiceSupabaseClient();
-
   const fileBuffer = await file.arrayBuffer();
 
   const { error: uploadError } = await serviceClient.storage
@@ -204,17 +216,22 @@ export async function POST(
     });
 
   if (uploadError) {
+    console.error("documents.storage_upload_error", {
+      agentId,
+      organizationId: session.organizationId,
+      error: uploadError.message,
+    });
+
     return NextResponse.json(
       { error: "No se pudo subir el archivo" },
       { status: 500 }
     );
   }
 
-  // Create agent_documents record
   const { data: document, error: docError } = await createDocument(
     {
       fileName: sanitizedName,
-      fileType: file.type,
+      fileType: validation.documentType,
       fileSizeBytes: file.size,
       storagePath,
       uploadedBy: session.user.id,
@@ -224,7 +241,12 @@ export async function POST(
   );
 
   if (docError || !document) {
-    // Cleanup: remove uploaded file if DB insert fails
+    console.error("documents.metadata_insert_error", {
+      agentId,
+      organizationId: session.organizationId,
+      error: docError ?? "unknown",
+    });
+
     await serviceClient.storage
       .from("agent-documents")
       .remove([storagePath]);
@@ -235,34 +257,21 @@ export async function POST(
     );
   }
 
-  // Queue processing event for n8n worker
-  const eventPayload: EventQueueInsert = {
-    organization_id: session.organizationId,
-    event_type: "document.uploaded",
-    entity_type: "agent_document",
-    entity_id: document.id,
+  await enqueueEvent({
+    organizationId: session.organizationId,
+    eventType: "document.uploaded",
+    entityType: "agent_document",
+    entityId: document.id,
+    idempotencyKey: `document.uploaded:${document.id}`,
     payload: {
       document_id: document.id,
       agent_id: agentId,
       organization_id: session.organizationId,
       storage_path: storagePath,
-      file_type: file.type,
+      file_type: validation.documentType,
       file_name: sanitizedName,
     },
-    idempotency_key: document.id,
-  };
-
-  const { error: eventError } = await serviceClient
-    .from("event_queue")
-    .insert(eventPayload);
-
-  if (eventError) {
-    console.error("documents.event_queue_error", {
-      documentId: document.id,
-      error: eventError.message,
-    });
-    // Non-fatal: document uploaded successfully, worker will pick it up via retry or manual trigger
-  }
+  });
 
   return NextResponse.json({ data: document }, { status: 201 });
 }

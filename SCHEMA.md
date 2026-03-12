@@ -430,6 +430,7 @@ CREATE INDEX idx_agent_versions_agent_id ON agent_versions(agent_id);
 CREATE INDEX idx_agent_versions_org      ON agent_versions(organization_id);
 
 -- Trigger de versionado: whitelist explícita, changed_by via auth.uid()
+-- Self-healing: calcula version_number desde MAX(agent_versions), no desde current_version
 CREATE OR REPLACE FUNCTION public.create_agent_version()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -440,6 +441,7 @@ DECLARE
   v_changed_by      UUID;
   v_changed_by_type TEXT;
   v_config          JSONB;
+  v_version_number  INTEGER;
 BEGIN
   v_changed_by := auth.uid();
 
@@ -448,6 +450,12 @@ BEGIN
   ELSE
     v_changed_by_type := 'user';
   END IF;
+
+  -- Self-healing: calcula desde datos reales, no depende de current_version
+  SELECT COALESCE(MAX(version_number), 0) + 1
+    INTO v_version_number
+    FROM agent_versions
+   WHERE agent_id = OLD.id;
 
   -- Whitelist explícita: NUNCA to_jsonb(OLD)
   v_config := jsonb_build_object(
@@ -470,12 +478,12 @@ BEGIN
     config, system_prompt, llm_model, llm_provider,
     changed_by, changed_by_type
   ) VALUES (
-    OLD.id, OLD.organization_id, OLD.current_version,
+    OLD.id, OLD.organization_id, v_version_number,
     v_config, OLD.system_prompt, OLD.llm_model, OLD.llm_provider,
     v_changed_by, v_changed_by_type
   );
 
-  NEW.current_version := OLD.current_version + 1;
+  NEW.current_version := v_version_number + 1;
   RETURN NEW;
 END;
 $$;

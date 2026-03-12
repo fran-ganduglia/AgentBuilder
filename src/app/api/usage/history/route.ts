@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { canViewOrganizationUsage } from "@/lib/auth/agent-access";
 import { getSession } from "@/lib/auth/get-session";
 import { getUsageHistory } from "@/lib/db/usage";
 
@@ -7,6 +8,10 @@ export async function GET(request: Request) {
 
   if (!session) {
     return NextResponse.json({ error: "No autorizado" }, { status: 401 });
+  }
+
+  if (!canViewOrganizationUsage(session.role)) {
+    return NextResponse.json({ error: "No autorizado" }, { status: 403 });
   }
 
   const url = new URL(request.url);

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useState, type FormEvent } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import {
   EMAIL_MAX_LENGTH,
   loginRequestSchema,
@@ -22,7 +22,6 @@ const initialFields: FormFields = {
 };
 
 export function LoginForm() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const registered = searchParams.get("registered") === "true";
 
@@ -65,8 +64,7 @@ export function LoginForm() {
         return;
       }
 
-      router.push("/dashboard");
-      router.refresh();
+      window.location.assign("/dashboard");
     } catch {
       setError("No se pudo iniciar sesion. Intenta de nuevo.");
     } finally {

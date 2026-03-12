@@ -27,9 +27,12 @@ function formatCostTick(value: number): string {
 export function UsageCostChart({ history }: UsageCostChartProps) {
   if (history.length === 0) {
     return (
-      <div className="rounded-lg border border-gray-200 bg-white p-6">
-        <h2 className="text-lg font-semibold text-gray-900">Costo por mes</h2>
-        <p className="mt-4 text-sm text-gray-500">No hay datos historicos disponibles.</p>
+      <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-10 text-center shadow-sm">
+        <svg className="mx-auto h-10 w-10 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+        <h3 className="mt-4 text-sm font-bold text-slate-900">Costo Estimado</h3>
+        <p className="mt-1 text-xs font-medium text-slate-500">No hay facturación procesada ni reportada todavía.</p>
       </div>
     );
   }
@@ -48,35 +51,35 @@ export function UsageCostChart({ history }: UsageCostChartProps) {
   const ticks = getTickValues(maxCost, (value) => Number(value.toFixed(2)));
 
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
+    <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+      <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h2 className="text-lg font-semibold text-gray-900">Costo por mes</h2>
-          <p className="mt-1 text-sm text-gray-500">
-            Estimacion mensual de costo basada en tokens consumidos.
+          <h2 className="text-base font-bold text-slate-900">Estadística de Costos</h2>
+          <p className="mt-0.5 text-xs text-slate-500">
+            Estimación proyectada basada en tokens consumidos.
           </p>
         </div>
 
-        <div className="flex flex-wrap gap-2 text-xs text-gray-600">
-          <span className="rounded-full bg-gray-100 px-3 py-1">
-            Total: {formatCurrency(totalCost)}
+        <div className="flex flex-wrap items-center gap-3 text-[11px] font-bold uppercase tracking-widest text-slate-600">
+          <span className="rounded-md bg-slate-100 px-2 py-1 ring-1 ring-inset ring-slate-900/5">
+            Total {formatCurrency(totalCost)}
           </span>
-          <span className="rounded-full bg-gray-100 px-3 py-1">
-            Promedio: {formatCurrency(averageCost)}/mes
+          <span className="rounded-md bg-slate-100 px-2 py-1 ring-1 ring-inset ring-slate-900/5">
+            ~ {formatCurrency(averageCost)} / mes
           </span>
-          <span className="rounded-full bg-gray-100 px-3 py-1">
-            Pico: {peakMonth.label} ({formatCurrency(peakMonth.estimatedCostUsd)})
+          <span className="rounded-md bg-slate-100 px-2 py-1 ring-1 ring-inset ring-slate-900/5 text-emerald-700">
+            Pico de {formatCurrency(peakMonth.estimatedCostUsd)} ({peakMonth.label})
           </span>
         </div>
       </div>
 
-      <div className="mt-6 overflow-x-auto">
+      <div className="mt-8 overflow-x-auto">
         <div className="min-w-[680px]">
           <svg
             viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`}
             className="h-auto w-full"
             role="img"
-            aria-label="Grafico de barras con costo estimado por mes"
+            aria-label="Gráfico analítico de barras con costo proyectado por mes"
           >
             {ticks.map((tick, index) => {
               const y =
@@ -89,14 +92,14 @@ export function UsageCostChart({ history }: UsageCostChartProps) {
                     x2={CHART_WIDTH - CHART_PADDING_RIGHT}
                     y1={y}
                     y2={y}
-                    className="stroke-gray-200"
-                    strokeDasharray="4 6"
+                    className="stroke-slate-100"
+                    strokeDasharray="4 4"
                   />
                   <text
-                    x={CHART_PADDING_LEFT - 10}
-                    y={y + 4}
+                    x={CHART_PADDING_LEFT - 12}
+                    y={y + 3}
                     textAnchor="end"
-                    className="fill-gray-400 text-[11px]"
+                    className="fill-slate-400 text-[10px] font-bold tracking-widest"
                   >
                     {formatCostTick(tick)}
                   </text>
@@ -114,14 +117,14 @@ export function UsageCostChart({ history }: UsageCostChartProps) {
               const isPeak = month.monthKey === peakMonth.monthKey;
 
               return (
-                <g key={month.monthKey}>
+                <g key={month.monthKey} className="group">
                   <rect
                     x={barX}
                     y={CHART_PADDING_TOP}
                     width={barWidth}
                     height={chartInnerHeight}
-                    rx={10}
-                    className="fill-gray-100"
+                    rx={6}
+                    className="fill-slate-50 transition-colors group-hover:fill-slate-100"
                   />
 
                   {barHeight > 0 && (
@@ -130,18 +133,18 @@ export function UsageCostChart({ history }: UsageCostChartProps) {
                       y={barY}
                       width={barWidth}
                       height={barHeight}
-                      rx={10}
-                      className={isPeak ? "fill-emerald-600" : "fill-emerald-500"}
+                      rx={6}
+                      className={isPeak ? "fill-emerald-700 transition-colors group-hover:fill-emerald-800" : "fill-emerald-500 transition-colors group-hover:fill-emerald-600"}
                     >
-                      <title>{`${month.label}: ${formatCurrency(month.estimatedCostUsd)}`}</title>
+                      <title>{`${month.label}: ${formatCurrency(month.estimatedCostUsd)} proyectados`}</title>
                     </rect>
                   )}
 
                   <text
                     x={centerX}
-                    y={CHART_PADDING_TOP + chartInnerHeight + 18}
+                    y={CHART_PADDING_TOP + chartInnerHeight + 20}
                     textAnchor="middle"
-                    className="fill-gray-500 text-[11px]"
+                    className="fill-slate-500 text-[10px] font-bold uppercase tracking-widest"
                   >
                     {month.label}
                   </text>

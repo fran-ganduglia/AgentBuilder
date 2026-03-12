@@ -1,8 +1,13 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
+import { buildAgentConnectionSummary } from "@/lib/agents/connection-policy";
 import { getSession } from "@/lib/auth/get-session";
-import { listAgents } from "@/lib/db/agents";
-import { AgentList } from "@/components/agents/agent-list";
+import {
+  canEditAgents,
+  listAccessibleAgents,
+} from "@/lib/auth/agent-access";
+import { listAgentConnectionSummaries } from "@/lib/db/agent-connections";
+import { listDeletedAgents } from "@/lib/db/agents";
+import { AgentsPageView } from "@/components/agents/agents-page-view";
 
 export default async function AgentsPage() {
   const session = await getSession();
@@ -11,20 +16,31 @@ export default async function AgentsPage() {
     redirect("/login");
   }
 
-  const { data: agents } = await listAgents(session.organizationId);
+  const canManageAgents = canEditAgents(session.role);
+  const canDeleteAgents = session.role === "admin";
+  const [{ data: agents }, { data: connectionSummaries }, { data: deletedAgents }] = await Promise.all([
+    listAccessibleAgents(session),
+    listAgentConnectionSummaries(session.organizationId),
+    canManageAgents
+      ? listDeletedAgents(session.organizationId)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+
+  const connectedAgentTypes = Object.fromEntries(
+    (connectionSummaries ?? []).map((connection) => [
+      connection.agent_id,
+      buildAgentConnectionSummary(connection).label,
+    ])
+  );
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900">Agentes</h1>
-        <Link
-          href="/agents/new"
-          className="inline-flex rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
-        >
-          Nuevo agente
-        </Link>
-      </div>
-      <AgentList agents={agents ?? []} />
-    </div>
+    <AgentsPageView
+      activeAgents={agents ?? []}
+      deletedAgents={deletedAgents ?? []}
+      connectedAgentTypes={connectedAgentTypes}
+      canCreate={canManageAgents}
+      canDeleteAgents={canDeleteAgents}
+      canRestoreAgents={canManageAgents}
+    />
   );
 }

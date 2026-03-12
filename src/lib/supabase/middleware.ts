@@ -14,6 +14,10 @@ function isPublicPath(pathname: string): boolean {
 }
 
 export async function updateSession(request: NextRequest): Promise<NextResponse> {
+  if (request.nextUrl.pathname.startsWith("/api/")) {
+    return NextResponse.next({ request });
+  }
+
   let supabaseResponse = NextResponse.next({ request });
 
   const supabase = createServerClient<Database>(
@@ -53,3 +57,4 @@ export async function updateSession(request: NextRequest): Promise<NextResponse>
 
   return supabaseResponse;
 }
+

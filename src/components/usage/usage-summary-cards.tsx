@@ -14,25 +14,27 @@ function formatCost(value: number): string {
 
 export function UsageSummaryCards({ usage }: UsageSummaryCardsProps) {
   return (
-    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-      <div className="rounded-lg border border-gray-200 bg-white p-6">
-        <p className="text-sm font-medium text-gray-500">Mensajes del mes</p>
-        <p className="mt-2 text-3xl font-bold text-gray-900">
-          {formatNumber(usage.totalMessages)}
-        </p>
-        <div className="mt-3">
-          <div className="flex items-center justify-between text-xs text-gray-500">
-            <span>{usage.usagePercent}% usado</span>
-            <span>{formatNumber(usage.planLimit)} limite</span>
+    <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="flex flex-col justify-between rounded-xl border border-slate-200 bg-white p-6 shadow-sm transition-all hover:shadow-md">
+        <div>
+          <p className="text-[11px] font-bold tracking-widest text-slate-500 uppercase">Mensajes procesados</p>
+          <p className="mt-3 text-3xl font-black tracking-tight text-slate-900">
+            {formatNumber(usage.totalMessages)}
+          </p>
+        </div>
+        <div className="mt-5">
+          <div className="flex items-center justify-between text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">
+            <span>{usage.usagePercent}% de cuota</span>
+            <span>{formatNumber(usage.planLimit)} MSJs</span>
           </div>
-          <div className="mt-1 h-2 w-full rounded-full bg-gray-200">
+          <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-100 ring-1 ring-inset ring-slate-900/5">
             <div
-              className={`h-2 rounded-full transition-all ${
+              className={`h-full rounded-full transition-all duration-500 ${
                 usage.usagePercent >= 100
-                  ? "bg-red-500"
+                  ? "bg-rose-500"
                   : usage.usagePercent >= 80
-                    ? "bg-yellow-500"
-                    : "bg-blue-500"
+                    ? "bg-amber-400"
+                    : "bg-emerald-500"
               }`}
               style={{ width: `${Math.min(usage.usagePercent, 100)}%` }}
             />
@@ -40,29 +42,50 @@ export function UsageSummaryCards({ usage }: UsageSummaryCardsProps) {
         </div>
       </div>
 
-      <div className="rounded-lg border border-gray-200 bg-white p-6">
-        <p className="text-sm font-medium text-gray-500">Tokens consumidos</p>
-        <p className="mt-2 text-3xl font-bold text-gray-900">
-          {formatNumber(usage.totalTokensInput + usage.totalTokensOutput)}
-        </p>
-        <p className="mt-1 text-xs text-gray-400">
-          {formatNumber(usage.totalTokensInput)} in / {formatNumber(usage.totalTokensOutput)} out
-        </p>
+      <div className="flex flex-col justify-between rounded-xl border border-slate-200 bg-white p-6 shadow-sm transition-all hover:shadow-md">
+        <div>
+          <p className="text-[11px] font-bold tracking-widest text-slate-500 uppercase">Volumen de Tokens</p>
+          <p className="mt-3 text-3xl font-black tracking-tight text-slate-900">
+            {formatNumber(usage.totalTokensInput + usage.totalTokensOutput)}
+          </p>
+        </div>
+        <div className="mt-5 flex items-center justify-between border-t border-slate-100 pt-3">
+          <p className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-widest text-slate-500">
+            <span className="h-2 w-2 rounded-full bg-slate-800" />
+            <span className="text-slate-800">{formatNumber(usage.totalTokensInput)}</span> IN
+          </p>
+          <p className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-widest text-slate-500">
+            <span className="h-2 w-2 rounded-full bg-blue-500" />
+            <span className="text-blue-600">{formatNumber(usage.totalTokensOutput)}</span> OUT
+          </p>
+        </div>
       </div>
 
-      <div className="rounded-lg border border-gray-200 bg-white p-6">
-        <p className="text-sm font-medium text-gray-500">Costo estimado</p>
-        <p className="mt-2 text-3xl font-bold text-gray-900">
-          {formatCost(usage.estimatedCostUsd)}
-        </p>
-        <p className="mt-1 text-xs text-gray-400">Plan {usage.planName}</p>
+      <div className="flex flex-col justify-between rounded-xl border border-slate-200 bg-white p-6 shadow-sm transition-all hover:shadow-md">
+        <div>
+          <p className="text-[11px] font-bold tracking-widest text-slate-500 uppercase">Costo proyectado</p>
+          <p className="mt-3 text-3xl font-black tracking-tight text-slate-900">
+            {formatCost(usage.estimatedCostUsd)}
+          </p>
+        </div>
+        <div className="mt-5 flex items-center justify-between border-t border-slate-100 pt-3 text-[11px] font-bold uppercase tracking-widest text-slate-500">
+          <span>Plan Suscrito</span>
+          <span className="rounded-md bg-slate-100 px-2 py-0.5 text-slate-800 ring-1 ring-inset ring-slate-500/10">
+            {usage.planName}
+          </span>
+        </div>
       </div>
 
-      <div className="rounded-lg border border-gray-200 bg-white p-6">
-        <p className="text-sm font-medium text-gray-500">Conversaciones</p>
-        <p className="mt-2 text-3xl font-bold text-gray-900">
-          {formatNumber(usage.totalConversations)}
-        </p>
+      <div className="flex flex-col justify-between rounded-xl border border-slate-200 bg-white p-6 shadow-sm transition-all hover:shadow-md">
+        <div>
+          <p className="text-[11px] font-bold tracking-widest text-slate-500 uppercase">Conversaciones</p>
+          <p className="mt-3 text-3xl font-black tracking-tight text-slate-900">
+            {formatNumber(usage.totalConversations)}
+          </p>
+        </div>
+        <div className="mt-5 border-t border-slate-100 pt-3">
+          <p className="text-[11px] font-bold uppercase tracking-widest text-slate-400">Total histórico consolidado</p>
+        </div>
       </div>
     </div>
   );

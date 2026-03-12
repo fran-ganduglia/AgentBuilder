@@ -44,21 +44,21 @@ export function DashboardFilters({
   }
 
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-4">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+    <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <p className="text-sm font-medium text-gray-900">Filtros de analitica</p>
-          <p className="mt-1 text-sm text-gray-500">
-            Ajusta el periodo y el agente para explorar la tendencia sin salir del dashboard.
+          <p className="text-sm font-bold text-slate-900">Filtros de control analítico</p>
+          <p className="mt-0.5 text-xs text-slate-500">
+            Segmenta el origen de los gráficos en el margen histórico disponible.
           </p>
         </div>
 
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
-          <div>
-            <p className="mb-2 text-xs font-medium uppercase tracking-wide text-gray-500">
-              Rango
-            </p>
-            <div className="flex rounded-lg border border-gray-200 p-1">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+          <div className="flex items-center gap-3">
+            <span className="text-[11px] font-bold uppercase tracking-widest text-slate-500">
+              Histórico
+            </span>
+            <div className="flex rounded-lg bg-slate-100 p-1 ring-1 ring-inset ring-slate-900/5">
               {RANGE_OPTIONS.map((option) => {
                 const isActive = selectedMonths === option.value;
 
@@ -68,10 +68,10 @@ export function DashboardFilters({
                     type="button"
                     onClick={() => updateParams(option.value, selectedAgentId)}
                     disabled={isPending}
-                    className={`rounded-md px-3 py-1.5 text-sm font-medium transition ${
+                    className={`relative rounded-md px-3.5 py-1.5 text-xs font-bold transition-all ${
                       isActive
-                        ? "bg-blue-600 text-white"
-                        : "text-gray-600 hover:bg-gray-100"
+                        ? "bg-white text-slate-900 shadow-sm ring-1 ring-slate-900/10"
+                        : "text-slate-500 hover:text-slate-700"
                     } disabled:cursor-not-allowed disabled:opacity-60`}
                   >
                     {option.label}
@@ -81,27 +81,30 @@ export function DashboardFilters({
             </div>
           </div>
 
-          <label className="block min-w-56">
-            <span className="mb-2 block text-xs font-medium uppercase tracking-wide text-gray-500">
-              Agente
-            </span>
+          <div className="h-8 w-px bg-slate-200 hidden sm:block" />
+
+          <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+            <label htmlFor="agent-filter-select" className="text-[11px] font-bold uppercase tracking-widest text-slate-500">
+              Trazabilidad
+            </label>
             <select
+              id="agent-filter-select"
               value={selectedAgentId ?? "all"}
               onChange={(event) => {
                 const nextAgentId = event.target.value === "all" ? null : event.target.value;
                 updateParams(selectedMonths, nextAgentId);
               }}
               disabled={isPending}
-              className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200 disabled:cursor-not-allowed disabled:opacity-60"
+              className="w-full sm:w-auto min-w-[200px] cursor-pointer rounded-lg border border-slate-300 bg-slate-50 px-3 py-2.5 text-xs font-bold text-slate-900 outline-none transition-all hover:bg-white focus:border-slate-900 focus:bg-white focus:ring-1 focus:ring-slate-900 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              <option value="all">Todos los agentes</option>
+              <option value="all">Fusión Global (Todos)</option>
               {agents.map((agent) => (
                 <option key={agent.id} value={agent.id}>
-                  {agent.name}
+                  Agente: {agent.name}
                 </option>
               ))}
             </select>
-          </label>
+          </div>
         </div>
       </div>
     </div>

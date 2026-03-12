@@ -28,25 +28,23 @@ export function OrganizationForm({ initialName }: OrganizationFormProps) {
       const json = await response.json();
 
       if (!response.ok) {
-        setError(json.error ?? "Error al actualizar");
+        setError(json.error ?? "Error al actualizar la organización");
         return;
       }
 
-      toast("Organizacion actualizada", "success");
+      toast("Organización actualizada", "success");
     } catch {
-      setError("Error de conexion. Intenta de nuevo.");
+      setError("Error de conexión. Intenta de nuevo.");
     } finally {
       setIsSubmitting(false);
     }
   }
 
   return (
-    <form onSubmit={handleSubmit} className="rounded-lg border border-gray-200 bg-white p-6">
-      <h2 className="text-lg font-semibold text-gray-900">Organizacion</h2>
-
-      <div className="mt-4">
-        <label htmlFor="orgName" className="block text-sm font-medium text-gray-700">
-          Nombre
+    <form onSubmit={handleSubmit} className="w-full max-w-xl">
+      <div>
+        <label htmlFor="orgName" className="block text-sm font-semibold tracking-wide text-slate-900">
+          Nombre público
         </label>
         <input
           id="orgName"
@@ -54,19 +52,32 @@ export function OrganizationForm({ initialName }: OrganizationFormProps) {
           required
           value={name}
           onChange={(e) => setName(e.target.value)}
-          className="mt-1 block w-full max-w-md rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          className="mt-2 block w-full rounded-lg border border-slate-300 bg-slate-50 px-4 py-2.5 text-sm text-slate-900 transition-colors hover:bg-white focus:border-slate-900 focus:bg-white focus:outline-none focus:ring-1 focus:ring-slate-900"
         />
       </div>
 
-      {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
+      {error && (
+        <div className="mt-4 rounded-lg bg-rose-50 p-4 border border-rose-200">
+          <p className="text-sm font-medium text-rose-800" role="alert">
+            {error}
+          </p>
+        </div>
+      )}
 
-      <button
-        type="submit"
-        disabled={isSubmitting || name === initialName}
-        className="mt-4 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-      >
-        {isSubmitting ? "Guardando..." : "Guardar"}
-      </button>
+      <div className="mt-6 flex shrink-0 items-center gap-3">
+        <button
+          type="submit"
+          disabled={isSubmitting || name === initialName}
+          className="inline-flex items-center justify-center rounded-lg bg-slate-900 px-6 py-2.5 text-sm font-bold text-white shadow-sm transition-all hover:-translate-y-0.5 hover:bg-slate-800 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-slate-900 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0"
+        >
+          {isSubmitting ? (
+             <svg className="mr-2 h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+             </svg>
+          ) : null}
+          {isSubmitting ? "Guardando..." : "Guardar cambios"}
+        </button>
+      </div>
     </form>
   );
 }

@@ -19,9 +19,12 @@ type UsageTrendChartProps = {
 export function UsageTrendChart({ history }: UsageTrendChartProps) {
   if (history.length === 0) {
     return (
-      <div className="rounded-lg border border-gray-200 bg-white p-6">
-        <h2 className="text-lg font-semibold text-gray-900">Mensajes por mes</h2>
-        <p className="mt-4 text-sm text-gray-500">No hay datos historicos disponibles.</p>
+      <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-10 text-center shadow-sm">
+        <svg className="mx-auto h-10 w-10 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z" />
+        </svg>
+        <h3 className="mt-4 text-sm font-bold text-slate-900">Mensajes por mes</h3>
+        <p className="mt-1 text-xs font-medium text-slate-500">No hay datos históricos reportados aún.</p>
       </div>
     );
   }
@@ -40,35 +43,35 @@ export function UsageTrendChart({ history }: UsageTrendChartProps) {
   const ticks = getTickValues(maxMessages);
 
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
+    <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+      <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h2 className="text-lg font-semibold text-gray-900">Mensajes por mes</h2>
-          <p className="mt-1 text-sm text-gray-500">
-            Volumen mensual de mensajes procesados por tus agentes.
+          <h2 className="text-base font-bold text-slate-900">Volumen General</h2>
+          <p className="mt-0.5 text-xs text-slate-500">
+            Mensajes netos procesados agrupados por mes.
           </p>
         </div>
 
-        <div className="flex flex-wrap gap-2 text-xs text-gray-600">
-          <span className="rounded-full bg-gray-100 px-3 py-1">
-            Total: {formatNumber(totalMessages)}
+        <div className="flex flex-wrap items-center gap-3 text-[11px] font-bold uppercase tracking-widest text-slate-600">
+          <span className="rounded-md bg-slate-100 px-2 py-1 ring-1 ring-inset ring-slate-900/5">
+            Total {formatNumber(totalMessages)}
           </span>
-          <span className="rounded-full bg-gray-100 px-3 py-1">
-            Promedio: {formatNumber(averageMessages)}/mes
+          <span className="rounded-md bg-slate-100 px-2 py-1 ring-1 ring-inset ring-slate-900/5">
+            ~ {formatNumber(averageMessages)} / mes
           </span>
-          <span className="rounded-full bg-gray-100 px-3 py-1">
-            Pico: {peakMonth.label} ({formatNumber(peakMonth.totalMessages)})
+          <span className="rounded-md bg-slate-100 px-2 py-1 ring-1 ring-inset ring-slate-900/5 text-blue-700">
+            Pico de {formatNumber(peakMonth.totalMessages)} ({peakMonth.label})
           </span>
         </div>
       </div>
 
-      <div className="mt-6 overflow-x-auto">
+      <div className="mt-8 overflow-x-auto">
         <div className="min-w-[680px]">
           <svg
             viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`}
             className="h-auto w-full"
             role="img"
-            aria-label="Grafico de barras con mensajes por mes"
+            aria-label="Gráfico de barras analítico para mensajes"
           >
             {ticks.map((tick, index) => {
               const y =
@@ -81,14 +84,14 @@ export function UsageTrendChart({ history }: UsageTrendChartProps) {
                     x2={CHART_WIDTH - CHART_PADDING_RIGHT}
                     y1={y}
                     y2={y}
-                    className="stroke-gray-200"
-                    strokeDasharray="4 6"
+                    className="stroke-slate-100"
+                    strokeDasharray="4 4"
                   />
                   <text
-                    x={CHART_PADDING_LEFT - 10}
-                    y={y + 4}
+                    x={CHART_PADDING_LEFT - 12}
+                    y={y + 3}
                     textAnchor="end"
-                    className="fill-gray-400 text-[11px]"
+                    className="fill-slate-400 text-[10px] font-bold tracking-widest"
                   >
                     {formatNumber(tick)}
                   </text>
@@ -106,14 +109,14 @@ export function UsageTrendChart({ history }: UsageTrendChartProps) {
               const isPeak = month.monthKey === peakMonth.monthKey;
 
               return (
-                <g key={month.monthKey}>
+                <g key={month.monthKey} className="group">
                   <rect
                     x={barX}
                     y={CHART_PADDING_TOP}
                     width={barWidth}
                     height={chartInnerHeight}
-                    rx={10}
-                    className="fill-gray-100"
+                    rx={6}
+                    className="fill-slate-50 transition-colors group-hover:fill-slate-100"
                   />
 
                   {barHeight > 0 && (
@@ -122,8 +125,8 @@ export function UsageTrendChart({ history }: UsageTrendChartProps) {
                       y={barY}
                       width={barWidth}
                       height={barHeight}
-                      rx={10}
-                      className={isPeak ? "fill-blue-600" : "fill-blue-500"}
+                      rx={6}
+                      className={isPeak ? "fill-blue-600 transition-colors group-hover:fill-blue-700" : "fill-slate-800 transition-colors group-hover:fill-slate-900"}
                     >
                       <title>{`${month.label}: ${formatNumber(month.totalMessages)} mensajes`}</title>
                     </rect>
@@ -131,9 +134,9 @@ export function UsageTrendChart({ history }: UsageTrendChartProps) {
 
                   <text
                     x={centerX}
-                    y={CHART_PADDING_TOP + chartInnerHeight + 18}
+                    y={CHART_PADDING_TOP + chartInnerHeight + 20}
                     textAnchor="middle"
-                    className="fill-gray-500 text-[11px]"
+                    className="fill-slate-500 text-[10px] font-bold uppercase tracking-widest"
                   >
                     {month.label}
                   </text>

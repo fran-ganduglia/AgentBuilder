@@ -3,7 +3,7 @@ import { validateCronRequest } from "@/lib/workers/auth";
 import { claimEvents, markDone, markFailed } from "@/lib/workers/event-queue";
 import { processDocument } from "@/lib/workers/rag-processor";
 
-export async function POST(request: Request) {
+export async function GET(request: Request) {
   if (!validateCronRequest(request)) {
     return NextResponse.json({ error: "No autorizado" }, { status: 401 });
   }
@@ -48,3 +48,4 @@ export async function POST(request: Request) {
 
   return NextResponse.json({ data: { processed, failed } });
 }
+
