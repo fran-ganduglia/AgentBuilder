@@ -2,6 +2,7 @@
 
 - La decision operativa para Railway ya cambio a modo `Hobby-first`: el repo ahora expone `npm run worker` como entrypoint recomendado para un unico proceso persistente con health server, queue loop y maintenance loop combinados.
 - El repo ya tiene runbook explicito para deploy/cutover de Railway en `RAILWAY_PHASE1_RUNBOOK.md`, incluyendo variables minimas, start commands, health checks, orden de despliegue, pruebas de wake-up/fallback/shutdown y secuencia de apagado de `n8n`.
+- Las rutas `/api/workers/*` ahora exponen headers de compatibilidad (`x-agentbuilder-worker-mode=compatibility`, `x-agentbuilder-worker-scheduler=railway-primary`) para dejar explicito que Railway es el scheduler principal y esos endpoints quedan como legado soportado.
 - Los workers persistentes de Railway ahora exponen `GET /health` de forma explicita en vez de responder OK a cualquier path, manteniendo tambien `/` como alias simple.
 - Ya existe el runtime minimo para salir de `n8n Cloud` en la capa de scheduling: `package.json` suma `npm run worker:queue` y `npm run worker:maintenance`, pensados para correr persistentes en Railway con health HTTP en `$PORT`, `SIGTERM`/`SIGINT` limpios y sin mover los endpoints de entrada fuera de Vercel.
 - `src/lib/db/event-queue.ts` ahora publica `event_queue:notify` en Redis inmediatamente despues del `INSERT` exitoso o de detectar duplicado por `idempotency_key`, respetando que Redis solo despierta y que el ownership real sigue en Postgres.
@@ -16,6 +17,7 @@
 - Gmail ahora persiste referencia estable `thread_id + message_id + rfc_message_id` en el contexto reciente y en los payloads de approval para que los jobs async no dependan de heuristicas conversacionales.
 - Gmail chat ahora puede resolver automaticamente un `thread_id` incompleto antes de una write: si el usuario pide borrador/label/archivar y solo hay `thread_id` reciente, el orquestador hace `read_thread` server-side para obtener `message_id` estable y crea la approval en el mismo turno.
 - La timezone de Google Calendar ahora se resuelve server-side con precedencia `override manual -> metadata detectada de Google -> setup/browser fallback -> UTC`, con hidratacion lazy en `integrations.metadata`.
+- Las approvals y summaries de Google Calendar en chat ya no muestran `startIso/endIso` crudos en UTC para altas y lecturas simples: ahora formatean la ventana en la timezone efectiva del agente para evitar confusion operativa con clientes finales.
 - `/api/agents/[agentId]/run` y `src/lib/chat/non-stream-executor.ts` siguen sin runtime real de Gmail/Calendar en esta etapa.
 - La migracion `supabase/migrations/20260313223000_add_workflow_phase0_foundation.sql` quedo validada como baseline de schema para la `Fase 0` comun.
 - La migracion `supabase/migrations/20260313223000_add_workflow_phase0_foundation.sql` ya fue aplicada tambien en Supabase, asi que la base de schema de `Fase 0` ya no esta solo modelada en repo sino activa en el entorno objetivo.
@@ -35,16 +37,20 @@
 ## Ultimos cambios relevantes
 
 - Se agrego `scripts/worker-service.ts` y el script `npm run worker` para Railway Hobby, consolidando cola y mantenimiento en un solo proceso persistente.
+- `src/lib/chat/google-calendar-tool-orchestrator.ts` ahora resume `create_event`, `check_availability` y `list_events` en horario local formateado segun la timezone efectiva del agente, y `src/lib/chat/google-calendar-tool-orchestrator.test.ts` suma cobertura para evitar regresiones donde reaparezca el ISO UTC en approvals.
+- `src/lib/integrations/refresh-coordination.ts` ahora soporta `onLockError`, ignora errores al liberar locks Redis con TTL y `GET /api/workers/oauth/refresh` usa fallback `refresh_without_lock` para que un timeout de Redis no rompa el refresh preventivo de HubSpot/Google.
 - `README.md` y `RAILWAY_PHASE1_RUNBOOK.md` ahora dejan `worker` como despliegue recomendado; `worker:queue` y `worker:maintenance` quedan como fallback o futura separacion si el uso real lo justifica.
 - Se agrego `RAILWAY_PHASE1_RUNBOOK.md` con el checklist concreto de deploy y cutover de la Fase 1 hacia Railway.
 - Se revalido el checklist de despliegue actual del repo: `Vercel` queda para UI/API/OAuth/webhooks y los procesos persistentes `worker:queue` + `worker:maintenance` siguen yendo por `Railway`, con `APP_BASE_URL` apuntando siempre a la URL publica real de Vercel.
 - `scripts/worker-queue.ts` y `scripts/worker-maintenance.ts` ahora responden `200` en `/health` y `404` fuera de `/health` o `/`, para que Railway tenga una ruta de health explicita.
+- Se unifico la semantica de compatibilidad de `/api/workers/*`: respuestas `401`, `204`, `200` y `500` ya cargan headers que anuncian modo legado y scheduler primario en Railway; ademas `webhooks` vacio paso a `204` para alinearse con `events` y `rag`.
 - `.env.local.example` deja de presentar `CRON_SECRET` como variable exclusiva de Vercel Cron y la documenta como auth/scheduling general de workers.
 - Se implemento la Fase 1 minima del plan de salida de `n8n Cloud`: nuevos entrypoints Railway `worker:queue` y `worker:maintenance`, health checks HTTP livianos, shutdown limpio y contrato `event_queue insert -> Redis publish`.
 - `worker:queue` no introduce negocio nuevo: ejecuta las mismas rutas `GET /api/workers/events`, `GET /api/workers/rag` y `GET /api/workers/webhooks` desde un proceso persistente, con despertar por `event_queue:notify` y sweep de respaldo cada 30 segundos.
 - `worker:maintenance` tampoco reescribe processors: agenda internamente las rutas periodicas ya existentes (`approvals`, `oauth/refresh`, `deletion`, `integrations`, `conversations/reengagement`, `whatsapp/followup`, `whatsapp/broadcast`) para que Railway reemplace al scheduler de `n8n` por fases.
 - Se agrego `src/lib/workers/queue-notify.ts` para manejar `PUBLISH` y `SUBSCRIBE` Redis sin sumar dependencias, y `src/lib/db/event-queue.ts` centraliza el wake-up para todos los callers actuales de `enqueueEvent`.
 - Verificacion completada para esta slice: `npm.cmd run typecheck` y `npm.cmd run lint` OK.
+- Verificacion puntual de esta correccion UX: `npm.cmd run test:ts -- src/lib/chat/google-calendar-tool-orchestrator.test.ts` OK.
 - Se agrego un kill switch global de workers via `WORKERS_ENABLED`: todas las rutas `/api/workers/*` ahora responden `204` sin procesar cuando la flag esta en `false`, y `src/lib/agents/n8n-activation.ts` ya no reactiva workflows de `n8n` mientras el switch siga apagado.
 - Se sumo el script `scripts/toggle-n8n-workflows.mjs` mas los comandos `npm run workers:pause` y `npm run workers:resume` para desactivar/activar por API todos los workflows JSON importados en `n8n`, pensado para cortar rapido ejecuciones del trial sin entrar manualmente a la UI.
 - En este entorno local ya se ejecuto `npm.cmd run workers:pause`: quedaron desactivados los workflows remotos de `n8n` visibles por API (`Conversation Reengagement`, `CRM Sync HubSpot/Salesforce`, `Deletion Worker`, `Event Queue Worker`, `Integration Health Worker`, `OAuth Token Refresh`, `RAG Processor`, `Webhook Delivery Worker`, `WhatsApp Broadcast` y `WhatsApp Follow Up`), y `Approval Expiration Worker` se reporto como no importado en esa instancia.
@@ -149,6 +155,7 @@
 - Desplegar `worker:queue` y `worker:maintenance` en Railway con las mismas credenciales server-side de Supabase/Redis que hoy usa Vercel, y verificar que el health check golpee el `$PORT` correcto de cada proceso.
 - Con `worker:queue` arriba, pausar en `n8n Cloud` al menos `rag-processor`, `event-queue-worker` y `webhook-delivery` para cortar consumo duplicado y validar que la cola siga drenando solo desde Railway.
 - Verificar en vivo el contrato `INSERT event_queue -> PUBLISH event_queue:notify`: un evento nuevo debe despertarse sin esperar el sweep, y ante falla Redis debe recuperarse en el siguiente sweep de 30s.
+- Verificar en staging/produccion que cualquier llamada de compatibilidad a `/api/workers/*` devuelva los headers `x-agentbuilder-worker-mode=compatibility` y `x-agentbuilder-worker-scheduler=railway-primary`, para que observabilidad y runbooks detecten rapido si el cutover quedo incompleto.
 - Validar shutdown limpio en Railway enviando `SIGTERM` durante un batch real y confirmar que no reclame nuevos jobs mientras termina el lote en curso.
 - Si el objetivo es bajar consumo del trial de `n8n` ya mismo, no alcanza con `WORKERS_ENABLED=false`: hace falta ejecutar `npm run workers:pause` en un entorno con acceso a `N8N_BASE_URL` + `N8N_API_KEY` validos para desactivar los workflows remotos.
 - Regenerar `src/types/database.ts` si los tipos locales todavia no fueron refrescados contra el entorno Supabase ya migrado.
@@ -179,9 +186,11 @@
 
 - El modo `Hobby-first` reduce costo y complejidad operativa, pero concentra cola y maintenance en un solo proceso; si la carga real crece o RAG bloquea demasiado, habra que volver a separar servicios.
 - La Fase 1 nueva reutiliza route handlers Next dentro de scripts Node; paso `typecheck`/`lint`, pero todavia falta la validacion operativa en Railway para confirmar que `next/server` y las dependencias server-only del repo se comportan igual fuera del proceso web.
+- Los headers de compatibilidad mejoran trazabilidad del cutover, pero no fuerzan por si solos que nadie siga usando `n8n`; la salida real sigue dependiendo de pausar los workflows remotos y validar logs en Railway.
 - `worker:queue` hoy orquesta tres batches separados (`events`, `rag`, `webhooks`) sobre la misma `event_queue`; funcionalmente sirve para la migracion, pero mas adelante conviene consolidar ese dispatch en una libreria comun para reducir acoplamiento a route handlers legacy.
 - `worker:maintenance` migra a Railway solo los jobs periodicos que ya existen en repo; followups/broadcasts futuros basados en `due_at` o `next_run_at` todavia requeriran endurecer contratos de claim/idempotencia cuando salgan del modo actual.
 - `WORKERS_ENABLED=false` corta procesamiento server-side y evita reactivaciones automaticas, pero por si solo no impide que `n8n` siga contando ejecuciones programadas; para eso hay que desactivar los workflows remotos.
+- Redis sigue siendo necesario para coordinar wake-ups y locks, pero el job `oauth-refresh` ya no trata un `Tiempo de espera agotado en Redis` como si fuera un fallo propio del provider mientras el refresh pueda ejecutarse igual.
 - La base de automatizacion real ya tiene schema Phase 0 aplicado en Supabase y cierre de scheduler definido en `n8n`; lo pendiente ya no es fundacional sino operacion/QA y expansion por ecosistema.
 - El repo ya tiene `event_queue`, budgets y notificaciones, pero todavia como piezas parciales; falta unificarlas sin mezclar approvals con notificaciones genericas ni registrar consumo solo despues de pegarle al proveedor.
 - A nivel repo y decision operativa, la `Fase 0` comun queda cerrada: approvals con expiracion definida, inbox y badge, engine async, retries, compensacion inicial, allocator previo, idempotencia por step, schema aplicado y scheduler oficial en `n8n`. Lo que sigue ahora es QA operativa, instrumentacion y expansion por ecosistema sobre esa base.

@@ -46,7 +46,7 @@ async function runSimpleExecutionTest(): Promise<void> {
       metadataWrites.push(patch as Record<string, unknown>);
       return { data: null, error: null };
     },
-    planGoogleCalendarToolAction: () => ({
+    planGoogleCalendarToolAction: async () => ({
       kind: "action",
       requiresConfirmation: false,
       input: {
@@ -140,7 +140,7 @@ async function runAmbiguousQueryTest(): Promise<void> {
     readRecentCrmToolContext: () => null,
     isPendingToolActionExpired: () => false,
     updateConversationMetadata: async () => ({ data: null, error: null }),
-    planGoogleCalendarToolAction: () => ({
+    planGoogleCalendarToolAction: async () => ({
       kind: "missing_data",
       message: "Necesito una fecha mas precisa.",
     }),
@@ -217,7 +217,7 @@ async function runReauthGuidanceTest(): Promise<void> {
     readRecentCrmToolContext: () => null,
     isPendingToolActionExpired: () => false,
     updateConversationMetadata: async () => ({ data: null, error: null }),
-    planGoogleCalendarToolAction: () => ({
+    planGoogleCalendarToolAction: async () => ({
       kind: "respond",
     }),
     resolveGoogleCalendarAgentTimezone: () => "UTC",
@@ -302,7 +302,7 @@ async function runApprovalSummaryIncludesResolvedEventTest(): Promise<void> {
     readRecentCrmToolContext: () => null,
     isPendingToolActionExpired: () => false,
     updateConversationMetadata: async () => ({ data: null, error: null }),
-    planGoogleCalendarToolAction: () => ({
+    planGoogleCalendarToolAction: async () => ({
       kind: "action",
       requiresConfirmation: true,
       input: {
@@ -401,11 +401,115 @@ async function runApprovalSummaryIncludesResolvedEventTest(): Promise<void> {
   assert.deepEqual(payloadSummary.action_input?.attendeeEmails, ["ops@example.com"]);
 }
 
+async function runCreateEventApprovalSummaryUsesLocalTimezoneTest(): Promise<void> {
+  const pendingSummaries: string[] = [];
+
+  const orchestrator = createGoogleCalendarChatOrchestrator({
+    readAgentSetupState: () => null,
+    resolveEffectiveAgentPrompt: () => ({
+      effectivePrompt: "prompt",
+      syncMode: "custom",
+      matchedVariant: null,
+      hadConflictCleanup: false,
+      hasPromptConflict: false,
+      promptConflictSnippet: null,
+    }),
+    getGoogleAgentToolRuntime: async () => ({
+      data: {
+        ...buildRuntime(),
+        config: {
+          provider: "google",
+          surface: "google_calendar",
+          allowed_actions: ["create_event"],
+        },
+      } as never,
+      error: null,
+    }),
+    assertGoogleCalendarRuntimeUsable: (runtime) => ({ data: runtime as never, error: null }),
+    readRecentCrmToolContext: () => null,
+    isPendingToolActionExpired: () => false,
+    updateConversationMetadata: async () => ({ data: null, error: null }),
+    planGoogleCalendarToolAction: async () => ({
+      kind: "action",
+      requiresConfirmation: true,
+      input: {
+        action: "create_event",
+        title: "videollamada",
+        startIso: "2026-03-15T13:00:00.000Z",
+        endIso: "2026-03-15T14:00:00.000Z",
+        timezone: "America/Argentina/Buenos_Aires",
+      },
+    }),
+    resolveGoogleCalendarAgentTimezone: () => "America/Argentina/Buenos_Aires",
+    resolveGoogleCalendarIntegrationTimezone: async () => ({
+      data: {
+        primaryTimezone: "America/Argentina/Buenos_Aires",
+        userTimezone: "America/Argentina/Buenos_Aires",
+        detectedTimezone: "America/Argentina/Buenos_Aires",
+      },
+      error: null,
+    }),
+    assertGoogleCalendarActionEnabled: (runtime) => ({ data: runtime as never, error: null }),
+    executeGoogleCalendarReadTool: async () => ({ data: null, error: "unused" }),
+    toGoogleCalendarRuntimeSafeError: (error) => ({
+      ok: false,
+      surface: "google_calendar",
+      code: "provider_error",
+      message: error,
+      retryable: true,
+    }),
+    formatGoogleCalendarReadResultForPrompt: () => "unused",
+    createRecentCrmToolContext: (_provider, context) => ({
+      provider: "google_calendar",
+      context,
+      recordedAt: "2026-03-13T12:00:00.000Z",
+    }),
+    readPendingCrmAction: () => null,
+    createPendingCrmAction: (input) => {
+      pendingSummaries.push(input.summary);
+      return {
+        provider: input.provider,
+        tool: input.toolName,
+        integrationId: input.integrationId,
+        initiatedBy: input.initiatedBy,
+        summary: input.summary,
+        actionInput: input.actionInput,
+        createdAt: "2026-03-13T12:00:00.000Z",
+        expiresAt: "2026-03-13T12:10:00.000Z",
+      };
+    },
+    createApprovalRequest: async () => ({
+      data: {
+        approvalItemId: "approval-1",
+        workflowRunId: "run-1",
+        workflowStepId: "step-1",
+        expiresAt: "2026-03-13T12:10:00.000Z",
+      },
+      error: null,
+    }),
+  });
+
+  const result = await orchestrator({
+    agent: { id: "agent-1", system_prompt: "prompt" } as never,
+    conversation: { id: "conversation-1", metadata: {} } as never,
+    organizationId: "org-1",
+    userId: "00000000-0000-0000-0000-000000000001",
+    latestUserMessage: "Agendame una videollamada manana a las 10",
+    recentMessages: [{ role: "user", content: "Agendame una videollamada manana a las 10" }],
+  });
+
+  assert.equal(result.kind, "respond_now");
+  assert.equal(pendingSummaries.length, 1);
+  assert.match(pendingSummaries[0], /10:00/);
+  assert.doesNotMatch(pendingSummaries[0], /2026-03-15T13:00:00\.000Z/);
+}
+
 async function main(): Promise<void> {
   await runSimpleExecutionTest();
   await runAmbiguousQueryTest();
   await runReauthGuidanceTest();
   await runApprovalSummaryIncludesResolvedEventTest();
+  await runCreateEventApprovalSummaryUsesLocalTimezoneTest();
   console.log("google-calendar-tool-orchestrator checks passed");
 }
 

@@ -334,7 +334,7 @@ export function createGoogleCalendarChatOrchestrator(
       };
     }
 
-    const decision = deps.planGoogleCalendarToolAction({
+    const decision = await deps.planGoogleCalendarToolAction({
       config: usableRuntime.data.config,
       latestUserMessage: input.latestUserMessage,
       recentMessages: input.recentMessages,
@@ -496,7 +496,7 @@ function buildGoogleCalendarConfirmationSummary(
   input: ExecuteGoogleCalendarToolInput
 ): string {
   if (input.action === "create_event") {
-    return `Crear el evento "${input.title}" entre ${input.startIso} y ${input.endIso} (${input.timezone}).`;
+    return `Crear el evento "${input.title}" entre ${formatGoogleCalendarIso(input.startIso, input.timezone)} y ${formatGoogleCalendarIso(input.endIso, input.timezone)} (${input.timezone}).`;
   }
 
   if (input.action === "reschedule_event") {
@@ -508,10 +508,10 @@ function buildGoogleCalendarConfirmationSummary(
   }
 
   if (input.action === "check_availability") {
-    return `Consultar disponibilidad entre ${input.startIso} y ${input.endIso} (${input.timezone}).`;
+    return `Consultar disponibilidad entre ${formatGoogleCalendarIso(input.startIso, input.timezone)} y ${formatGoogleCalendarIso(input.endIso, input.timezone)} (${input.timezone}).`;
   }
 
-  return `Listar eventos entre ${input.startIso} y ${input.endIso} (${input.timezone}).`;
+  return `Listar eventos entre ${formatGoogleCalendarIso(input.startIso, input.timezone)} y ${formatGoogleCalendarIso(input.endIso, input.timezone)} (${input.timezone}).`;
 }
 
 export const orchestrateGoogleCalendarForChat =
