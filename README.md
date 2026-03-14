@@ -46,7 +46,7 @@ Variables operativas minimas para produccion:
 La arquitectura operativa actual queda partida entre `Vercel` y `Railway`:
 
 - `Vercel` mantiene UI, API Routes, webhooks entrantes e inserts en `event_queue`
-- `Railway` corre procesos persistentes `worker:queue` y `worker:maintenance`
+- `Railway` corre un unico proceso persistente `worker` en modo Hobby-first
 - `event_queue` sigue siendo la source of truth; Redis solo despierta al worker por `event_queue:notify`
 
 Kill switch operativo:
@@ -55,17 +55,17 @@ Kill switch operativo:
 - si tambien queres dejar de consumir ejecuciones del trial de `n8n`, correr `npm run workers:pause`
 - para reactivar temporalmente los workflows importados en `n8n`, correr `npm run workers:resume`
 
-Procesos Railway:
+Proceso Railway recomendado:
 
-- `npm run worker:queue`
-- `npm run worker:maintenance`
+- `npm run worker`
 - configurar health check en `/health`
 
 Contrato operativo minimo:
 
 - al insertar un evento asincrono, el backend debe hacer `INSERT event_queue` y luego `PUBLISH event_queue:notify`
-- `worker:queue` escucha `event_queue:notify` y ademas ejecuta un sweep completo cada 30 segundos
-- ambos procesos exponen `GET /health` en `$PORT` y soportan `SIGTERM`/`SIGINT`
+- `worker` corre en paralelo el queue loop y los maintenance jobs con frecuencias gruesas
+- `worker` escucha `event_queue:notify` y ademas ejecuta un sweep completo cada 30 segundos
+- el proceso expone `GET /health` en `$PORT` y soporta `SIGTERM`/`SIGINT`
 - las rutas `/api/workers/*` quedan como compatibilidad/legado; Railway pasa a ser el scheduler principal
 
 Runbook concreto de despliegue y cutover: `RAILWAY_PHASE1_RUNBOOK.md`
@@ -73,7 +73,7 @@ Runbook concreto de despliegue y cutover: `RAILWAY_PHASE1_RUNBOOK.md`
 `n8n` queda como legado transitorio:
 
 - `event-queue-worker.json`, `rag-processor.json` y `webhook-delivery.json` ya pueden apagarse al mover la carga a Railway
-- `approval-expiration-worker.json` e `integration-health.json` pueden mantenerse mientras se valida `worker:maintenance`
+- los jobs de maintenance restantes pueden migrarse al mismo servicio `worker` con validacion gradual
 - los JSON de `n8n/workflows` siguen siendo utiles como fallback operativo durante la migracion
 
 En desarrollo local, si `n8n` corre en Docker y la app Next corre nativa con `npm run dev`, usar:

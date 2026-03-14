@@ -1,5 +1,6 @@
 ## Estado actual
 
+- La decision operativa para Railway ya cambio a modo `Hobby-first`: el repo ahora expone `npm run worker` como entrypoint recomendado para un unico proceso persistente con health server, queue loop y maintenance loop combinados.
 - El repo ya tiene runbook explicito para deploy/cutover de Railway en `RAILWAY_PHASE1_RUNBOOK.md`, incluyendo variables minimas, start commands, health checks, orden de despliegue, pruebas de wake-up/fallback/shutdown y secuencia de apagado de `n8n`.
 - Los workers persistentes de Railway ahora exponen `GET /health` de forma explicita en vez de responder OK a cualquier path, manteniendo tambien `/` como alias simple.
 - Ya existe el runtime minimo para salir de `n8n Cloud` en la capa de scheduling: `package.json` suma `npm run worker:queue` y `npm run worker:maintenance`, pensados para correr persistentes en Railway con health HTTP en `$PORT`, `SIGTERM`/`SIGINT` limpios y sin mover los endpoints de entrada fuera de Vercel.
@@ -33,7 +34,10 @@
 
 ## Ultimos cambios relevantes
 
+- Se agrego `scripts/worker-service.ts` y el script `npm run worker` para Railway Hobby, consolidando cola y mantenimiento en un solo proceso persistente.
+- `README.md` y `RAILWAY_PHASE1_RUNBOOK.md` ahora dejan `worker` como despliegue recomendado; `worker:queue` y `worker:maintenance` quedan como fallback o futura separacion si el uso real lo justifica.
 - Se agrego `RAILWAY_PHASE1_RUNBOOK.md` con el checklist concreto de deploy y cutover de la Fase 1 hacia Railway.
+- Se revalido el checklist de despliegue actual del repo: `Vercel` queda para UI/API/OAuth/webhooks y los procesos persistentes `worker:queue` + `worker:maintenance` siguen yendo por `Railway`, con `APP_BASE_URL` apuntando siempre a la URL publica real de Vercel.
 - `scripts/worker-queue.ts` y `scripts/worker-maintenance.ts` ahora responden `200` en `/health` y `404` fuera de `/health` o `/`, para que Railway tenga una ruta de health explicita.
 - `.env.local.example` deja de presentar `CRON_SECRET` como variable exclusiva de Vercel Cron y la documenta como auth/scheduling general de workers.
 - Se implemento la Fase 1 minima del plan de salida de `n8n Cloud`: nuevos entrypoints Railway `worker:queue` y `worker:maintenance`, health checks HTTP livianos, shutdown limpio y contrato `event_queue insert -> Redis publish`.
@@ -140,6 +144,8 @@
 
 ## Pendientes inmediatos
 
+- Desplegar `worker` en Railway con las mismas credenciales server-side de Supabase/Redis que hoy usa Vercel, y verificar que el health check golpee `GET /health` en el `$PORT` correcto.
+- Con `worker` arriba, pausar en `n8n Cloud` al menos `rag-processor`, `event-queue-worker` y `webhook-delivery` para cortar consumo duplicado y validar que la cola siga drenando solo desde Railway.
 - Desplegar `worker:queue` y `worker:maintenance` en Railway con las mismas credenciales server-side de Supabase/Redis que hoy usa Vercel, y verificar que el health check golpee el `$PORT` correcto de cada proceso.
 - Con `worker:queue` arriba, pausar en `n8n Cloud` al menos `rag-processor`, `event-queue-worker` y `webhook-delivery` para cortar consumo duplicado y validar que la cola siga drenando solo desde Railway.
 - Verificar en vivo el contrato `INSERT event_queue -> PUBLISH event_queue:notify`: un evento nuevo debe despertarse sin esperar el sweep, y ante falla Redis debe recuperarse en el siguiente sweep de 30s.
@@ -171,6 +177,7 @@
 
 ## Riesgos o bloqueos
 
+- El modo `Hobby-first` reduce costo y complejidad operativa, pero concentra cola y maintenance en un solo proceso; si la carga real crece o RAG bloquea demasiado, habra que volver a separar servicios.
 - La Fase 1 nueva reutiliza route handlers Next dentro de scripts Node; paso `typecheck`/`lint`, pero todavia falta la validacion operativa en Railway para confirmar que `next/server` y las dependencias server-only del repo se comportan igual fuera del proceso web.
 - `worker:queue` hoy orquesta tres batches separados (`events`, `rag`, `webhooks`) sobre la misma `event_queue`; funcionalmente sirve para la migracion, pero mas adelante conviene consolidar ese dispatch en una libreria comun para reducir acoplamiento a route handlers legacy.
 - `worker:maintenance` migra a Railway solo los jobs periodicos que ya existen en repo; followups/broadcasts futuros basados en `due_at` o `next_run_at` todavia requeriran endurecer contratos de claim/idempotencia cuando salgan del modo actual.

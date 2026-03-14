@@ -9,6 +9,7 @@
     "start": "next start",
     "lint": "eslint . --max-warnings=0",
     "typecheck": "tsc --noEmit",
+    "worker": "node --env-file=.env.local --experimental-strip-types --experimental-loader ./scripts/ts-path-loader.mjs ./scripts/worker-service.ts",
     "worker:queue": "node --env-file=.env.local --experimental-strip-types --experimental-loader ./scripts/ts-path-loader.mjs ./scripts/worker-queue.ts",
     "worker:maintenance": "node --env-file=.env.local --experimental-strip-types --experimental-loader ./scripts/ts-path-loader.mjs ./scripts/worker-maintenance.ts",
     "workers:pause": "node --env-file=.env.local ./scripts/toggle-n8n-workflows.mjs deactivate",
