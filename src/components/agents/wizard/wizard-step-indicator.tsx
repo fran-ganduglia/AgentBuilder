@@ -3,9 +3,11 @@ type WizardStepIndicatorProps = {
 };
 
 const STEPS = [
-  "Integracion",
-  "Comportamiento",
-  "Setup del canal",
+  "Workflow",
+  "Instancia",
+  "Integraciones",
+  "Reglas",
+  "Modelo",
   "Revision",
 ] as const;
 
@@ -49,4 +51,3 @@ export function WizardStepIndicator({ currentStep }: WizardStepIndicatorProps) {
     </div>
   );
 }
-

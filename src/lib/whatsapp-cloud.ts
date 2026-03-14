@@ -43,6 +43,10 @@ export type WhatsAppSource = {
   wabaId: string;
 };
 
+export type WhatsAppTextMessageDelivery = {
+  providerMessageId: string | null;
+};
+
 function getSafeErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "unknown";
 }
@@ -159,6 +163,85 @@ export async function getWhatsAppSourceById(
   return sources.find((source) => source.phoneNumberId === phoneNumberId) ?? null;
 }
 
+export async function sendWhatsAppTextMessage(input: {
+  accessToken: string;
+  phoneNumberId: string;
+  to: string;
+  body: string;
+  context?: WhatsAppProviderContext;
+}): Promise<WhatsAppTextMessageDelivery> {
+  const executeRequest = async (): Promise<WhatsAppTextMessageDelivery> => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), WHATSAPP_REQUEST_TIMEOUT_MS);
+
+    try {
+      const response = await fetch(`${WHATSAPP_GRAPH_BASE_URL}/${input.phoneNumberId}/messages`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${input.accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          messaging_product: "whatsapp",
+          recipient_type: "individual",
+          to: input.to,
+          type: "text",
+          text: {
+            preview_url: false,
+            body: input.body,
+          },
+        }),
+        signal: controller.signal,
+        cache: "no-store",
+      });
+
+      const payload = (await response.json()) as {
+        messages?: Array<{ id?: string }>;
+        error?: { message?: string };
+      };
+
+      if (!response.ok) {
+        throw new ProviderRequestError({
+          provider: "whatsapp",
+          message: payload.error?.message || "Meta Cloud API rechazo el envio del mensaje",
+          statusCode: response.status,
+          requestId: response.headers.get("x-fb-request-id"),
+          retryAfterSeconds: parseRetryAfter(response.headers.get("retry-after")),
+        });
+      }
+
+      return {
+        providerMessageId: payload.messages?.[0]?.id ?? null,
+      };
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") {
+        throw new ProviderRequestError({
+          provider: "whatsapp",
+          message: "Meta Cloud API excedio el tiempo maximo de respuesta",
+          statusCode: 504,
+        });
+      }
+
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
+  };
+
+  if (!input.context) {
+    return executeRequest();
+  }
+
+  return performProviderRequest(
+    {
+      ...input.context,
+      provider: "whatsapp",
+      onBudgetExceededMessage: "Se alcanzo temporalmente el presupuesto operativo configurado para WhatsApp.",
+    },
+    executeRequest
+  );
+}
+
 export function buildWhatsAppAccessTokenHint(accessToken: string): string {
   return accessToken.length >= 4 ? `***${accessToken.slice(-4)}` : "***";
 }
@@ -168,6 +251,7 @@ export function buildWhatsAppSourceMetadata(source: WhatsAppSource): Record<stri
     display_phone_number: source.displayPhoneNumber,
     waba_id: source.wabaId,
     read_only: true,
+    auto_reply_mode: "worker",
   };
 
   if (source.verifiedName) {

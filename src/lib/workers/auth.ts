@@ -1,5 +1,6 @@
 import "server-only";
 
+import { NextResponse } from "next/server";
 import { env } from "@/lib/utils/env";
 
 export function validateCronRequest(request: Request): boolean {
@@ -14,4 +15,17 @@ export function validateCronRequest(request: Request): boolean {
     : authHeader;
 
   return token === env.CRON_SECRET;
+}
+
+export function areWorkersEnabled(): boolean {
+  return env.WORKERS_ENABLED;
+}
+
+export function getWorkersDisabledResponse(): NextResponse {
+  return new NextResponse(null, {
+    status: 204,
+    headers: {
+      "x-agentbuilder-workers-disabled": "true",
+    },
+  });
 }

@@ -1,15 +1,25 @@
 import { after, NextResponse } from "next/server";
 import { z } from "zod";
-import { resolveConversationChatMode } from "@/lib/chat/conversation-metadata";
-import { chatPreviewConfigSchema } from "@/lib/chat/session-draft";
-import { orchestrateSalesforceForChat } from "@/lib/chat/salesforce-tool-orchestrator";
-import {
-  detectSalesforcePromptConflict,
-  stripSalesforcePromptConflicts,
-} from "@/lib/integrations/salesforce-selection";
-import { isWhatsAppChannelAgent } from "@/lib/agents/agent-setup-state";
+import { setupStateExpectsGmailIntegration } from "@/lib/agents/gmail-agent-integration";
+import { setupStateExpectsGoogleCalendarIntegration } from "@/lib/agents/google-calendar-agent-integration";
+import { isHubSpotTemplateId, isSalesforceTemplateId } from "@/lib/agents/agent-templates";
+import { resolveEffectiveAgentPrompt } from "@/lib/agents/effective-prompt";
+import { readAgentSetupState } from "@/lib/agents/agent-setup-state";
 import { assertAgentAccess } from "@/lib/auth/agent-access";
 import { getSession } from "@/lib/auth/get-session";
+import { resolveConversationChatMode } from "@/lib/chat/conversation-metadata";
+import {
+  buildChatFormGuidance,
+  type ChatFormAction,
+} from "@/lib/chat/inline-forms";
+import { maybeActivateChatForm } from "@/lib/chat/chat-form-server";
+import {
+  buildGmailPromptInjectionGuardrail,
+  orchestrateGoogleGmailForChat,
+} from "@/lib/chat/google-gmail-tool-orchestrator";
+import { orchestrateGoogleCalendarForChat } from "@/lib/chat/google-calendar-tool-orchestrator";
+import { orchestrateHubSpotForChat } from "@/lib/chat/hubspot-tool-orchestrator";
+import { orchestrateSalesforceForChat } from "@/lib/chat/salesforce-tool-orchestrator";
 import { hasReadyDocuments } from "@/lib/db/agent-documents";
 import { getConversationById, getOrCreateConversation } from "@/lib/db/conversations";
 import { insertMessage, insertMessageWithServiceRole, listMessages } from "@/lib/db/messages";
@@ -18,7 +28,8 @@ import { formatChunksAsContext, searchChunks } from "@/lib/db/rag";
 import { recordUsage } from "@/lib/db/usage-writer";
 import { generateEmbedding } from "@/lib/llm/embeddings";
 import { LiteLLMError, sendStreamingChatCompletion } from "@/lib/llm/litellm";
-import { getJsonValue, incrementRateLimit, setJsonValue } from "@/lib/redis";
+import { incrementRateLimit } from "@/lib/redis";
+import { getGoogleAgentToolRuntime } from "@/lib/integrations/google-agent-runtime";
 import { createServiceSupabaseClient } from "@/lib/supabase/service";
 import {
   parseJsonRequestBody,
@@ -29,12 +40,10 @@ import type { Tables } from "@/types/database";
 
 const CHAT_RATE_LIMIT_MAX_REQUESTS = 30;
 const CHAT_RATE_LIMIT_WINDOW_SECONDS = 60;
-const CHAT_MEMORY_TTL_SECONDS = 6 * 60 * 60;
 const CHAT_MEMORY_MAX_MESSAGES = 20;
 const CHAT_RAG_TIMEOUT_MS = 1200;
-const CHAT_REDIS_TIMEOUT_MS = 150;
-const CHAT_REQUEST_MODES = ["sandbox", "live_local"] as const;
-const CHAT_EXECUTION_MODES = ["saved", "preview"] as const;
+const CHAT_RATE_LIMIT_REDIS_TIMEOUT_MS = 900;
+const CHAT_OBSERVABILITY_SLOW_REQUEST_MS = 5000;
 
 const chatSchema = z.object({
   agentId: z.string().uuid("agentId debe ser un UUID valido"),
@@ -43,9 +52,6 @@ const chatSchema = z.object({
     .string()
     .min(1, "El mensaje no puede estar vacio")
     .max(4000, "El mensaje no puede superar 4000 caracteres"),
-  chatMode: z.enum(CHAT_REQUEST_MODES).default("live_local"),
-  mode: z.enum(CHAT_EXECUTION_MODES).default("saved"),
-  preview: chatPreviewConfigSchema.optional(),
 });
 
 type PlanLimits = Pick<Tables<"plans">, "max_messages_month">;
@@ -55,8 +61,7 @@ type ChatMessage = {
   role: "user" | "assistant";
   content: string;
 };
-type ChatRequestMode = (typeof CHAT_REQUEST_MODES)[number];
-type ChatExecutionMode = (typeof CHAT_EXECUTION_MODES)[number];
+type ChatRequestMode = "sandbox" | "live_local";
 
 type ConversationResult = {
   data: Conversation | null;
@@ -70,7 +75,19 @@ type ChatExecutionConfig = {
   llmTemperature: number;
   maxTokens: number;
   llmProvider: string;
-  executionMode: ChatExecutionMode;
+};
+
+type ChatStageTimings = {
+  historyMs: number | null;
+  ragMs: number | null;
+  persistUserMessageMs: number | null;
+  salesforceOrchestrationMs: number | null;
+  hubspotOrchestrationMs: number | null;
+  gmailOrchestrationMs: number | null;
+  googleCalendarOrchestrationMs: number | null;
+  googleRuntimeChecksMs: number | null;
+  promptResolutionMs: number | null;
+  llmReadyMs: number | null;
 };
 
 function getSafeChatErrorMessage(error: LiteLLMError, model: string): string {
@@ -101,30 +118,8 @@ function buildChatRateLimitKey(organizationId: string): string {
   return `rate_limit:chat:${organizationId}`;
 }
 
-function buildConversationMemoryKey(
-  organizationId: string,
-  conversationId: string
-): string {
-  return `chat_memory:${organizationId}:${conversationId}`;
-}
-
 function trimChatMemory(messages: ChatMessage[]): ChatMessage[] {
   return messages.slice(-CHAT_MEMORY_MAX_MESSAGES);
-}
-
-function isChatMessage(value: unknown): value is ChatMessage {
-  if (!value || typeof value !== "object") {
-    return false;
-  }
-
-  const role = Reflect.get(value, "role");
-  const content = Reflect.get(value, "content");
-
-  return (
-    (role === "user" || role === "assistant") &&
-    typeof content === "string" &&
-    content.length > 0
-  );
 }
 
 function createTimeoutError(label: string): Error {
@@ -173,38 +168,25 @@ function canUseSandbox(role: Role): boolean {
   return role === "admin" || role === "editor";
 }
 
-function getAllowedStatuses(chatMode: ChatRequestMode, role: Role): Array<"draft" | "active"> {
-  if (chatMode === "sandbox" && canUseSandbox(role)) {
-    return ["draft", "active"];
-  }
-
-  return ["active"];
+function getAllowedStatuses(role: Role): Array<"draft" | "active"> {
+  return canUseSandbox(role) ? ["draft", "active"] : ["active"];
 }
 
 function resolveExecutionConfig(
-  agent: ConversationResult extends never ? never : { system_prompt: string; llm_model: string; llm_temperature: number | null; max_tokens: number | null; llm_provider: string },
-  chatMode: ChatRequestMode,
-  mode: ChatExecutionMode,
-  preview?: z.infer<typeof chatPreviewConfigSchema>
-): ChatExecutionConfig {
-  if (chatMode === "sandbox" && mode === "preview" && preview) {
-    return {
-      systemPrompt: preview.systemPrompt,
-      llmModel: preview.llmModel,
-      llmTemperature: preview.llmTemperature,
-      maxTokens: preview.maxTokens ?? agent.max_tokens ?? 1000,
-      llmProvider: resolveLlmProvider(preview.llmModel),
-      executionMode: "preview",
-    };
+  agent: {
+    system_prompt: string;
+    llm_model: string;
+    llm_temperature: number | null;
+    max_tokens: number | null;
+    llm_provider: string;
   }
-
+): ChatExecutionConfig {
   return {
     systemPrompt: agent.system_prompt,
     llmModel: agent.llm_model,
     llmTemperature: agent.llm_temperature ?? 0.7,
     maxTokens: agent.max_tokens ?? 1000,
-    llmProvider: agent.llm_provider,
-    executionMode: "saved",
+    llmProvider: agent.llm_provider || resolveLlmProvider(agent.llm_model),
   };
 }
 
@@ -215,7 +197,7 @@ async function isChatRateLimited(organizationId: string): Promise<boolean> {
         buildChatRateLimitKey(organizationId),
         CHAT_RATE_LIMIT_WINDOW_SECONDS
       ),
-      CHAT_REDIS_TIMEOUT_MS,
+      CHAT_RATE_LIMIT_REDIS_TIMEOUT_MS,
       "chat.rate_limit"
     );
 
@@ -227,63 +209,6 @@ async function isChatRateLimited(organizationId: string): Promise<boolean> {
     });
 
     return false;
-  }
-}
-
-async function loadConversationMemory(
-  organizationId: string,
-  conversationId: string
-): Promise<ChatMessage[] | null> {
-  try {
-    const cachedMessages = await withTimeout(
-      getJsonValue<unknown[]>(buildConversationMemoryKey(organizationId, conversationId)),
-      CHAT_REDIS_TIMEOUT_MS,
-      "chat.memory_read"
-    );
-
-    if (!cachedMessages) {
-      return null;
-    }
-
-    const validMessages = cachedMessages.filter(isChatMessage);
-
-    if (validMessages.length !== cachedMessages.length) {
-      throw new Error("Redis devolvio historial de chat invalido");
-    }
-
-    return trimChatMemory(validMessages);
-  } catch (error) {
-    console.error("chat.memory_read_error", {
-      conversationId,
-      organizationId,
-      error: error instanceof Error ? error.message : "unknown",
-    });
-
-    return null;
-  }
-}
-
-async function persistConversationMemory(
-  organizationId: string,
-  conversationId: string,
-  messages: ChatMessage[]
-): Promise<void> {
-  try {
-    await withTimeout(
-      setJsonValue(
-        buildConversationMemoryKey(organizationId, conversationId),
-        trimChatMemory(messages),
-        CHAT_MEMORY_TTL_SECONDS
-      ),
-      CHAT_REDIS_TIMEOUT_MS,
-      "chat.memory_write"
-    );
-  } catch (error) {
-    console.error("chat.memory_write_error", {
-      conversationId,
-      organizationId,
-      error: error instanceof Error ? error.message : "unknown",
-    });
   }
 }
 
@@ -435,12 +360,15 @@ async function createImmediateAssistantResponse(input: {
       conversationId: input.conversationId,
       error: assistantInsertResult.error,
     });
+  } else if (assistantInsertResult.data) {
+    await maybeActivateChatForm({
+      agentId: input.agentId,
+      conversationId: input.conversationId,
+      organizationId: input.organizationId,
+      assistantMessageId: assistantInsertResult.data.id,
+      assistantContent: assistantInsertResult.data.content,
+    });
   }
-
-  await persistConversationMemory(input.organizationId, input.conversationId, [
-    ...input.nextMemory,
-    { role: "assistant", content: input.content },
-  ]);
 
   return new Response(input.content, {
     headers: {
@@ -456,8 +384,89 @@ async function createImmediateAssistantResponse(input: {
 function buildSalesforceOrchestrationFailureMessage(): string {
   return "No pude completar la operacion con Salesforce por un error interno del agente. Revisa la integracion activa, la tool CRM del agente y el system prompt antes de volver a intentarlo.";
 }
+
+function buildHubSpotOrchestrationFailureMessage(): string {
+  return "No pude completar la operacion con HubSpot por un error interno del agente. Revisa la integracion activa, la tool CRM del agente y el system prompt antes de volver a intentarlo.";
+}
+
+function buildSalesforceCapabilityGuidance(): string {
+  return [
+    "SALESFORCE_CAPABILITY",
+    "<salesforce_capability>",
+    "Este agente tiene acceso operativo a las tools de Salesforce habilitadas para esta organizacion.",
+    "Si el usuario pregunta si tienes acceso a Salesforce o al CRM, responde que si tienes acceso operativo via integracion backend de este agente.",
+    "Si en este turno todavia no ejecutaste una consulta, aclara que el acceso existe aunque aun no hayas leido o escrito datos en esta respuesta.",
+    "No afirmes que no tienes acceso al CRM mientras esta integracion siga usable.",
+    "Si mensajes anteriores de esta misma conversacion dijeron lo contrario, tratalos como respuestas previas incorrectas o desactualizadas, no como el estado real actual.",
+    "No digas que una busqueda previa no fue real o no fue confiable salvo que TOOL_OUTPUTS o un error backend indiquen explicitamente un fallo real.",
+    "Si una consulta no devolvio coincidencias, describelo como falta de resultados o falta de coincidencias, no como ausencia de acceso ni como simulacion.",
+    "Si el usuario habla de crear un lead en HubSpot, recuerda que esa necesidad puede resolverse con objetos como contacto, empresa o deal; no digas que falta tool solo porque el nombre del objeto no sea literal.",
+    "Si el usuario habla de crear un lead en HubSpot, recuerda que esa necesidad puede resolverse con objetos como contacto, empresa o deal; no digas que falta tool solo porque el nombre del objeto no sea literal.",
+    "</salesforce_capability>",
+  ].join("\n");
+}
+
+function buildHubSpotCapabilityGuidance(): string {
+  return [
+    "HUBSPOT_CAPABILITY",
+    "<hubspot_capability>",
+    "Este agente tiene acceso operativo a las tools de HubSpot habilitadas para esta organizacion.",
+    "Si el usuario pregunta si tienes acceso a HubSpot o al CRM, responde que si tienes acceso operativo via integracion backend de este agente.",
+    "Si en este turno todavia no ejecutaste una consulta, aclara que el acceso existe aunque aun no hayas leido o escrito datos en esta respuesta.",
+    "No afirmes que no tienes acceso al CRM mientras esta integracion siga usable.",
+    "Si mensajes anteriores de esta misma conversacion dijeron lo contrario, tratalos como respuestas previas incorrectas o desactualizadas, no como el estado real actual.",
+    "No digas que una busqueda previa no fue real o no fue confiable salvo que TOOL_OUTPUTS o un error backend indiquen explicitamente un fallo real.",
+    "Si una consulta no devolvio coincidencias, describelo como falta de resultados o falta de coincidencias, no como ausencia de acceso ni como simulacion.",
+    "Si el usuario habla de crear un lead en HubSpot, recuerda que esa necesidad puede resolverse con objetos como contacto, empresa o deal; no digas que falta tool solo porque el nombre del objeto no sea literal.",
+    "</hubspot_capability>",
+  ].join("\n");
+}
+
+function appendToolContext(
+  current: string | undefined,
+  next: string | undefined
+): string | undefined {
+  if (!next) {
+    return current;
+  }
+
+  return current ? `${current}\n\n${next}` : next;
+}
+
+async function measureAsync<T>(
+  fn: () => Promise<T>
+): Promise<{ value: T; durationMs: number }> {
+  const start = Date.now();
+  const value = await fn();
+  return { value, durationMs: Date.now() - start };
+}
+
+function shouldLogChatObservability(input: {
+  latencyMs: number;
+  usedRag: boolean;
+  usedTool: boolean;
+}): boolean {
+  return (
+    input.latencyMs >= CHAT_OBSERVABILITY_SLOW_REQUEST_MS ||
+    input.usedRag ||
+    input.usedTool
+  );
+}
+
 export async function POST(request: Request): Promise<Response> {
   const requestStart = Date.now();
+  const stageTimings: ChatStageTimings = {
+    historyMs: null,
+    ragMs: null,
+    persistUserMessageMs: null,
+    salesforceOrchestrationMs: null,
+    hubspotOrchestrationMs: null,
+    gmailOrchestrationMs: null,
+    googleCalendarOrchestrationMs: null,
+    googleRuntimeChecksMs: null,
+    promptResolutionMs: null,
+    llmReadyMs: null,
+  };
 
   const requestError = validateJsonMutationRequest(request);
   if (requestError) {
@@ -481,29 +490,13 @@ export async function POST(request: Request): Promise<Response> {
     return parsedBody.errorResponse;
   }
 
-  const { agentId, conversationId, content, preview } = parsedBody.data;
-  const chatMode = parsedBody.data.chatMode ?? "live_local";
-  const mode = parsedBody.data.mode ?? "saved";
-
-  if (mode === "preview" && chatMode !== "sandbox") {
-    return NextResponse.json(
-      { error: "El modo preview solo esta disponible en sandbox." },
-      { status: 400 }
-    );
-  }
-
-  if (chatMode === "sandbox" && !canUseSandbox(session.role)) {
-    return NextResponse.json(
-      { error: "Solo admin y editor pueden usar el sandbox del agente." },
-      { status: 403 }
-    );
-  }
+  const { agentId, conversationId, content } = parsedBody.data;
 
   const access = await assertAgentAccess({
     session,
     agentId,
     capability: "use",
-    allowedStatuses: getAllowedStatuses(chatMode, session.role),
+    allowedStatuses: getAllowedStatuses(session.role),
   });
 
   if (!access.ok) {
@@ -517,24 +510,18 @@ export async function POST(request: Request): Promise<Response> {
     );
   }
 
-  const whatsappIntent = isWhatsAppChannelAgent(access.agent);
-
-  if (access.connectionSummary.classification === "channel_connected" && chatMode === "live_local") {
-    return NextResponse.json(
-      { error: "Los agentes con WhatsApp conectado no usan chat operativo local. Usa sandbox o QA." },
-      { status: 403 }
-    );
-  }
-
-  if (whatsappIntent && chatMode === "live_local") {
-    return NextResponse.json(
-      { error: "Este agente esta orientado a WhatsApp y no usa chat operativo local. Usa sandbox hasta conectar el canal real." },
-      { status: 403 }
-    );
-  }
-
   const agent = access.agent;
-  const executionConfig = resolveExecutionConfig(agent, chatMode, mode, preview);
+  const chatMode: ChatRequestMode = agent.status === "draft" ? "sandbox" : "live_local";
+
+  if (chatMode === "sandbox" && !canUseSandbox(session.role)) {
+    return NextResponse.json(
+      { error: "Solo admin y editor pueden probar agentes en draft." },
+      { status: 403 }
+    );
+  }
+
+  const agentSetupState = readAgentSetupState(agent);
+  const executionConfig = resolveExecutionConfig(agent);
   const planCheck = await checkPlanLimits(session.organizationId);
 
   if (!planCheck.allowed) {
@@ -566,67 +553,288 @@ export async function POST(request: Request): Promise<Response> {
     return NextResponse.json({ error: "Conversacion no encontrada" }, { status: 404 });
   }
 
-  const cachedHistoryPromise = loadConversationMemory(session.organizationId, conversation.id);
-  const historyPromise = listMessages(conversation.id, session.organizationId);
-  const userMessagePromise = insertMessage({
-    agentId,
-    conversationId: conversation.id,
-    organizationId: session.organizationId,
-    role: "user",
-    content,
-  });
-  const ragContextPromise = buildRagContext(agentId, session.organizationId, content);
+  const historyPromise = measureAsync(() =>
+    listMessages(conversation.id, session.organizationId)
+  );
+  const userMessagePromise = measureAsync(() =>
+    insertMessage({
+      agentId,
+      conversationId: conversation.id,
+      organizationId: session.organizationId,
+      role: "user",
+      content,
+    })
+  );
+  const ragContextPromise = measureAsync(() =>
+    buildRagContext(agentId, session.organizationId, content)
+  );
 
-  const [cachedHistory, historyResult, userMessageResult, ragContext] = await Promise.all([
-    cachedHistoryPromise,
+  const [historyMeasure, userMessageMeasure, ragContextMeasure] = await Promise.all([
     historyPromise,
     userMessagePromise,
     ragContextPromise,
   ]);
 
+  stageTimings.historyMs = historyMeasure.durationMs;
+  stageTimings.persistUserMessageMs = userMessageMeasure.durationMs;
+  stageTimings.ragMs = ragContextMeasure.durationMs;
+
+  const historyResult = historyMeasure.value;
+  const userMessageResult = userMessageMeasure.value;
+  const ragContext = ragContextMeasure.value;
+
   if (userMessageResult.error) {
     return NextResponse.json({ error: "No se pudo guardar el mensaje" }, { status: 500 });
   }
 
-  const previousMessages = cachedHistory ??
-    (historyResult.data ?? []).map((message) => ({
-      role: message.role as "user" | "assistant",
-      content: message.content,
-    }));
+  const previousMessages = (historyResult.data ?? []).map((message) => ({
+    role: message.role as "user" | "assistant",
+    content: message.content,
+  }));
 
   const nextMemory = trimChatMemory([...previousMessages, { role: "user", content }]);
-  void persistConversationMemory(session.organizationId, conversation.id, nextMemory);
 
-  let salesforceToolContext: string | undefined;
+  let toolContext: string | undefined;
+  let hasUsableSalesforceRuntime = false;
+  let hasUsableHubSpotRuntime = false;
+  let hasUsableGmailRuntime = false;
+  let hasUsableGoogleCalendarRuntime = false;
+  let hasConfiguredGmail = false;
+  let hasConfiguredGoogleCalendar = false;
+  let salesforceAllowedFormActions: ChatFormAction[] = [];
+  let hubspotAllowedFormActions: ChatFormAction[] = [];
+  const shouldOrchestrateSalesforce = Boolean(
+    agentSetupState && (isSalesforceTemplateId(agentSetupState.template_id) || agentSetupState.integrations.includes("salesforce"))
+  );
+  const shouldOrchestrateHubSpot = Boolean(
+    agentSetupState && (isHubSpotTemplateId(agentSetupState.template_id) || agentSetupState.integrations.includes("hubspot"))
+  );
+  const shouldOrchestrateGoogleCalendar = Boolean(
+    agentSetupState &&
+      setupStateExpectsGoogleCalendarIntegration(agentSetupState)
+  );
+  const shouldOrchestrateGmail = Boolean(
+    agentSetupState &&
+      setupStateExpectsGmailIntegration(agentSetupState)
+  );
 
   try {
-    const orchestration = await orchestrateSalesforceForChat({
-      agent,
-      conversation,
-      organizationId: session.organizationId,
-      userId: session.user.id,
-      latestUserMessage: content,
-      recentMessages: nextMemory,
-    });
+    if (shouldOrchestrateSalesforce) {
+      const { value: orchestration, durationMs } = await measureAsync(() =>
+        orchestrateSalesforceForChat({
+          agent,
+          conversation,
+          organizationId: session.organizationId,
+          userId: session.user.id,
+          latestUserMessage: content,
+          recentMessages: nextMemory,
+        })
+      );
+      stageTimings.salesforceOrchestrationMs = durationMs;
 
-    if (orchestration.kind === "respond_now") {
-      return createImmediateAssistantResponse({
-        agentId,
-        conversationId: conversation.id,
-        organizationId: session.organizationId,
-        chatMode,
-        content: orchestration.content,
-        nextMemory,
-      });
+      if (orchestration.kind === "respond_now") {
+        return createImmediateAssistantResponse({
+          agentId,
+          conversationId: conversation.id,
+          organizationId: session.organizationId,
+          chatMode,
+          content: orchestration.content,
+          nextMemory,
+        });
+      }
+
+      toolContext = appendToolContext(toolContext, orchestration.toolContext);
+      hasUsableSalesforceRuntime = orchestration.hasUsableSalesforceRuntime;
+      salesforceAllowedFormActions = orchestration.allowedActions;
     }
 
-    salesforceToolContext = orchestration.toolContext;
+    if (shouldOrchestrateHubSpot) {
+      const { value: orchestration, durationMs } = await measureAsync(() =>
+        orchestrateHubSpotForChat({
+          agent,
+          conversation,
+          organizationId: session.organizationId,
+          userId: session.user.id,
+          latestUserMessage: content,
+          recentMessages: nextMemory,
+        })
+      );
+      stageTimings.hubspotOrchestrationMs = durationMs;
 
-    if (salesforceToolContext && detectSalesforcePromptConflict(executionConfig.systemPrompt).hasConflict) {
-      executionConfig.systemPrompt = stripSalesforcePromptConflicts(executionConfig.systemPrompt);
+      if (orchestration.kind === "respond_now") {
+        return createImmediateAssistantResponse({
+          agentId,
+          conversationId: conversation.id,
+          organizationId: session.organizationId,
+          chatMode,
+          content: orchestration.content,
+          nextMemory,
+        });
+      }
+
+      toolContext = appendToolContext(toolContext, orchestration.toolContext);
+      hasUsableHubSpotRuntime = orchestration.hasUsableHubSpotRuntime;
+      hubspotAllowedFormActions = orchestration.allowedActions;
+    }
+
+    if (shouldOrchestrateGmail) {
+      const { value: orchestration, durationMs } = await measureAsync(() =>
+        orchestrateGoogleGmailForChat({
+          agent,
+          conversation,
+          organizationId: session.organizationId,
+          userId: session.user.id,
+          latestUserMessage: content,
+          recentMessages: nextMemory,
+        })
+      );
+      stageTimings.gmailOrchestrationMs = durationMs;
+
+      if (orchestration.kind === "respond_now") {
+        return createImmediateAssistantResponse({
+          agentId,
+          conversationId: conversation.id,
+          organizationId: session.organizationId,
+          chatMode,
+          content: orchestration.content,
+          nextMemory,
+        });
+      }
+
+      toolContext = appendToolContext(toolContext, orchestration.toolContext);
+      hasUsableGmailRuntime = orchestration.hasUsableGmailRuntime;
+    }
+
+    if (shouldOrchestrateGoogleCalendar) {
+      const { value: orchestration, durationMs } = await measureAsync(() =>
+        orchestrateGoogleCalendarForChat({
+          agent,
+          conversation,
+          organizationId: session.organizationId,
+          userId: session.user.id,
+          latestUserMessage: content,
+          recentMessages: nextMemory,
+        })
+      );
+      stageTimings.googleCalendarOrchestrationMs = durationMs;
+
+      if (orchestration.kind === "respond_now") {
+        return createImmediateAssistantResponse({
+          agentId,
+          conversationId: conversation.id,
+          organizationId: session.organizationId,
+          chatMode,
+          content: orchestration.content,
+          nextMemory,
+        });
+      }
+
+      toolContext = appendToolContext(toolContext, orchestration.toolContext);
+      hasUsableGoogleCalendarRuntime =
+        orchestration.hasUsableGoogleCalendarRuntime;
+    }
+
+    const googleRuntimeChecksStart = Date.now();
+    if (
+      agentSetupState &&
+      setupStateExpectsGmailIntegration(agentSetupState) &&
+      !hasUsableGmailRuntime
+    ) {
+      const gmailRuntime = await getGoogleAgentToolRuntime(
+        agent.id,
+        session.organizationId,
+        "gmail"
+      );
+      hasConfiguredGmail = Boolean(gmailRuntime.data?.ok);
+    } else if (hasUsableGmailRuntime) {
+      hasConfiguredGmail = true;
+    }
+
+    if (
+      agentSetupState &&
+      setupStateExpectsGoogleCalendarIntegration(agentSetupState)
+    ) {
+      const googleCalendarRuntime = await getGoogleAgentToolRuntime(
+        agent.id,
+        session.organizationId,
+        "google_calendar"
+      );
+      hasConfiguredGoogleCalendar = Boolean(googleCalendarRuntime.data?.ok);
+    }
+    stageTimings.googleRuntimeChecksMs = Date.now() - googleRuntimeChecksStart;
+
+    const promptResolutionStart = Date.now();
+    const promptResolution = resolveEffectiveAgentPrompt({
+      savedPrompt: executionConfig.systemPrompt,
+      setupState: agentSetupState,
+      promptEnvironment: {
+        salesforceUsable: hasUsableSalesforceRuntime,
+        hubspotUsable: hasUsableHubSpotRuntime,
+        gmailConfigured: hasConfiguredGmail,
+        gmailRuntimeAvailable: hasUsableGmailRuntime,
+        googleCalendarConfigured: hasConfiguredGoogleCalendar,
+        googleCalendarRuntimeAvailable: hasUsableGoogleCalendarRuntime,
+      },
+      allowConflictCleanupForCustom: true,
+    });
+    stageTimings.promptResolutionMs = Date.now() - promptResolutionStart;
+
+    executionConfig.systemPrompt = promptResolution.effectivePrompt;
+
+    const inlineFormGuidance = [
+      hasUsableSalesforceRuntime
+        ? buildChatFormGuidance({
+            provider: "salesforce",
+            allowedActions: salesforceAllowedFormActions,
+          })
+        : null,
+      hasUsableHubSpotRuntime
+        ? buildChatFormGuidance({
+            provider: "hubspot",
+            allowedActions: hubspotAllowedFormActions,
+          })
+        : null,
+    ].filter((guidance): guidance is string => Boolean(guidance));
+
+    if (inlineFormGuidance.length > 0) {
+      executionConfig.systemPrompt = [
+        executionConfig.systemPrompt,
+        ...inlineFormGuidance,
+      ].join("\n\n");
+    }
+
+    if (hasUsableGmailRuntime) {
+      executionConfig.systemPrompt = [
+        executionConfig.systemPrompt,
+        buildGmailPromptInjectionGuardrail(),
+      ].join("\n\n");
+    }
+
+    if (promptResolution.syncMode === "custom") {
+      if (hasUsableSalesforceRuntime) {
+        executionConfig.systemPrompt = [
+          executionConfig.systemPrompt,
+          buildSalesforceCapabilityGuidance(),
+        ].join("\n\n");
+      }
+
+      if (hasUsableHubSpotRuntime) {
+        executionConfig.systemPrompt = [
+          executionConfig.systemPrompt,
+          buildHubSpotCapabilityGuidance(),
+        ].join("\n\n");
+      }
     }
   } catch (error) {
-    console.error("chat.salesforce_orchestration_error", {
+    const provider = shouldOrchestrateGmail
+      ? "gmail"
+      : shouldOrchestrateGoogleCalendar
+      ? "google_calendar"
+      : shouldOrchestrateHubSpot
+        ? "hubspot"
+        : "salesforce";
+
+    console.error(`chat.${provider}_orchestration_error`, {
       conversationId: conversation.id,
       organizationId: session.organizationId,
       error: error instanceof Error ? error.message : "unknown",
@@ -637,21 +845,40 @@ export async function POST(request: Request): Promise<Response> {
       conversationId: conversation.id,
       organizationId: session.organizationId,
       chatMode,
-      content: buildSalesforceOrchestrationFailureMessage(),
+      content: shouldOrchestrateGmail
+        ? "No pude completar la consulta de Gmail por un error interno del agente. Revisa la integracion Google activa, la tool Gmail del agente y los scopes de metadata antes de volver a intentarlo."
+        : shouldOrchestrateGoogleCalendar
+        ? "No pude completar la consulta de Google Calendar por un error interno del agente. Revisa la integracion Google activa, la tool Google Calendar del agente y la timezone configurada antes de volver a intentarlo."
+        : shouldOrchestrateHubSpot
+        ? buildHubSpotOrchestrationFailureMessage()
+        : buildSalesforceOrchestrationFailureMessage(),
       nextMemory,
     });
   }
 
-  console.info("chat.pre_stream_ready", {
-    conversationId: conversation.id,
-    organizationId: session.organizationId,
-    latencyMs: Date.now() - requestStart,
-    usedCachedHistory: cachedHistory !== null,
-    usedRag: Boolean(ragContext),
-    usedSalesforceTool: Boolean(salesforceToolContext),
-    chatMode,
-    executionMode: executionConfig.executionMode,
-  });
+  const preStreamLatencyMs = Date.now() - requestStart;
+  const usedRag = Boolean(ragContext);
+  const usedTool = Boolean(toolContext);
+
+  if (
+    shouldLogChatObservability({
+      latencyMs: preStreamLatencyMs,
+      usedRag,
+      usedTool,
+    })
+  ) {
+    console.info("chat.pre_stream_ready", {
+      conversationId: conversation.id,
+      organizationId: session.organizationId,
+      latencyMs: preStreamLatencyMs,
+      usedCachedHistory: false,
+      usedRag,
+      usedCrmTool: usedTool,
+      chatMode,
+      stageTimings,
+    });
+  }
+
   let streamResult;
   try {
     streamResult = sendStreamingChatCompletion({
@@ -664,10 +891,26 @@ export async function POST(request: Request): Promise<Response> {
       agentId: agent.id,
       conversationId: conversation.id,
       context: ragContext,
-      toolContext: salesforceToolContext,
+      toolContext,
     });
 
     await streamResult.onReady;
+    stageTimings.llmReadyMs = Date.now() - requestStart;
+    if (
+      shouldLogChatObservability({
+        latencyMs: stageTimings.llmReadyMs,
+        usedRag,
+        usedTool,
+      })
+    ) {
+      console.info("chat.stream_ready", {
+        conversationId: conversation.id,
+        organizationId: session.organizationId,
+        latencyMs: stageTimings.llmReadyMs,
+        model: executionConfig.llmModel,
+        stageTimings,
+      });
+    }
   } catch (error) {
     if (error instanceof LiteLLMError) {
       console.error("chat.llm_error", {
@@ -715,6 +958,14 @@ export async function POST(request: Request): Promise<Response> {
           conversationId: convId,
           error: assistantInsertResult.error,
         });
+      } else if (assistantInsertResult.data) {
+        await maybeActivateChatForm({
+          agentId: currentAgentId,
+          conversationId: convId,
+          organizationId: orgId,
+          assistantMessageId: assistantInsertResult.data.id,
+          assistantContent: assistantInsertResult.data.content,
+        });
       }
 
       const usageResult = await recordUsage({
@@ -732,11 +983,6 @@ export async function POST(request: Request): Promise<Response> {
           planLimit: usageResult.planLimit,
         });
       }
-
-      await persistConversationMemory(orgId, convId, [
-        ...nextMemory,
-        { role: "assistant", content: output.content },
-      ]);
     } catch (error) {
       console.error("chat.post_stream_persistence_error", {
         conversationId: convId,
@@ -756,6 +1002,7 @@ export async function POST(request: Request): Promise<Response> {
     },
   });
 }
+
 
 
 

@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -9,23 +9,37 @@ type AppSidebarProps = {
   userName: string;
   organizationName: string;
   role: Role;
+  initialPendingApprovalCount: number;
 };
 
 type NavLink = {
   href: string;
   label: string;
   adminOnly?: boolean;
+  visibleRoles?: Role[];
+  showsApprovalCount?: boolean;
 };
 
 const navLinks: NavLink[] = [
   { href: "/dashboard", label: "Dashboard" },
   { href: "/agents", label: "Agentes" },
-  { href: "/settings", label: "Configuración", adminOnly: true },
+  {
+    href: "/approvals",
+    label: "Aprobaciones",
+    visibleRoles: ["admin", "editor", "operador"],
+    showsApprovalCount: true,
+  },
+  { href: "/settings", label: "ConfiguraciÃ³n", adminOnly: true },
   { href: "/settings/integrations", label: "Integraciones", adminOnly: true },
   { href: "/settings/users", label: "Usuarios", adminOnly: true },
 ];
 
-export function AppSidebar({ userName, organizationName, role }: AppSidebarProps) {
+export function AppSidebar({
+  userName,
+  organizationName,
+  role,
+  initialPendingApprovalCount,
+}: AppSidebarProps) {
   const pathname = usePathname();
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -43,13 +57,13 @@ export function AppSidebar({ userName, organizationName, role }: AppSidebarProps
       const response = await fetch("/api/auth/logout", { method: "POST" });
 
       if (!response.ok) {
-        setError("No se pudo cerrar la sesión. Intenta de nuevo.");
+        setError("No se pudo cerrar la sesiÃ³n. Intenta de nuevo.");
         return;
       }
 
       window.location.assign("/login");
     } catch {
-      setError("No se pudo cerrar la sesión. Intenta de nuevo.");
+      setError("No se pudo cerrar la sesiÃ³n. Intenta de nuevo.");
     } finally {
       setIsLoggingOut(false);
     }
@@ -71,14 +85,18 @@ export function AppSidebar({ userName, organizationName, role }: AppSidebarProps
 
       <nav className="flex-1 space-y-1.5 px-4 py-6">
         {navLinks
-          .filter((link) => !link.adminOnly || role === "admin")
+          .filter(
+            (link) =>
+              (!link.adminOnly || role === "admin") &&
+              (!link.visibleRoles || link.visibleRoles.includes(role))
+          )
           .map((link) => {
             const isActive = pathname === link.href || pathname.startsWith(`${link.href}/`);
             return (
               <Link
                 key={link.href}
                 href={link.href}
-                className={`group flex items-center rounded-lg px-3 py-2.5 text-sm transition-all focus:outline-none focus:ring-2 focus:ring-emerald-500/50 ${
+                className={`group relative flex items-center justify-between rounded-lg px-3 py-2.5 text-sm transition-all focus:outline-none focus:ring-2 focus:ring-emerald-500/50 ${
                   isActive
                     ? "bg-emerald-500/10 font-semibold text-emerald-400 shadow-sm"
                     : "font-medium text-slate-400 hover:bg-white/5 hover:text-slate-200"
@@ -87,7 +105,12 @@ export function AppSidebar({ userName, organizationName, role }: AppSidebarProps
                 {isActive && (
                   <span className="absolute left-0 h-5 w-1 rounded-r-full bg-emerald-500" />
                 )}
-                {link.label}
+                <span>{link.label}</span>
+                {link.showsApprovalCount && initialPendingApprovalCount > 0 ? (
+                  <span className="inline-flex min-w-[1.5rem] items-center justify-center rounded-full bg-rose-500 px-2 py-0.5 text-[11px] font-bold text-white">
+                    {initialPendingApprovalCount > 99 ? "99+" : initialPendingApprovalCount}
+                  </span>
+                ) : null}
               </Link>
             );
           })}
@@ -101,7 +124,7 @@ export function AppSidebar({ userName, organizationName, role }: AppSidebarProps
           disabled={isLoggingOut}
           className="mt-2 w-full rounded-lg px-2 py-1.5 text-left text-xs font-semibold text-slate-500 transition-colors hover:bg-white/5 hover:text-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {isLoggingOut ? "Cerrando sesión..." : "Cerrar sesión"}
+          {isLoggingOut ? "Cerrando sesiÃ³n..." : "Cerrar sesiÃ³n"}
         </button>
         {error ? <p className="mt-2 px-2 text-xs text-rose-500">{error}</p> : null}
       </div>
@@ -133,7 +156,7 @@ export function AppSidebar({ userName, organizationName, role }: AppSidebarProps
         type="button"
         onClick={() => setIsMobileOpen(!isMobileOpen)}
         className="fixed left-4 top-3.5 z-30 rounded-lg bg-white/50 p-1.5 text-slate-700 shadow-sm backdrop-blur-md transition-colors hover:bg-white/80 md:hidden"
-        aria-label="Menú"
+        aria-label="MenÃº"
       >
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5">
           {isMobileOpen ? (
@@ -146,3 +169,4 @@ export function AppSidebar({ userName, organizationName, role }: AppSidebarProps
     </>
   );
 }
+

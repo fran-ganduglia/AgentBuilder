@@ -1,72 +1,23 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { ChatWindow } from "@/components/chat/chat-window";
-import { isWhatsAppChannelAgent } from "@/lib/agents/agent-setup-state";
 import { assertAgentAccess } from "@/lib/auth/agent-access";
 import { requireUser } from "@/lib/auth/require-user";
+import { resolveChatQuickActions } from "@/lib/chat/quick-actions-server";
 import { getConversationById, getOrCreateConversation } from "@/lib/db/conversations";
 import { listMessages } from "@/lib/db/messages";
-import type { ChatMode } from "@/lib/chat/conversation-metadata";
-import type { AgentStatus } from "@/types/app";
 
 type ChatPageProps = {
   params: Promise<{ agentId: string }>;
-  searchParams?: Promise<Record<string, string | string[] | undefined>>;
 };
 
-function readFirstValue(value: string | string[] | undefined): string | undefined {
-  return Array.isArray(value) ? value[0] : value;
-}
-
-function canUseSandbox(role: string): boolean {
+function canUseDraftChat(role: string): boolean {
   return role === "admin" || role === "editor";
 }
 
-function getChatFallbackUrl(
-  agentId: string,
-  connectionClassification: "local" | "remote_managed" | "channel_connected"
-): string {
-  return connectionClassification === "channel_connected"
-    ? `/agents/${agentId}?tab=qa`
-    : `/agents/${agentId}`;
-}
-
-function resolveRequestedChatMode(
-  requestedChatMode: string | undefined,
-  agentStatus: string,
-  connectionClassification: "local" | "remote_managed" | "channel_connected",
-  userRole: string,
-  isWhatsAppIntent: boolean
-): ChatMode | null {
-  if (requestedChatMode === "sandbox") {
-    return "sandbox";
-  }
-
-  if (requestedChatMode === "live_local") {
-    if (connectionClassification === "channel_connected" || isWhatsAppIntent) {
-      return null;
-    }
-
-    return "live_local";
-  }
-
-  if (connectionClassification === "channel_connected" || isWhatsAppIntent) {
-    return canUseSandbox(userRole) ? "sandbox" : null;
-  }
-
-  if (agentStatus === "draft") {
-    return "sandbox";
-  }
-
-  return "live_local";
-}
-
-export default async function AgentChatPage({ params, searchParams }: ChatPageProps) {
+export default async function AgentChatPage({ params }: ChatPageProps) {
   const { agentId } = await params;
   const user = await requireUser();
-  const resolvedSearchParams = searchParams ? await searchParams : {};
-  const requestedChatMode = readFirstValue(resolvedSearchParams.chatMode);
-  const requestedPreview = readFirstValue(resolvedSearchParams.preview) === "1";
 
   const access = await assertAgentAccess({
     session: {
@@ -76,7 +27,7 @@ export default async function AgentChatPage({ params, searchParams }: ChatPagePr
     },
     agentId,
     capability: "use",
-    allowedStatuses: canUseSandbox(user.role) ? ["draft", "active"] : ["active"],
+    allowedStatuses: canUseDraftChat(user.role) ? ["draft", "active"] : ["active"],
   });
 
   if (!access.ok) {
@@ -91,31 +42,8 @@ export default async function AgentChatPage({ params, searchParams }: ChatPagePr
     redirect(`/agents/${agentId}`);
   }
 
-  const whatsappIntent = isWhatsAppChannelAgent(access.agent);
-  const fallbackUrl = getChatFallbackUrl(agentId, access.connectionSummary.classification);
-  const chatMode = resolveRequestedChatMode(
-    requestedChatMode,
-    access.agent.status,
-    access.connectionSummary.classification,
-    user.role,
-    whatsappIntent
-  );
-
-  if (!chatMode) {
-    redirect(fallbackUrl);
-  }
-
-  if (chatMode === "sandbox" && !canUseSandbox(user.role)) {
-    redirect(fallbackUrl);
-  }
-
-  if (chatMode === "live_local" && (access.connectionSummary.classification !== "local" || whatsappIntent)) {
-    redirect(fallbackUrl);
-  }
-
-  if (chatMode === "live_local" && access.agent.status !== "active") {
-    redirect(`/agents/${agentId}`);
-  }
+  const isTestMode = access.agent.status === "draft";
+  const chatMode = isTestMode ? "sandbox" : "live_local";
 
   const { data: conversation } = await getOrCreateConversation(
     agentId,
@@ -148,7 +76,7 @@ export default async function AgentChatPage({ params, searchParams }: ChatPagePr
     initialMessages = messages ?? [];
   }
 
-  const isSandbox = chatMode === "sandbox";
+  const initialQuickActions = await resolveChatQuickActions(access.agent);
 
   return (
     <div className="flex h-[calc(100vh-4rem)] flex-col bg-slate-50">
@@ -175,25 +103,20 @@ export default async function AgentChatPage({ params, searchParams }: ChatPagePr
               </span>
               <span
                 className={`flex items-center rounded-md px-2 py-0.5 text-[10px] font-bold tracking-widest ring-1 ring-inset ${
-                  isSandbox
+                  isTestMode
                     ? "bg-amber-500/15 text-amber-200 ring-amber-500/25"
                     : "bg-emerald-500/15 text-emerald-200 ring-emerald-500/25"
                 }`}
               >
-                {isSandbox ? "SANDBOX" : "LIVE LOCAL"}
+                {isTestMode ? "DRAFT" : "ACTIVE"}
               </span>
             </div>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-[10px] font-bold uppercase tracking-widest text-slate-500">
-              {isSandbox ? "Entorno de afinacion y pruebas" : "Chat operativo local"}
+              {isTestMode ? "Chat de prueba interno" : "Chat operativo del agente"}
             </span>
-            {requestedPreview ? (
-              <span className="rounded-full bg-amber-500/15 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-amber-200 ring-1 ring-inset ring-amber-500/20">
-                Preview solicitado
-              </span>
-            ) : null}
           </div>
         </div>
       </div>
@@ -201,10 +124,10 @@ export default async function AgentChatPage({ params, searchParams }: ChatPagePr
       <div className="flex-1 overflow-hidden">
         <ChatWindow
           agentId={agentId}
-          agentStatus={access.agent.status as AgentStatus}
-          chatMode={chatMode}
+          isTestMode={isTestMode}
+          initialConversationId={conversation?.id ?? null}
           initialMessages={initialMessages}
-          initialExecutionMode={requestedPreview ? "preview" : "saved"}
+          initialQuickActions={initialQuickActions}
         />
       </div>
     </div>

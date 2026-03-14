@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { validateCronRequest } from "@/lib/workers/auth";
+import { areWorkersEnabled, getWorkersDisabledResponse, validateCronRequest } from "@/lib/workers/auth";
 import { claimEvents, markDone, markFailed } from "@/lib/workers/event-queue";
 import { processDocument } from "@/lib/workers/rag-processor";
 
@@ -8,10 +8,14 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "No autorizado" }, { status: 401 });
   }
 
+  if (!areWorkersEnabled()) {
+    return getWorkersDisabledResponse();
+  }
+
   const events = await claimEvents(["document.uploaded"], 5);
 
   if (events.length === 0) {
-    return NextResponse.json({ data: { processed: 0 } });
+    return new NextResponse(null, { status: 204 });
   }
 
   let processed = 0;
@@ -48,4 +52,3 @@ export async function GET(request: Request) {
 
   return NextResponse.json({ data: { processed, failed } });
 }
-

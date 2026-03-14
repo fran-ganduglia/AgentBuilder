@@ -33,6 +33,8 @@ export type ScheduleTaskData = {
   timezone: string;
   days: ScheduleDay[];
   deferred?: boolean;
+  timezoneManualOverride?: boolean;
+  detectedTimezone?: string | null;
 };
 
 export type CriteriaTaskData = {
@@ -54,6 +56,8 @@ const scheduleTaskDataSchema = z.object({
   timezone: z.string().trim().min(1, "Timezone requerida").max(100, "Timezone invalida"),
   days: z.array(scheduleDaySchema).length(WEEKDAYS.length),
   deferred: z.boolean().optional(),
+  timezoneManualOverride: z.boolean().optional(),
+  detectedTimezone: z.string().trim().min(1).max(100).nullable().optional(),
 });
 
 const criteriaTaskDataSchema = z.object({
@@ -76,6 +80,8 @@ export function createDefaultScheduleTaskData(timezone = "UTC"): ScheduleTaskDat
       end: "18:00",
     })),
     deferred: false,
+    timezoneManualOverride: false,
+    detectedTimezone: null,
   };
 }
 
@@ -94,6 +100,11 @@ export function normalizeScheduleTaskData(
         ? candidate.timezone.trim()
         : fallbackTimezone,
     deferred: Boolean(candidate.deferred),
+    timezoneManualOverride: Boolean(candidate.timezoneManualOverride),
+    detectedTimezone:
+      typeof candidate.detectedTimezone === "string" && candidate.detectedTimezone.trim()
+        ? candidate.detectedTimezone.trim()
+        : null,
     days: WEEKDAYS.map((day) => {
       const existingDay = Array.isArray(candidate.days)
         ? candidate.days.find((item) => item?.day === day)

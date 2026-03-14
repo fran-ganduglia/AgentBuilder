@@ -1,11 +1,23 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/get-session";
 import {
+  buildGmailSetupResolutionContext,
+  getGmailAgentIntegrationState,
+} from "@/lib/agents/gmail-agent-integration";
+import {
+  buildGoogleCalendarSetupResolutionContext,
+  getGoogleCalendarAgentIntegrationState,
+} from "@/lib/agents/google-calendar-agent-integration";
+import {
   mergeSetupProgress,
   setupProgressPatchSchema,
   toSetupStateJson,
 } from "@/lib/agents/agent-setup";
 import { readAgentSetupState } from "@/lib/agents/agent-setup-state";
+import {
+  buildHubSpotSetupResolutionContext,
+  getHubSpotAgentIntegrationState,
+} from "@/lib/agents/hubspot-agent-integration";
 import {
   buildSalesforceSetupResolutionContext,
   getSalesforceAgentIntegrationState,
@@ -14,6 +26,7 @@ import { canEditAgents } from "@/lib/auth/agent-access";
 import { insertAuditLog } from "@/lib/db/audit";
 import { hasReadyDocuments } from "@/lib/db/agent-documents";
 import { getAgentById, updateAgentSetupState } from "@/lib/db/agents";
+import { resolveGoogleCalendarIntegrationTimezone } from "@/lib/integrations/google-calendar-timezone";
 import {
   parseJsonRequestBody,
   validateJsonMutationRequest,
@@ -53,13 +66,31 @@ export async function PATCH(
     hasReadyDocuments: hasDocumentsReady,
   });
   let providerIntegrations;
+  let googleCalendarDetectedTimezone: string | null = null;
 
   if (baseSetupState) {
-    const salesforceIntegrationStateResult = await getSalesforceAgentIntegrationState({
-      agentId,
-      organizationId: session.organizationId,
-      setupState: baseSetupState,
-    });
+    const [salesforceIntegrationStateResult, hubspotIntegrationStateResult, gmailIntegrationStateResult, googleCalendarIntegrationStateResult] = await Promise.all([
+      getSalesforceAgentIntegrationState({
+        agentId,
+        organizationId: session.organizationId,
+        setupState: baseSetupState,
+      }),
+      getHubSpotAgentIntegrationState({
+        agentId,
+        organizationId: session.organizationId,
+        setupState: baseSetupState,
+      }),
+      getGmailAgentIntegrationState({
+        agentId,
+        organizationId: session.organizationId,
+        setupState: baseSetupState,
+      }),
+      getGoogleCalendarAgentIntegrationState({
+        agentId,
+        organizationId: session.organizationId,
+        setupState: baseSetupState,
+      }),
+    ]);
 
     if (salesforceIntegrationStateResult.error) {
       return NextResponse.json(
@@ -68,11 +99,50 @@ export async function PATCH(
       );
     }
 
-    providerIntegrations = buildSalesforceSetupResolutionContext(salesforceIntegrationStateResult.data);
+    if (hubspotIntegrationStateResult.error) {
+      return NextResponse.json(
+        { error: "No se pudo validar la vinculacion HubSpot del agente" },
+        { status: 500 }
+      );
+    }
+
+    if (gmailIntegrationStateResult.error) {
+      return NextResponse.json(
+        { error: "No se pudo validar la vinculacion Gmail del agente" },
+        { status: 500 }
+      );
+    }
+
+    if (googleCalendarIntegrationStateResult.error) {
+      return NextResponse.json(
+        { error: "No se pudo validar la vinculacion Google Calendar del agente" },
+        { status: 500 }
+      );
+    }
+
+    providerIntegrations = {
+      ...buildSalesforceSetupResolutionContext(salesforceIntegrationStateResult.data),
+      ...buildHubSpotSetupResolutionContext(hubspotIntegrationStateResult.data),
+      ...buildGmailSetupResolutionContext(gmailIntegrationStateResult.data),
+      ...buildGoogleCalendarSetupResolutionContext(googleCalendarIntegrationStateResult.data),
+    };
+
+    if (
+      googleCalendarIntegrationStateResult.data?.integration &&
+      googleCalendarIntegrationStateResult.data.hasUsableIntegration
+    ) {
+      const googleCalendarTimezoneResult = await resolveGoogleCalendarIntegrationTimezone({
+        integrationId: googleCalendarIntegrationStateResult.data.integration.id,
+        organizationId: session.organizationId,
+      });
+      googleCalendarDetectedTimezone =
+        googleCalendarTimezoneResult.data?.detectedTimezone ?? null;
+    }
   }
 
   const existingSetupState = readAgentSetupState(existingAgent, {
     hasReadyDocuments: hasDocumentsReady,
+    googleCalendarDetectedTimezone,
     providerIntegrations,
   });
 
@@ -113,6 +183,8 @@ export async function PATCH(
 
   const nextSetupState = mergeSetupProgress(existingSetupState, parsedBody.data, {
     hasReadyDocuments: hasDocumentsReady,
+    googleCalendarDetectedTimezone,
+    providerIntegrations,
   });
   const updateResult = await updateAgentSetupState(
     agentId,
@@ -139,4 +211,5 @@ export async function PATCH(
 
   return NextResponse.json({ data: { setupState: nextSetupState } });
 }
+
 

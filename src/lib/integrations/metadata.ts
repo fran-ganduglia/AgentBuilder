@@ -76,6 +76,48 @@ export function getMetadataStringArray(
   return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
 }
 
+function isValidTimezone(timezone: string | null | undefined): timezone is string {
+  if (!timezone || timezone.trim().length === 0) {
+    return false;
+  }
+
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: timezone }).format(new Date());
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export type GoogleCalendarTimezoneMetadata = {
+  primaryTimezone: string | null;
+  userTimezone: string | null;
+  detectedTimezone: string | null;
+};
+
+export function getGoogleCalendarTimezoneMetadata(
+  metadata: Json | null | undefined
+): GoogleCalendarTimezoneMetadata {
+  const primaryTimezone = getMetadataString(
+    metadata,
+    "google_calendar_primary_timezone"
+  );
+  const userTimezone = getMetadataString(
+    metadata,
+    "google_calendar_user_timezone"
+  );
+
+  return {
+    primaryTimezone: isValidTimezone(primaryTimezone) ? primaryTimezone : null,
+    userTimezone: isValidTimezone(userTimezone) ? userTimezone : null,
+    detectedTimezone: isValidTimezone(primaryTimezone)
+      ? primaryTimezone
+      : isValidTimezone(userTimezone)
+        ? userTimezone
+        : null,
+  };
+}
+
 function isExpiringSoon(value: string | null, now: number): boolean {
   if (!value) {
     return false;
@@ -249,11 +291,17 @@ export function getIntegrationOperationalView(
   };
 }
 
+export function isIntegrationOperationalViewUsable(
+  view: Pick<IntegrationOperationalView, "status">
+): boolean {
+  return view.status === "connected" || view.status === "expiring_soon";
+}
+
 export function isIntegrationUsable(
   integration: Integration | null | undefined
 ): boolean {
   const view = getIntegrationOperationalView(integration);
-  return view.status === "connected" || view.status === "expiring_soon";
+  return isIntegrationOperationalViewUsable(view);
 }
 
 export function getIntegrationUnavailableMessage(
@@ -279,4 +327,5 @@ export function getIntegrationUnavailableMessage(
 
   return "La integracion no esta disponible en este momento.";
 }
+
 

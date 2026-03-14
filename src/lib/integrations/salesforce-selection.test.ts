@@ -1,12 +1,5 @@
 import assert from "node:assert/strict";
 
-const {
-  detectSalesforcePromptConflict,
-  getSalesforceAgentToolSelectionDiagnostics,
-  selectMostRecentByCreatedAt,
-  selectPreferredSalesforceAgentToolCore,
-} = await import(new URL("./salesforce-selection.ts", import.meta.url).href);
-
 type SalesforceToolConfigLike = {
   provider: "salesforce";
   allowed_actions: string[];
@@ -46,7 +39,16 @@ function parseConfig(config: unknown): SalesforceToolConfigLike | null {
   };
 }
 
-function run(): void {
+async function run(): Promise<void> {
+  const {
+    detectHubSpotPromptConflict,
+    detectSalesforcePromptConflict,
+    getSalesforceAgentToolSelectionDiagnostics,
+    selectMostRecentByCreatedAt,
+    selectPreferredSalesforceAgentToolCore,
+    stripHubSpotPromptConflicts,
+  } = await import(new URL("./salesforce-selection.ts", import.meta.url).href);
+
   const records: TestRecord[] = [
     { id: "older", created_at: "2026-03-10T10:00:00.000Z" },
     { id: "newest", created_at: "2026-03-12T15:30:00.000Z" },
@@ -110,17 +112,35 @@ function run(): void {
   assert.equal(diagnostics.hasLookupRecordsAction, false);
   assert.deepEqual(diagnostics.selectedAllowedActions, ["create_task"]);
 
-  const prompt = `
-    Quiero ser transparente contigo:
-    No tengo acceso a tu CRM.
-    No estoy conectado a Salesforce ni a ninguna base de datos externa.
-  `;
+  const prompt = [
+    "Quiero ser transparente contigo:",
+    "No tengo acceso a tu CRM.",
+    "No estoy conectado a Salesforce ni a ninguna base de datos externa.",
+  ].join("\n");
 
   const result = detectSalesforcePromptConflict(prompt);
 
   assert.equal(result.hasConflict, true);
   assert.match(result.snippet ?? "", /no tengo acceso/i);
+
+  const hubspotPrompt = [
+    "Siendo completamente transparente:",
+    "No tengo habilitada la tool de creacion de contactos en HubSpot.",
+    "No puedo crear ni actualizar contactos en tu CRM desde aqui.",
+  ].join("\n");
+
+  const hubspotResult = detectHubSpotPromptConflict(hubspotPrompt);
+
+  assert.equal(hubspotResult.hasConflict, true);
+  assert.match(hubspotResult.snippet ?? "", /tool de creacion de contactos/i);
+  assert.doesNotMatch(stripHubSpotPromptConflicts(hubspotPrompt), /hubspot/i);
 }
 
-run();
-console.log("salesforce-selection checks passed");
+run()
+  .then(() => {
+    console.log("salesforce-selection checks passed");
+  })
+  .catch((error: unknown) => {
+    console.error(error);
+    process.exit(1);
+  });

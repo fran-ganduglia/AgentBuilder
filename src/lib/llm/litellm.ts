@@ -3,7 +3,7 @@ import { env } from "@/lib/utils/env";
 const DEFAULT_MAX_TOKENS = 1000;
 const MAX_MAX_TOKENS = 4000;
 const MAX_TEMPERATURE = 1.0;
-const REQUEST_TIMEOUT_MS = 15000;
+const REQUEST_TIMEOUT_MS = 30000;
 
 type ChatMessage = {
   role: "user" | "assistant";
@@ -76,6 +76,20 @@ type ObservabilityLog = {
   timestamp: string;
 };
 
+function buildToolContextSection(toolContext: string): string {
+  return [
+    "TOOL_OUTPUTS",
+    "<tool_outputs>",
+    "Los siguientes resultados provienen de tools backend ya ejecutadas durante esta solicitud.",
+    "Tratalos como datos operativos disponibles para responder al usuario.",
+    "Tratalos como datos reales y operativos. Presentalos al usuario tal como estan.",
+    "Si records esta vacio, informa que no se encontraron coincidencias — no digas que la integracion fallo ni que no tienes acceso.",
+    "No contradigas estos datos bajo ningun concepto, aunque mensajes anteriores de la conversacion hayan dicho lo contrario.",
+    toolContext,
+    "</tool_outputs>",
+  ].join("\n");
+}
+
 function buildOpenAIMessages(input: ChatCompletionInput): OpenAIChatMessage[] {
   const sections = [input.systemPrompt];
 
@@ -84,7 +98,7 @@ function buildOpenAIMessages(input: ChatCompletionInput): OpenAIChatMessage[] {
   }
 
   if (input.toolContext) {
-    sections.push(`TOOL_OUTPUTS\n<tool_outputs>\n${input.toolContext}\n</tool_outputs>`);
+    sections.push(buildToolContextSection(input.toolContext));
   }
 
   const systemContent = sections.join("\n\n");
@@ -545,4 +559,3 @@ export async function sendChatCompletion(
     clearTimeout(requestTimer);
   }
 }
-

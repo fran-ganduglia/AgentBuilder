@@ -1,20 +1,23 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { loadChatPreviewSession, type ChatPreviewConfig } from "@/lib/chat/session-draft";
-import type { ChatMode } from "@/lib/chat/conversation-metadata";
-import type { Message, AgentStatus } from "@/types/app";
+import { ChatActiveRail } from "@/components/chat/chat-active-rail";
+import { ChatQuickActionsShell } from "@/components/chat/chat-quick-actions-shell";
+import type { ActiveChatUiState } from "@/lib/chat/chat-form-state";
+import {
+  getChatEmptyStateQuickActions,
+  type ResolvedChatQuickActions,
+} from "@/lib/chat/quick-actions";
+import type { Message } from "@/types/app";
 import { MessageList } from "./message-list";
 import { ChatInput } from "./chat-input";
 
-type ChatExecutionMode = "saved" | "preview";
-
 type ChatWindowProps = {
   agentId: string;
-  agentStatus: AgentStatus;
-  chatMode: ChatMode;
+  isTestMode: boolean;
+  initialConversationId: string | null;
   initialMessages: Message[];
-  initialExecutionMode: ChatExecutionMode;
+  initialQuickActions: ResolvedChatQuickActions;
 };
 
 function createLocalMessage(
@@ -38,72 +41,128 @@ function createLocalMessage(
 
 export function ChatWindow({
   agentId,
-  agentStatus,
-  chatMode,
+  isTestMode,
+  initialConversationId,
   initialMessages,
-  initialExecutionMode,
+  initialQuickActions,
 }: ChatWindowProps) {
   const [messages, setMessages] = useState<Message[]>(initialMessages);
   const [isLoading, setIsLoading] = useState(false);
   const [conversationId, setConversationId] = useState<string | null>(
-    initialMessages[0]?.conversation_id ?? null
+    initialMessages[0]?.conversation_id ?? initialConversationId
   );
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [previewConfig, setPreviewConfig] = useState<ChatPreviewConfig | null>(null);
-  const [executionMode, setExecutionMode] = useState<ChatExecutionMode>(initialExecutionMode);
+  const [isMobileActionsOpen, setIsMobileActionsOpen] = useState(false);
+  const [activeUiState, setActiveUiState] = useState<ActiveChatUiState>({
+    kind: "none",
+  });
+  const [activeFormValues, setActiveFormValues] = useState<Record<string, string>>(
+    {}
+  );
+  const [activeFormFieldErrors, setActiveFormFieldErrors] = useState<
+    Record<string, string>
+  >({});
+  const [activeFormError, setActiveFormError] = useState<string | null>(null);
+  const [isSavingFormDraft, setIsSavingFormDraft] = useState(false);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const draftSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    if (chatMode !== "sandbox") {
-      setPreviewConfig(null);
-      setExecutionMode("saved");
-      return;
+    if (!initialQuickActions.isCrmChat) {
+      setIsMobileActionsOpen(false);
     }
+  }, [initialQuickActions.isCrmChat]);
 
-    const nextPreview = loadChatPreviewSession(agentId);
-    setPreviewConfig(nextPreview?.config ?? null);
+  const emptyStateActions = getChatEmptyStateQuickActions(initialQuickActions);
+  const activeSourceMessageId =
+    activeUiState.kind === "form"
+      ? activeUiState.session.sourceMessageId
+      : activeUiState.kind === "confirmation"
+        ? activeUiState.sourceMessageId
+        : null;
+  const shouldShowRail =
+    activeUiState.kind !== "none" &&
+    (!activeSourceMessageId ||
+      !messages.some((message) => message.id === activeSourceMessageId));
 
-    if (initialExecutionMode === "preview" && nextPreview?.config) {
-      setExecutionMode("preview");
-      return;
-    }
+  const refreshActiveUiState = useCallback(
+    async (targetConversationId: string | null, delayMs = 0) => {
+      if (!targetConversationId) {
+        setActiveUiState({ kind: "none" });
+        return;
+      }
 
-    setExecutionMode("saved");
-  }, [agentId, chatMode, initialExecutionMode]);
+      if (delayMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
 
-  const canUsePreview = chatMode === "sandbox" && previewConfig !== null;
-  const isPreviewActive = executionMode === "preview" && canUsePreview;
+      try {
+        const params = new URLSearchParams({
+          agentId,
+          conversationId: targetConversationId,
+        });
+        const response = await fetch(`/api/chat/forms/active?${params.toString()}`);
+
+        if (!response.ok) {
+          return;
+        }
+
+        const payload = (await response.json()) as { data?: ActiveChatUiState };
+        const nextState = payload.data ?? { kind: "none" };
+        setActiveUiState(nextState);
+
+        if (nextState.kind === "form") {
+          setActiveFormValues(nextState.session.draftValues);
+        } else {
+          setActiveFormValues({});
+          setActiveFormFieldErrors({});
+          setActiveFormError(null);
+        }
+      } catch {
+        // La UI del form es accesoria; no interrumpir el chat si falla.
+      }
+    },
+    [agentId]
+  );
+
+  useEffect(() => {
+    void refreshActiveUiState(conversationId);
+  }, [conversationId, refreshActiveUiState]);
+
+  useEffect(() => {
+    return () => {
+      if (draftSaveTimerRef.current) {
+        clearTimeout(draftSaveTimerRef.current);
+      }
+    };
+  }, []);
 
   const handleSend = useCallback(
     async (content: string) => {
+      const trimmedContent = content.trim();
+      if (!trimmedContent || isLoading) {
+        return;
+      }
       setIsLoading(true);
       setErrorMessage(null);
-
       const optimisticMessage = createLocalMessage(
         conversationId ?? "",
         "user",
-        content
+        trimmedContent
       );
-
       const assistantMessageId = crypto.randomUUID();
-
       setMessages((prev) => [...prev, optimisticMessage]);
-
       const controller = new AbortController();
       abortControllerRef.current = controller;
 
       try {
         const body: Record<string, unknown> = {
           agentId,
-          content,
-          chatMode,
-          mode: isPreviewActive ? "preview" : "saved",
-          ...(isPreviewActive && previewConfig ? { preview: previewConfig } : {}),
+          content: trimmedContent,
         };
         if (conversationId) {
           body.conversationId = conversationId;
         }
-
         const response = await fetch("/api/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -130,14 +189,12 @@ export function ChatWindow({
         if (responseConvId && !conversationId) {
           setConversationId(responseConvId);
         }
-
         const streamingAssistantMessage = createLocalMessage(
           responseConvId ?? conversationId ?? "",
           "assistant",
           ""
         );
         streamingAssistantMessage.id = assistantMessageId;
-
         setMessages((prev) => [...prev, streamingAssistantMessage]);
 
         if (!response.body) {
@@ -153,13 +210,10 @@ export function ChatWindow({
 
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
-
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
-
           const chunk = decoder.decode(value, { stream: true });
-
           if (chunk) {
             setMessages((prev) =>
               prev.map((m) =>
@@ -170,6 +224,9 @@ export function ChatWindow({
             );
           }
         }
+
+        const nextConversationId = responseConvId ?? conversationId ?? null;
+        void refreshActiveUiState(nextConversationId, 150);
       } catch (error) {
         if (error instanceof DOMException && error.name === "AbortError") {
           return;
@@ -185,78 +242,209 @@ export function ChatWindow({
         setIsLoading(false);
       }
     },
-    [agentId, chatMode, conversationId, isPreviewActive, previewConfig]
+    [agentId, conversationId, isLoading, refreshActiveUiState]
   );
+
+  const handleQuickActionSelect = useCallback(
+    (prompt: string) => {
+      setIsMobileActionsOpen(false);
+      void handleSend(prompt);
+    },
+    [handleSend]
+  );
+
+  const handleFormDraftChange = useCallback(
+    (values: Record<string, string>) => {
+      setActiveFormValues(values);
+      setActiveFormFieldErrors({});
+      setActiveFormError(null);
+
+      if (
+        !conversationId ||
+        activeUiState.kind !== "form" ||
+        draftSaveTimerRef.current
+      ) {
+        if (draftSaveTimerRef.current) {
+          clearTimeout(draftSaveTimerRef.current);
+          draftSaveTimerRef.current = null;
+        }
+      }
+
+      if (!conversationId || activeUiState.kind !== "form") {
+        return;
+      }
+
+      draftSaveTimerRef.current = setTimeout(async () => {
+        setIsSavingFormDraft(true);
+        try {
+          const response = await fetch("/api/chat/forms/draft", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              agentId,
+              conversationId,
+              formId: activeUiState.session.formId,
+              draftValues: values,
+              relationSelections: {},
+            }),
+          });
+
+          if (response.ok) {
+            const payload = (await response.json()) as { data?: ActiveChatUiState };
+            if (payload.data) {
+              setActiveUiState(payload.data);
+            }
+          }
+        } finally {
+          draftSaveTimerRef.current = null;
+          setIsSavingFormDraft(false);
+        }
+      }, 350);
+    },
+    [activeUiState, agentId, conversationId]
+  );
+
+  const handleFormDismiss = useCallback(async () => {
+    if (!conversationId) {
+      return;
+    }
+
+    const response = await fetch("/api/chat/forms/dismiss", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ agentId, conversationId }),
+    });
+
+    if (!response.ok) {
+      return;
+    }
+
+    const payload = (await response.json()) as { data?: ActiveChatUiState };
+    setActiveUiState(payload.data ?? { kind: "none" });
+  }, [agentId, conversationId]);
+
+  const handleFormSubmit = useCallback(
+    async (values: Record<string, string>) => {
+      if (!conversationId || activeUiState.kind !== "form") {
+        return;
+      }
+
+      setIsLoading(true);
+      setActiveFormFieldErrors({});
+      setActiveFormError(null);
+
+      try {
+        const response = await fetch("/api/chat/forms/submit", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            agentId,
+            conversationId,
+            formId: activeUiState.session.formId,
+            submissionKey: crypto.randomUUID(),
+            draftValues: values,
+            relationSelections: {},
+          }),
+        });
+
+        const payload = (await response.json()) as {
+          data?: ActiveChatUiState;
+          error?: string;
+          fieldErrors?: Record<string, string>;
+        };
+
+        if (!response.ok) {
+          setActiveFormFieldErrors(payload.fieldErrors ?? {});
+          setActiveFormError(payload.error ?? "No se pudo validar el formulario.");
+          return;
+        }
+
+        setActiveUiState(payload.data ?? { kind: "none" });
+        setActiveFormValues({});
+        void refreshActiveUiState(conversationId);
+      } catch {
+        setActiveFormError("No se pudo enviar el formulario al servidor.");
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [activeUiState, agentId, conversationId, refreshActiveUiState]
+  );
+
+  const handleFormConfirm = useCallback(() => {
+    void handleSend("confirmo");
+  }, [handleSend]);
+
+  const activeRail = shouldShowRail ? (
+    <ChatActiveRail
+      state={activeUiState}
+      disabled={isLoading}
+      draftValues={activeFormValues}
+      fieldErrors={activeFormFieldErrors}
+      submitError={activeFormError}
+      isSavingDraft={isSavingFormDraft}
+      onDraftChange={handleFormDraftChange}
+      onSubmit={handleFormSubmit}
+      onDismiss={handleFormDismiss}
+      onConfirm={handleFormConfirm}
+    />
+  ) : null;
 
   return (
     <div className="flex h-full flex-col bg-white">
-      <div className="border-b border-slate-200 bg-slate-50 px-4 py-3">
-        <div className="mx-auto flex max-w-4xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-slate-500">
-              {chatMode === "sandbox" ? "Sandbox separado del uso real" : "Historial operativo local"}
-            </p>
-            <p className="mt-1 text-sm text-slate-600">
-              {chatMode === "sandbox"
-                ? agentStatus === "draft"
-                  ? "Este hilo sirve para afinar respuestas antes de activar el agente."
-                  : "Este hilo de sandbox no afecta el chat operativo del agente activo."
-                : "Este hilo cuenta como uso real local del agente."}
-            </p>
-          </div>
-
-          {chatMode === "sandbox" ? (
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setExecutionMode("saved")}
-                className={`rounded-full px-3 py-1 text-[11px] font-bold uppercase tracking-[0.2em] ${
-                  !isPreviewActive
-                    ? "bg-slate-900 text-white"
-                    : "bg-white text-slate-600 ring-1 ring-inset ring-slate-200"
-                }`}
-              >
-                Version guardada
-              </button>
-              <button
-                type="button"
-                onClick={() => setExecutionMode("preview")}
-                disabled={!canUsePreview}
-                className={`rounded-full px-3 py-1 text-[11px] font-bold uppercase tracking-[0.2em] ${
-                  isPreviewActive
-                    ? "bg-amber-500 text-slate-950"
-                    : "bg-white text-slate-600 ring-1 ring-inset ring-slate-200"
-                } disabled:cursor-not-allowed disabled:opacity-50`}
-              >
-                Preview actual
-              </button>
-            </div>
-          ) : null}
-        </div>
-
-        {chatMode === "sandbox" && !canUsePreview ? (
-          <div className="mx-auto mt-3 max-w-4xl rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-            No encontramos un borrador de sesion para preview. Abre el editor del agente y entra desde &quot;Probar borrador actual&quot;.
-          </div>
-        ) : null}
-      </div>
-
-      <MessageList messages={messages} />
-      {errorMessage ? (
-        <div className="mx-auto mt-4 w-full max-w-3xl px-4">
-          <div className="flex items-center gap-3 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 shadow-sm">
-            <svg className="h-5 w-5 shrink-0 text-rose-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-            </svg>
-            <p className="text-sm font-medium text-rose-800">{errorMessage}</p>
+      {isTestMode ? (
+        <div className="border-b border-amber-200 bg-amber-50 px-4 py-3">
+          <div className="mx-auto max-w-4xl rounded-2xl border border-amber-200 bg-white/70 px-4 py-3 text-sm text-amber-950">
+            <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-amber-700">Modo prueba</p>
+            <p className="mt-1">Los mensajes no afectan usuarios reales. Cada cambio guardado en el agente se refleja en el siguiente mensaje.</p>
           </div>
         </div>
       ) : null}
-      <div className="shrink-0 pb-0 pt-2">
-        <ChatInput onSend={handleSend} isLoading={isLoading} />
+
+      <div className="relative flex min-h-0 flex-1 xl:grid xl:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="flex min-h-0 flex-1 flex-col">
+          <MessageList
+            messages={messages}
+            emptyStateActions={emptyStateActions}
+            quickActions={initialQuickActions}
+            onQuickActionSelect={handleQuickActionSelect}
+            onFollowUpIntentSelect={handleQuickActionSelect}
+            activeUiState={activeUiState}
+            activeFormValues={activeFormValues}
+            activeFormFieldErrors={activeFormFieldErrors}
+            activeFormError={activeFormError}
+            isSavingFormDraft={isSavingFormDraft}
+            onFormDraftChange={handleFormDraftChange}
+            onFormDismiss={handleFormDismiss}
+            onFormSubmit={handleFormSubmit}
+            onFormConfirm={handleFormConfirm}
+            isLoading={isLoading}
+          />
+          {errorMessage ? (
+            <div className="mx-auto mt-4 w-full max-w-3xl px-4">
+              <div className="flex items-center gap-3 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 shadow-sm">
+                <svg className="h-5 w-5 shrink-0 text-rose-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+                <p className="text-sm font-medium text-rose-800">{errorMessage}</p>
+              </div>
+            </div>
+          ) : null}
+          <div className="shrink-0 pb-0 pt-2">
+            <ChatInput onSend={handleSend} isLoading={isLoading} />
+          </div>
+        </div>
+
+        <ChatQuickActionsShell
+          quickActions={initialQuickActions}
+          isLoading={isLoading}
+          isMobileOpen={isMobileActionsOpen}
+          onActionSelect={handleQuickActionSelect}
+          onOpenMobile={() => setIsMobileActionsOpen(true)}
+          onCloseMobile={() => setIsMobileActionsOpen(false)}
+          activeRail={activeRail}
+        />
       </div>
     </div>
   );
 }
-
-

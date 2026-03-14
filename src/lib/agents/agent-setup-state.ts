@@ -2,22 +2,35 @@ import { z } from "zod";
 import type { Agent } from "@/types/app";
 import {
   agentSetupStateSchema,
+  createDefaultAgentSetupState,
   resolveSetupState,
   type AgentSetupState,
   type SetupResolutionContext,
 } from "@/lib/agents/agent-setup";
 import { createSetupStateForTemplate } from "@/lib/agents/agent-templates";
 
-type ParsedSetupState = z.infer<typeof agentSetupStateSchema>;
+type ParsedSetupStateInput = z.input<typeof agentSetupStateSchema>;
 
 export function normalizeSetupState(
-  setupState: ParsedSetupState,
+  setupState: ParsedSetupStateInput,
   context: SetupResolutionContext = {}
 ): AgentSetupState {
-  const baseState = createSetupStateForTemplate(setupState.template_id, {
-    fallbackTimezone: context.fallbackTimezone,
-  });
-  const existingItems = new Map(setupState.checklist.map((item) => [item.id, item]));
+  const parsedSetupState = agentSetupStateSchema.parse(setupState);
+  const baseState = parsedSetupState.template_id
+    ? createSetupStateForTemplate(parsedSetupState.template_id, {
+      fallbackTimezone: context.fallbackTimezone,
+    })
+    : createDefaultAgentSetupState({
+      templateId: null,
+      workflowTemplateId: parsedSetupState.workflowTemplateId,
+      areas: parsedSetupState.areas,
+      integrations: parsedSetupState.integrations,
+      toolScopePreset: parsedSetupState.tool_scope_preset,
+      channel: parsedSetupState.channel,
+      currentStep: parsedSetupState.current_step,
+      fallbackTimezone: context.fallbackTimezone,
+    });
+  const existingItems = new Map(parsedSetupState.checklist.map((item) => [item.id, item]));
   const checklist = baseState.checklist.map((item) => {
     const existing = existingItems.get(item.id);
 
@@ -34,12 +47,24 @@ export function normalizeSetupState(
   return resolveSetupState(
     {
       ...baseState,
-      channel: setupState.channel,
-      current_step: setupState.current_step,
-      builder_draft: setupState.builder_draft
-        ? { ...baseState.builder_draft, ...setupState.builder_draft, channel: setupState.channel }
+      template_id: parsedSetupState.template_id,
+      workflowTemplateId: parsedSetupState.workflowTemplateId,
+      workflowCategory: parsedSetupState.workflowCategory,
+      requiredIntegrations: parsedSetupState.requiredIntegrations,
+      optionalIntegrations: parsedSetupState.optionalIntegrations,
+      allowedAutomationPresets: parsedSetupState.allowedAutomationPresets,
+      automationPreset: parsedSetupState.automationPreset,
+      instanceConfig: parsedSetupState.instanceConfig,
+      successMetrics: parsedSetupState.successMetrics,
+      areas: parsedSetupState.areas,
+      integrations: parsedSetupState.integrations,
+      tool_scope_preset: parsedSetupState.tool_scope_preset,
+      channel: parsedSetupState.channel,
+      current_step: parsedSetupState.current_step,
+      builder_draft: parsedSetupState.builder_draft
+        ? { ...baseState.builder_draft, ...parsedSetupState.builder_draft, channel: parsedSetupState.channel }
         : baseState.builder_draft,
-      task_data: setupState.task_data ?? baseState.task_data,
+      task_data: parsedSetupState.task_data ?? baseState.task_data,
       checklist,
     },
     context
@@ -70,5 +95,10 @@ export function isWhatsAppChannelAgent(
   agent: Agent,
   context: SetupResolutionContext = {}
 ): boolean {
-  return readAgentSetupState(agent, context)?.channel === "whatsapp";
+  const setupState = readAgentSetupState(agent, context);
+  if (!setupState) {
+    return false;
+  }
+
+  return setupState.channel === "whatsapp" || setupState.integrations.includes("whatsapp");
 }

@@ -1,0 +1,166 @@
+{
+  "name": "Deletion Worker",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 5
+            }
+          ]
+        }
+      },
+      "id": "e5f6a7b8-c9d0-1234-efab-345678901234",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -656,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.APP_BASE_URL }}/api/workers/deletion",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 55000
+        }
+      },
+      "id": "f6a7b8c9-d0e1-2345-fabc-456789012345",
+      "name": "HTTP Request — Deletion Worker",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -448,
+        128
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "iU2pm59vosdoAGqW",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "check-empty",
+              "leftValue": "={{ $json.body.data.processed }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a7b8c9d0-e1f2-3456-abcd-567890123456",
+      "name": "IF — Cola vacía",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -224,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "log-processed",
+              "name": "processed",
+              "value": "={{ $json.body.data.processed }}",
+              "type": "number"
+            },
+            {
+              "id": "log-failed",
+              "name": "failed",
+              "value": "={{ $json.body.data.failed }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "b8c9d0e1-f2a3-4567-bcde-678901234567",
+      "name": "Set — Log resultado",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        0,
+        0
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request — Deletion Worker",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request — Deletion Worker": {
+      "main": [
+        [
+          {
+            "node": "IF — Cola vacía",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF — Cola vacía": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Set — Log resultado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "c9d0e1f2-a3b4-5678-cdef-789012345678",
+  "meta": {
+    "instanceId": "383bde83c8f40f9807dee2626a62ac57bbcfa0c3c0b2b2551b71dd028bdd21cd"
+  },
+  "id": "wDeletionWorker",
+  "tags": []
+}

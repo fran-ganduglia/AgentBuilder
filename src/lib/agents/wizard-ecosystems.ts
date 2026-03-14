@@ -63,9 +63,9 @@ export const WIZARD_ECOSYSTEMS: WizardEcosystem[] = [
           "Reune WABA ID, access token, app secret y verify token. Son los mismos datos que vas a cargar en Settings > Integraciones.",
       },
       {
-        title: "Vuelve al wizard para elegir el template",
+        title: "Vuelve al wizard para crear el agente inteligente",
         description:
-          "Una vez definida la integracion base, usa uno de los templates para dejar armado el comportamiento inicial del agente.",
+          "Una vez definida la integracion base, crea el agente unificado de WhatsApp y completa su setup comun antes de conectarlo al numero real.",
       },
     ],
     resourceLinks: [
@@ -139,29 +139,29 @@ export const WIZARD_ECOSYSTEMS: WizardEcosystem[] = [
     description: "Acelera captacion y seguimiento comercial con templates enfocados en pipeline y lead capture.",
     availabilityLabel: "Conexion real disponible",
     theme: "orange",
-    tutorialTitle: "Preconfigura el agente mientras defines la app de HubSpot",
+    tutorialTitle: "Conecta HubSpot y deja el agente listo para operar",
     tutorialDescription:
-      "La integracion nativa con HubSpot todavia no existe en AgentBuilder. Esta fase sirve para dejar listo el comportamiento del agente y bajar el trabajo de onboarding para cuando la conexion real llegue.",
+      "Si tu organizacion ya tiene una integracion HubSpot usable, el borrador se crea con la tool CRM vinculada automaticamente. Si todavia no existe o necesita revision, el wizard crea el borrador igual y lo deja pendiente hasta completar la conexion.",
     prerequisites: [
-      "Identificar si el flujo depende de contactos, negocios o tareas",
-      "Tener claro el owner y las propiedades minimas a capturar",
-      "Preparar una private app o un flujo OAuth fuera de AgentBuilder",
+      "Permiso de admin para abrir Settings > Integraciones en AgentBuilder",
+      "Una integracion HubSpot activa y operable para la organizacion",
+      "Definir el flujo a cubrir: contactos, deals, tasks o meetings",
     ],
     steps: [
       {
-        title: "Mapea el pipeline o el formulario objetivo",
+        title: "Conecta HubSpot desde Integraciones",
         description:
-          "Alinea que etapas, campos o disparadores necesitan contexto del agente antes de llevarlo a HubSpot.",
+          "Revisa si la organizacion ya tiene OAuth operativo en Settings > Integraciones. Si falta, ese es el primer paso antes de activar el agente.",
       },
       {
-        title: "Define el tipo de autenticacion",
+        title: "Crea el borrador con un template HubSpot",
         description:
-          "HubSpot recomienda preparar la app y los scopes desde su developer platform. Esa configuracion queda fuera de AgentBuilder por ahora.",
+          "Cuando la integracion esta usable, el agente se guarda con la tool CRM autoasignada. Si no, el borrador queda pendiente y el setup lo muestra como bloqueo real.",
       },
       {
-        title: "Elige un template y adelanta el setup",
+        title: "Valida la tool CRM del agente",
         description:
-          "Puedes dejar listas preguntas de calificacion, handoff y seguimiento comercial sin esperar la integracion real.",
+          "Para agentes nuevos suele quedar lista automaticamente. En agentes existentes, abre la configuracion de tools y guarda la tool CRM si todavia no esta vinculada.",
       },
     ],
     resourceLinks: [
@@ -172,44 +172,44 @@ export const WIZARD_ECOSYSTEMS: WizardEcosystem[] = [
       },
     ],
     primaryAction: {
-      label: "Abrir guia oficial",
-      href: "https://developers.hubspot.com/docs/apps/developer-platform/build-apps/authentication/oauth/oauth-quickstart-guide",
-      external: true,
+      label: "Abrir integraciones",
+      href: "/settings/integrations",
     },
     secondaryAction: {
-      label: "Ver templates sugeridos",
-      href: "#wizard-template-gallery",
+      label: "Guia oficial de HubSpot",
+      href: "https://developers.hubspot.com/docs/apps/developer-platform/build-apps/authentication/oauth/oauth-quickstart-guide",
+      external: true,
     },
   },
   {
     id: "google_workspace",
     name: "Gmail + Calendar",
-    description: "Prepara asistentes para inbox y coordinacion operativa sin abrir todavia una integracion real.",
+    description: "Asistentes para inbox y agenda sobre una sola integracion compartida de Google Workspace.",
     availabilityLabel: "Conexion real disponible",
     theme: "rose",
-    tutorialTitle: "Disena el flujo antes de conectar Gmail o Calendar",
+    tutorialTitle: "Conecta Google Workspace y habilita Gmail o Calendar por superficie",
     tutorialDescription:
-      "En esta fase AgentBuilder no conecta Gmail ni Google Calendar de forma nativa. El wizard solo te deja adelantado el comportamiento para inbox, agenda y seguimiento operativo.",
+      "Gmail y Google Calendar ya comparten una sola integracion `google` a nivel organizacion. Puedes conectar una superficie primero y ampliar scopes despues sin perder la conexion existente.",
     prerequisites: [
-      "Elegir si el agente prioriza inbox, agenda o ambas superficies",
-      "Tener una cuenta de Google Workspace y proyecto en Google Cloud",
-      "Definir permisos y datos minimos que debera leer o proponer",
+      "Permiso de admin para abrir Settings > Integraciones en AgentBuilder",
+      "Proyecto OAuth de Google Cloud con Gmail API y/o Calendar API habilitadas",
+      "Definir si el agente necesita inbox, agenda o ambas superficies",
     ],
     steps: [
       {
-        title: "Prepara el proyecto de Google Cloud",
+        title: "Conecta Google desde Integraciones",
         description:
-          "La conexion futura necesitara APIs y credenciales en Google Cloud. Puedes revisarlo ahora mientras dejas listo el onboarding conversacional.",
+          "Cada card de Settings habilita Gmail o Calendar pidiendo solo los scopes necesarios y acumulando permisos sobre la misma integracion `google`.",
       },
       {
-        title: "Delimita el alcance del agente",
+        title: "Crea el borrador con un template de inbox o agenda",
         description:
-          "Decide si va a sugerir respuestas de inbox, ordenar prioridades o ayudar a preparar agendamiento y confirmaciones.",
+          "El wizard ya permite marcar Gmail y Google Calendar como integraciones disponibles para que el setup refleje el alcance real del agente.",
       },
       {
-        title: "Avanza con un template base",
+        title: "Guarda la tool correcta en el agente",
         description:
-          "El template deja definidos tono, restricciones y checklist inicial para que luego solo falte enchufar la integracion real.",
+          "Cada superficie se configura por separado en el panel del agente con sus propias acciones habilitadas, aunque ambas apunten al mismo `integration_id`.",
       },
     ],
     resourceLinks: [
@@ -225,9 +225,8 @@ export const WIZARD_ECOSYSTEMS: WizardEcosystem[] = [
       },
     ],
     primaryAction: {
-      label: "Abrir guia Gmail",
-      href: "https://developers.google.com/workspace/gmail/api/quickstart/js",
-      external: true,
+      label: "Abrir integraciones",
+      href: "/settings/integrations",
     },
     secondaryAction: {
       label: "Ver templates sugeridos",
@@ -298,5 +297,6 @@ export function getWizardEcosystemById(ecosystemId: WizardEcosystemId): WizardEc
   const ecosystem = WIZARD_ECOSYSTEMS.find((item) => item.id === ecosystemId);
   return ecosystem ?? WIZARD_ECOSYSTEMS[0];
 }
+
 
 

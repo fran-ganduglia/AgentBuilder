@@ -1,0 +1,84 @@
+{
+  "name": "Integration Health Worker",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 5
+            }
+          ]
+        }
+      },
+      "id": "d0e1f2a3-b4c5-6789-defa-890123456789",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -656,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $vars.appBaseUrl + '/api/workers/integrations' }}",
+        "authentication": "none",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $vars.cronSecret }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 55000
+        }
+      },
+      "id": "e1f2a3b4-c5d6-7890-efab-901234567890",
+      "name": "HTTP Request — Integration Health",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -448,
+        128
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request — Integration Health",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "f2a3b4c5-d6e7-8901-fabc-012345678901",
+  "meta": {
+    "instanceId": "383bde83c8f40f9807dee2626a62ac57bbcfa0c3c0b2b2551b71dd028bdd21cd"
+  },
+  "id": "wIntegrationHealth",
+  "tags": []
+}

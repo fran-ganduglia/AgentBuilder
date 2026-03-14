@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { validateCronRequest } from "@/lib/workers/auth";
+import { areWorkersEnabled, getWorkersDisabledResponse, validateCronRequest } from "@/lib/workers/auth";
 import { claimEvents, markDone, markFailed } from "@/lib/workers/event-queue";
 import { deliverWebhooks } from "@/lib/workers/webhook-deliverer";
 
@@ -17,6 +17,10 @@ const WEBHOOK_EVENT_TYPES = [
 export async function GET(request: Request) {
   if (!validateCronRequest(request)) {
     return NextResponse.json({ error: "No autorizado" }, { status: 401 });
+  }
+
+  if (!areWorkersEnabled()) {
+    return getWorkersDisabledResponse();
   }
 
   const events = await claimEvents(WEBHOOK_EVENT_TYPES, 5);

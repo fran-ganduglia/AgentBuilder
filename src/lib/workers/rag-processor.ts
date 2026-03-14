@@ -1,7 +1,7 @@
 import "server-only";
 
 import { enqueueEvent } from "@/lib/db/event-queue";
-import { generateEmbedding } from "@/lib/llm/embeddings";
+import { generateEmbeddings } from "@/lib/llm/embeddings";
 import { createServiceSupabaseClient } from "@/lib/supabase/service";
 import { chunkText } from "@/lib/workers/text-chunker";
 import { extractText } from "@/lib/workers/text-extractor";
@@ -55,8 +55,16 @@ export async function processDocument(event: RagEvent): Promise<void> {
     throw new Error(`No se generaron chunks para ${file_name}`);
   }
 
-  for (const chunk of chunks) {
-    const embedding = await generateEmbedding(chunk.content);
+  const embeddings = await generateEmbeddings(chunks.map((c) => c.content));
+
+  for (let i = 0; i < chunks.length; i++) {
+    const chunk = chunks[i];
+    const embedding = embeddings[i];
+
+    if (!embedding) {
+      console.error("rag.embedding_missing", { documentId: document_id, chunkIndex: chunk.chunkIndex });
+      continue;
+    }
 
     const { error: insertError } = await supabase.from("document_chunks").insert({
       document_id,

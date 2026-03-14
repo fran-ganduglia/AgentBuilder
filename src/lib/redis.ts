@@ -12,7 +12,7 @@ type RedisConnectionOptions = {
   useTls: boolean;
 };
 
-const REDIS_TIMEOUT_MS = 500;
+const REDIS_TIMEOUT_MS = 2000;
 
 function encodeCommand(args: string[]): string {
   return `*${args.length}\r\n${args
@@ -239,6 +239,64 @@ export async function incrementCounter(
     return currentCount;
   });
 }
+
+export async function getCounter(key: string): Promise<number> {
+  return withRedisConnection(async (socket) => {
+    const value = await sendCommand(socket, ["GET", key]);
+
+    if (value === null) {
+      return 0;
+    }
+
+    if (typeof value !== "string") {
+      throw new Error("Redis devolvio un contador invalido");
+    }
+
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) {
+      throw new Error("Redis devolvio un contador no numerico");
+    }
+
+    return parsed;
+  });
+}
+
+export async function acquireRedisLock(
+  key: string,
+  token: string,
+  ttlSeconds: number
+): Promise<boolean> {
+  return withRedisConnection(async (socket) => {
+    const result = await sendCommand(socket, [
+      "SET",
+      key,
+      token,
+      "NX",
+      "EX",
+      String(Math.max(1, ttlSeconds)),
+    ]);
+
+    return result === "OK";
+  });
+}
+
+export async function releaseRedisLock(
+  key: string,
+  token: string
+): Promise<boolean> {
+  return withRedisConnection(async (socket) => {
+    const result = await sendCommand(socket, [
+      "EVAL",
+      "if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) else return 0 end",
+      "1",
+      key,
+      token,
+    ]);
+
+    return result === 1;
+  });
+}
+
 export async function getJsonValue<T>(key: string): Promise<T | null> {
   return withRedisConnection(async (socket) => {
     const value = await sendCommand(socket, ["GET", key]);
@@ -270,4 +328,3 @@ export async function setJsonValue(
     ]);
   });
 }
-

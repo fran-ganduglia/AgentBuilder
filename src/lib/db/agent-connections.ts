@@ -257,6 +257,25 @@ export async function createAgentConnection(
   return { data, error: null };
 }
 
+export async function getAgentConnectionByIdWithServiceRole(
+  connectionId: string,
+  organizationId: string
+): Promise<DbResult<AgentConnection>> {
+  const serviceClient = createServiceSupabaseClient();
+  const { data, error } = await serviceClient
+    .from("agent_connections")
+    .select("*")
+    .eq("id", connectionId)
+    .eq("organization_id", organizationId)
+    .maybeSingle();
+
+  if (error) {
+    return { data: null, error: error.message };
+  }
+
+  return { data, error: null };
+}
+
 export async function getAgentConnectionByProviderAgentId(
   integrationId: string,
   organizationId: string,

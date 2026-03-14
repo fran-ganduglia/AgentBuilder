@@ -24,9 +24,21 @@ export function ScheduleEditor({ itemId, timezoneFallback, setupState, canEdit, 
           type="text"
           value={schedule.timezone}
           disabled={!canEdit}
-          onChange={(event) => onTaskDataChange(itemId, { ...schedule, timezone: event.target.value, deferred: false })}
+          onChange={(event) => onTaskDataChange(itemId, {
+            ...schedule,
+            timezone: event.target.value,
+            deferred: false,
+            timezoneManualOverride: true,
+          })}
           className="mt-2 block w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm text-slate-900 transition-colors hover:bg-slate-50 focus:border-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900 disabled:cursor-not-allowed disabled:bg-slate-100"
         />
+        {schedule.detectedTimezone ? (
+          <p className="mt-2 text-xs text-slate-500">
+            {schedule.timezoneManualOverride
+              ? `Detectada desde Google Calendar: ${schedule.detectedTimezone}. Este campo quedó como override manual del admin.`
+              : `Detectada desde Google Calendar: ${schedule.detectedTimezone}.`}
+          </p>
+        ) : null}
       </div>
       <div className="grid gap-3">
         {WEEKDAYS.map((day) => {

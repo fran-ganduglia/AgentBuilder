@@ -1,14 +1,21 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { getSession } from "@/lib/auth/get-session";
 import { agentModelSchema } from "@/lib/agents/agent-config";
-import { isSalesforceTemplateId } from "@/lib/agents/agent-templates";
-import { agentSetupStateSchema } from "@/lib/agents/agent-setup";
+import { validateIntegrationSelection } from "@/lib/agents/agent-integration-limits";
+import {
+  agentSetupStateSchema,
+  getResolvedToolsForIntegration,
+} from "@/lib/agents/agent-setup";
+import { isHubSpotTemplateId, isSalesforceTemplateId } from "@/lib/agents/agent-templates";
 import { normalizeSetupState } from "@/lib/agents/agent-setup-state";
+import { getSession } from "@/lib/auth/get-session";
 import { createAgent, softDeleteAgent, updateAgentSetupState } from "@/lib/db/agents";
 import { createAgentConnection } from "@/lib/db/agent-connections";
 import { upsertAgentTool } from "@/lib/db/agent-tools";
 import { enqueueEvent } from "@/lib/db/event-queue";
+import { getPrimaryGoogleIntegration } from "@/lib/db/google-integrations";
+import { getPrimaryHubSpotIntegration } from "@/lib/db/hubspot-integrations";
+import { getOrganizationPlanName } from "@/lib/db/organization-plans";
 import {
   getOpenAIIntegrationApiKey,
   getOpenAIIntegrationById,
@@ -16,21 +23,24 @@ import {
 import { getPrimarySalesforceIntegration } from "@/lib/db/salesforce-integrations";
 import { assertUsableIntegration } from "@/lib/integrations/access";
 import { insertProviderActionAudit } from "@/lib/integrations/audit";
+import { resolveGoogleCalendarIntegrationTimezone } from "@/lib/integrations/google-calendar-timezone";
 import { getSafeProviderErrorMessage } from "@/lib/integrations/provider-gateway";
-import { getDefaultSalesforceAgentToolConfig } from "@/lib/integrations/salesforce-tools";
+import { buildAssistantConnectionMetadata } from "@/lib/llm/openai-assistant-mapper";
 import {
-  buildAssistantConnectionMetadata,
-} from "@/lib/llm/openai-assistant-mapper";
+  gmailAgentToolConfigSchema,
+  googleCalendarAgentToolConfigSchema,
+} from "@/lib/integrations/google-agent-tools";
+import { hasAllGoogleScopesForSurface } from "@/lib/integrations/google-scopes";
 import {
   createOpenAIAssistant,
   deleteOpenAIAssistant,
 } from "@/lib/llm/openai-assistants";
-import type { Role } from "@/types/app";
-import type { Json } from "@/types/database";
 import {
   parseJsonRequestBody,
   validateJsonMutationRequest,
 } from "@/lib/utils/request-security";
+import type { Role } from "@/types/app";
+import type { Json } from "@/types/database";
 
 const ROLES_WITH_WRITE_ACCESS: readonly Role[] = ["admin", "editor"];
 
@@ -43,6 +53,263 @@ const createAgentSchema = z.object({
   integrationId: z.string().uuid("integrationId debe ser un UUID valido").optional(),
   setupState: agentSetupStateSchema.optional(),
 });
+
+async function resolveAutoLinkIntegrations(organizationId: string, input: {
+  expectsSalesforceIntegration: boolean;
+  expectsHubSpotIntegration: boolean;
+  expectsGmailIntegration: boolean;
+  expectsGoogleCalendarIntegration: boolean;
+}): Promise<{
+  salesforceIntegrationId: string | null;
+  hubspotIntegrationId: string | null;
+  googleIntegrationId: string | null;
+  googleGrantedScopes: string[];
+  error: string | null;
+}> {
+  let salesforceIntegrationId: string | null = null;
+  let hubspotIntegrationId: string | null = null;
+  let googleIntegrationId: string | null = null;
+  let googleGrantedScopes: string[] = [];
+
+  if (input.expectsSalesforceIntegration) {
+    const salesforceIntegrationResult = await getPrimarySalesforceIntegration(organizationId);
+
+    if (salesforceIntegrationResult.error) {
+      return {
+        salesforceIntegrationId: null,
+        hubspotIntegrationId: null,
+        googleIntegrationId: null,
+        googleGrantedScopes: [],
+        error: "No se pudo validar la integracion de Salesforce",
+      };
+    }
+
+    if (salesforceIntegrationResult.data) {
+      const salesforceAccess = assertUsableIntegration(salesforceIntegrationResult.data);
+      if (salesforceAccess.ok) {
+        salesforceIntegrationId = salesforceIntegrationResult.data.id;
+      }
+    }
+  }
+
+  if (input.expectsHubSpotIntegration) {
+    const hubspotIntegrationResult = await getPrimaryHubSpotIntegration(organizationId);
+
+    if (hubspotIntegrationResult.error) {
+      return {
+        salesforceIntegrationId,
+        hubspotIntegrationId: null,
+        googleIntegrationId,
+        googleGrantedScopes,
+        error: "No se pudo validar la integracion de HubSpot",
+      };
+    }
+
+    if (hubspotIntegrationResult.data) {
+      const hubspotAccess = assertUsableIntegration(hubspotIntegrationResult.data);
+      if (hubspotAccess.ok) {
+        hubspotIntegrationId = hubspotIntegrationResult.data.id;
+      }
+    }
+  }
+
+  if (input.expectsGmailIntegration || input.expectsGoogleCalendarIntegration) {
+    const googleIntegrationResult = await getPrimaryGoogleIntegration(organizationId);
+
+    if (googleIntegrationResult.error) {
+      return {
+        salesforceIntegrationId,
+        hubspotIntegrationId,
+        googleIntegrationId: null,
+        googleGrantedScopes: [],
+        error: "No se pudo validar la integracion de Google Workspace",
+      };
+    }
+
+    if (googleIntegrationResult.data) {
+      const googleAccess = assertUsableIntegration(googleIntegrationResult.data);
+      if (googleAccess.ok) {
+        googleIntegrationId = googleIntegrationResult.data.id;
+        googleGrantedScopes =
+          googleIntegrationResult.data.metadata &&
+          typeof googleIntegrationResult.data.metadata === "object" &&
+          !Array.isArray(googleIntegrationResult.data.metadata)
+            ? (() => {
+                const scopes = Reflect.get(
+                  googleIntegrationResult.data.metadata,
+                  "granted_scopes"
+                );
+                return Array.isArray(scopes)
+                  ? scopes.filter((scope): scope is string => typeof scope === "string")
+                  : [];
+              })()
+            : [];
+      }
+    }
+  }
+
+  return {
+    salesforceIntegrationId,
+    hubspotIntegrationId,
+    googleIntegrationId,
+    googleGrantedScopes,
+    error: null,
+  };
+}
+
+async function autoLinkLocalCrmTools(input: {
+  agentId: string;
+  organizationId: string;
+  setupState: NonNullable<z.infer<typeof createAgentSchema>["setupState"]>;
+  salesforceIntegrationId: string | null;
+  hubspotIntegrationId: string | null;
+  googleIntegrationId: string | null;
+  googleGrantedScopes: string[];
+}): Promise<{ error: string | null; source: "local" | "local_salesforce_ready" | "local_hubspot_ready" }> {
+  let source: "local" | "local_salesforce_ready" | "local_hubspot_ready" = "local";
+  const salesforceAllowedActions = getResolvedToolsForIntegration(input.setupState, "salesforce");
+  const hubspotAllowedActions = getResolvedToolsForIntegration(input.setupState, "hubspot");
+  const gmailAllowedActions = getResolvedToolsForIntegration(input.setupState, "gmail");
+  const googleCalendarAllowedActions = getResolvedToolsForIntegration(
+    input.setupState,
+    "google_calendar"
+  );
+
+  if (input.salesforceIntegrationId && salesforceAllowedActions.length > 0) {
+    const toolResult = await upsertAgentTool({
+      agentId: input.agentId,
+      organizationId: input.organizationId,
+      integrationId: input.salesforceIntegrationId,
+      toolType: "crm",
+      isEnabled: true,
+      config: {
+        provider: "salesforce",
+        allowed_actions: salesforceAllowedActions,
+      } as unknown as Json,
+    });
+
+    if (toolResult.error || !toolResult.data) {
+      return { error: toolResult.error ?? "No se pudo vincular Salesforce al agente", source };
+    }
+
+    const resolvedSetupState = normalizeSetupState(input.setupState, {
+      hasReadyDocuments: false,
+      providerIntegrations: {
+        salesforce: {
+          isUsable: true,
+          hasEnabledTool: true,
+        },
+      },
+    });
+    const setupUpdateResult = await updateAgentSetupState(
+      input.agentId,
+      input.organizationId,
+      resolvedSetupState
+    );
+
+    if (setupUpdateResult.error || !setupUpdateResult.data) {
+      return {
+        error: setupUpdateResult.error ?? "No se pudo guardar el setup de Salesforce del agente",
+        source,
+      };
+    }
+
+    source = "local_salesforce_ready";
+  }
+
+  if (input.hubspotIntegrationId && hubspotAllowedActions.length > 0) {
+    const toolResult = await upsertAgentTool({
+      agentId: input.agentId,
+      organizationId: input.organizationId,
+      integrationId: input.hubspotIntegrationId,
+      toolType: "crm",
+      isEnabled: true,
+      config: {
+        provider: "hubspot",
+        allowed_actions: hubspotAllowedActions,
+      } as unknown as Json,
+    });
+
+    if (toolResult.error || !toolResult.data) {
+      return { error: toolResult.error ?? "No se pudo vincular HubSpot al agente", source };
+    }
+
+    const resolvedSetupState = normalizeSetupState(input.setupState, {
+      hasReadyDocuments: false,
+      providerIntegrations: {
+        hubspot: {
+          isUsable: true,
+          hasEnabledTool: true,
+        },
+      },
+    });
+    const setupUpdateResult = await updateAgentSetupState(
+      input.agentId,
+      input.organizationId,
+      resolvedSetupState
+    );
+
+    if (setupUpdateResult.error || !setupUpdateResult.data) {
+      return {
+        error: setupUpdateResult.error ?? "No se pudo guardar el setup de HubSpot del agente",
+        source,
+      };
+    }
+
+    source = input.salesforceIntegrationId ? source : "local_hubspot_ready";
+  }
+
+  if (
+    input.googleIntegrationId &&
+    gmailAllowedActions.length > 0 &&
+    hasAllGoogleScopesForSurface(input.googleGrantedScopes, "gmail")
+  ) {
+    const toolResult = await upsertAgentTool({
+      agentId: input.agentId,
+      organizationId: input.organizationId,
+      integrationId: input.googleIntegrationId,
+      toolType: "gmail",
+      isEnabled: true,
+      config: gmailAgentToolConfigSchema.parse({
+        provider: "google",
+        surface: "gmail",
+        allowed_actions: gmailAllowedActions,
+      }) as unknown as Json,
+    });
+
+    if (toolResult.error || !toolResult.data) {
+      return { error: toolResult.error ?? "No se pudo configurar Gmail en el agente", source };
+    }
+  }
+
+  if (
+    input.googleIntegrationId &&
+    googleCalendarAllowedActions.length > 0 &&
+    hasAllGoogleScopesForSurface(input.googleGrantedScopes, "google_calendar")
+  ) {
+    const toolResult = await upsertAgentTool({
+      agentId: input.agentId,
+      organizationId: input.organizationId,
+      integrationId: input.googleIntegrationId,
+      toolType: "google_calendar",
+      isEnabled: true,
+      config: googleCalendarAgentToolConfigSchema.parse({
+        provider: "google",
+        surface: "google_calendar",
+        allowed_actions: googleCalendarAllowedActions,
+      }) as unknown as Json,
+    });
+
+    if (toolResult.error || !toolResult.data) {
+      return {
+        error: toolResult.error ?? "No se pudo configurar Google Calendar en el agente",
+        source,
+      };
+    }
+  }
+
+  return { error: null, source };
+}
 
 export async function POST(request: Request): Promise<NextResponse> {
   const requestError = validateJsonMutationRequest(request);
@@ -64,31 +331,73 @@ export async function POST(request: Request): Promise<NextResponse> {
     return parsed.errorResponse;
   }
 
-  const normalizedSetupState = parsed.data.setupState
+  const initialSetupState = parsed.data.setupState
     ? normalizeSetupState(parsed.data.setupState, { hasReadyDocuments: false })
     : undefined;
-  const expectsSalesforceIntegration = normalizedSetupState
-    ? isSalesforceTemplateId(normalizedSetupState.template_id)
-    : false;
 
-  let autoLinkSalesforceIntegrationId: string | null = null;
-  if (expectsSalesforceIntegration) {
-    const salesforceIntegrationResult = await getPrimarySalesforceIntegration(session.organizationId);
+  if (initialSetupState) {
+    const planResult = await getOrganizationPlanName(session.organizationId);
 
-    if (salesforceIntegrationResult.error) {
+    if (planResult.error || !planResult.data) {
       return NextResponse.json(
-        { error: "No se pudo validar la integracion de Salesforce" },
+        { error: planResult.error ?? "No se pudo validar el plan de la organizacion" },
         { status: 500 }
       );
     }
 
-    if (salesforceIntegrationResult.data) {
-      const salesforceAccess = assertUsableIntegration(salesforceIntegrationResult.data);
-      if (salesforceAccess.ok) {
-        autoLinkSalesforceIntegrationId = salesforceIntegrationResult.data.id;
-      }
+    const integrationValidationError = validateIntegrationSelection({
+      planName: planResult.data,
+      integrationIds: initialSetupState.integrations,
+    });
+
+    if (integrationValidationError) {
+      return NextResponse.json({ error: integrationValidationError }, { status: 422 });
     }
   }
+
+  const expectsSalesforceIntegration = initialSetupState
+    ? (isSalesforceTemplateId(initialSetupState.template_id) ||
+      initialSetupState.integrations.includes("salesforce"))
+    : false;
+  const expectsHubSpotIntegration = initialSetupState
+    ? (isHubSpotTemplateId(initialSetupState.template_id) ||
+      initialSetupState.integrations.includes("hubspot"))
+    : false;
+  const expectsGmailIntegration = initialSetupState
+    ? (initialSetupState.template_id === "gmail_inbox_assistant" ||
+      initialSetupState.template_id === "gmail_follow_up_assistant" ||
+      initialSetupState.integrations.includes("gmail"))
+    : false;
+  const expectsGoogleCalendarIntegration = initialSetupState
+    ? (initialSetupState.template_id === "calendar_booking_assistant" ||
+      initialSetupState.template_id === "calendar_reschedule_assistant" ||
+      initialSetupState.integrations.includes("google_calendar"))
+    : false;
+
+  const autoLinkIntegrations = await resolveAutoLinkIntegrations(session.organizationId, {
+    expectsSalesforceIntegration,
+    expectsHubSpotIntegration,
+    expectsGmailIntegration,
+    expectsGoogleCalendarIntegration,
+  });
+
+  if (autoLinkIntegrations.error) {
+    return NextResponse.json({ error: autoLinkIntegrations.error }, { status: 500 });
+  }
+
+  const googleCalendarDetectedTimezone =
+    autoLinkIntegrations.googleIntegrationId && expectsGoogleCalendarIntegration
+      ? (await resolveGoogleCalendarIntegrationTimezone({
+          integrationId: autoLinkIntegrations.googleIntegrationId,
+          organizationId: session.organizationId,
+        })).data?.detectedTimezone ?? null
+      : null;
+  const normalizedSetupState = parsed.data.setupState
+    ? normalizeSetupState(parsed.data.setupState, {
+        hasReadyDocuments: false,
+        googleCalendarDetectedTimezone,
+      })
+    : undefined;
 
   if (parsed.data.integrationId && session.role !== "admin") {
     return NextResponse.json(
@@ -132,17 +441,21 @@ export async function POST(request: Request): Promise<NextResponse> {
     }
 
     try {
-      const remoteAssistant = await createOpenAIAssistant(apiKeyResult.data, {
-        name: parsed.data.name,
-        description: parsed.data.description,
-        instructions: parsed.data.systemPrompt,
-        model: parsed.data.llmModel,
-        temperature: parsed.data.llmTemperature,
-      }, {
-        organizationId: session.organizationId,
-        integrationId: integrationResult.data.id,
-        methodKey: "openai.assistants.create",
-      });
+      const remoteAssistant = await createOpenAIAssistant(
+        apiKeyResult.data,
+        {
+          name: parsed.data.name,
+          description: parsed.data.description,
+          instructions: parsed.data.systemPrompt,
+          model: parsed.data.llmModel,
+          temperature: parsed.data.llmTemperature,
+        },
+        {
+          organizationId: session.organizationId,
+          integrationId: integrationResult.data.id,
+          methodKey: "openai.assistants.create",
+        }
+      );
 
       const localAgentResult = await createAgent(
         {
@@ -274,71 +587,45 @@ export async function POST(request: Request): Promise<NextResponse> {
     );
   }
 
-  let createdAgent = agent;
+  let source: "local" | "local_salesforce_ready" | "local_hubspot_ready" = "local";
 
-  if (normalizedSetupState && autoLinkSalesforceIntegrationId) {
-    const toolResult = await upsertAgentTool({
+  if (normalizedSetupState) {
+    const autoLinkResult = await autoLinkLocalCrmTools({
       agentId: agent.id,
       organizationId: session.organizationId,
-      integrationId: autoLinkSalesforceIntegrationId,
-      toolType: "crm",
-      isEnabled: true,
-      config: getDefaultSalesforceAgentToolConfig() as unknown as Json,
+      setupState: normalizedSetupState,
+      salesforceIntegrationId: autoLinkIntegrations.salesforceIntegrationId,
+      hubspotIntegrationId: autoLinkIntegrations.hubspotIntegrationId,
+      googleIntegrationId: autoLinkIntegrations.googleIntegrationId,
+      googleGrantedScopes: autoLinkIntegrations.googleGrantedScopes,
     });
 
-    if (toolResult.error || !toolResult.data) {
-      return NextResponse.json(
-        { error: toolResult.error ?? "No se pudo vincular Salesforce al agente" },
-        { status: 500 }
-      );
+    if (autoLinkResult.error) {
+      return NextResponse.json({ error: autoLinkResult.error }, { status: 500 });
     }
 
-    const resolvedSetupState = normalizeSetupState(normalizedSetupState, {
-      hasReadyDocuments: false,
-      providerIntegrations: {
-        salesforce: {
-          isUsable: true,
-          hasEnabledTool: true,
-        },
-      },
-    });
-    const setupUpdateResult = await updateAgentSetupState(
-      agent.id,
-      session.organizationId,
-      resolvedSetupState
-    );
-
-    if (setupUpdateResult.error || !setupUpdateResult.data) {
-      return NextResponse.json(
-        { error: setupUpdateResult.error ?? "No se pudo guardar el setup de Salesforce del agente" },
-        { status: 500 }
-      );
-    }
-
-    createdAgent = setupUpdateResult.data;
+    source = autoLinkResult.source;
   }
 
   void enqueueEvent({
     organizationId: session.organizationId,
     eventType: "agent.created",
     entityType: "agent",
-    entityId: createdAgent.id,
-    idempotencyKey: `agent.created:${createdAgent.id}`,
+    entityId: agent.id,
+    idempotencyKey: `agent.created:${agent.id}`,
     payload: {
-      agent_id: createdAgent.id,
-      name: createdAgent.name,
-      status: createdAgent.status,
-      llm_model: createdAgent.llm_model,
-      llm_temperature: createdAgent.llm_temperature ?? null,
-      created_at: createdAgent.created_at ?? null,
-      source: autoLinkSalesforceIntegrationId ? "local_salesforce_ready" : "local",
+      agent_id: agent.id,
+      name: agent.name,
+      status: agent.status,
+      llm_model: agent.llm_model,
+      llm_temperature: agent.llm_temperature ?? null,
+      created_at: agent.created_at ?? null,
+      source,
     },
   });
 
-  return NextResponse.json({ data: createdAgent }, { status: 201 });
+  return NextResponse.json({ data: agent }, { status: 201 });
 }
-
-
 
 
 

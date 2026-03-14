@@ -37,8 +37,6 @@ export type SalesforceAgentIntegrationState = {
 type DbResult<T> = { data: T | null; error: string | null };
 type AgentTool = Tables<"agent_tools">;
 
-
-
 function buildState(input: {
   expectsSalesforceIntegration: boolean;
   status: SalesforceAgentIntegrationStatus;
@@ -64,7 +62,7 @@ function buildState(input: {
 export function setupStateExpectsSalesforceIntegration(
   setupState: AgentSetupState | null | undefined
 ): boolean {
-  return Boolean(setupState && isSalesforceTemplateId(setupState.template_id));
+  return Boolean(setupState && (isSalesforceTemplateId(setupState.template_id) || setupState.integrations.includes("salesforce")));
 }
 
 export function buildSalesforceSetupResolutionContext(
@@ -103,8 +101,6 @@ function getSalesforceChecklistLabel(state: SalesforceAgentIntegrationState): st
 
   return "Conectar Salesforce y habilitar tool CRM";
 }
-
-
 
 export async function getSalesforceAgentIntegrationState(input: {
   agentId: string;
@@ -235,7 +231,3 @@ export function getSalesforceIntegrationCta(state: SalesforceAgentIntegrationSta
 
   return { href: "#agent-tools", label: "Abrir tools del agente" };
 }
-
-
-
-

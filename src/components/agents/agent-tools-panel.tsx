@@ -223,7 +223,7 @@ export function AgentToolsPanel({ agentId, canEdit }: AgentToolsPanelProps) {
           <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-slate-500">Agent tools</p>
           <h3 className="mt-2 text-lg font-bold text-slate-900">CRM Salesforce</h3>
           <p className="mt-1 text-sm text-slate-500">
-            Habilita lecturas automaticas y escrituras confirmadas para leads, accounts, opportunities, cases y tasks.
+            Habilita lecturas automaticas y escrituras confirmadas para leads, contactos, pipeline, accounts, opportunities, cases y tasks.
           </p>
         </div>
         {crmTool ? (

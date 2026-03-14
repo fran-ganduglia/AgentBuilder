@@ -9,6 +9,12 @@
     "start": "next start",
     "lint": "eslint . --max-warnings=0",
     "typecheck": "tsc --noEmit",
+    "worker:queue": "node --env-file=.env.local --experimental-strip-types --experimental-loader ./scripts/ts-path-loader.mjs ./scripts/worker-queue.ts",
+    "worker:maintenance": "node --env-file=.env.local --experimental-strip-types --experimental-loader ./scripts/ts-path-loader.mjs ./scripts/worker-maintenance.ts",
+    "workers:pause": "node --env-file=.env.local ./scripts/toggle-n8n-workflows.mjs deactivate",
+    "workers:resume": "node --env-file=.env.local ./scripts/toggle-n8n-workflows.mjs activate",
+    "test:ts": "node --env-file=.env.local --experimental-strip-types --experimental-loader ./scripts/ts-path-loader.mjs",
+    "test:google-calendar": "npm run test:ts -- src/lib/chat/google-calendar-tool-planner.test.ts && npm run test:ts -- src/lib/integrations/google-calendar-agent-runtime.test.ts && npm run test:ts -- src/lib/chat/google-calendar-tool-orchestrator.test.ts && npm run test:ts -- src/lib/integrations/google-calendar-write-runtime.test.ts",
     "ci:verify": "npm run lint && npm run typecheck && npm run build"
   },
   "dependencies": {

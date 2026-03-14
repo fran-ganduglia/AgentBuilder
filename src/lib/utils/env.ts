@@ -45,6 +45,11 @@ function getOptionalServerEnv(key: string, fallback: string): string {
   return value && value.trim().length > 0 ? value.trim() : fallback;
 }
 
+function getOptionalServerBooleanEnv(key: string, fallback: boolean): boolean {
+  const value = getOptionalServerEnv(key, fallback ? "true" : "false").toLowerCase();
+  return value !== "false" && value !== "0" && value !== "no" && value !== "off";
+}
+
 export const env = {
   NEXT_PUBLIC_SUPABASE_URL: requirePublicEnv(
     publicSupabaseUrl,
@@ -87,6 +92,10 @@ export const env = {
     return requireServerEnv("CRON_SECRET");
   },
 
+  get WORKERS_ENABLED() {
+    return getOptionalServerBooleanEnv("WORKERS_ENABLED", true);
+  },
+
   get SALESFORCE_CLIENT_ID() {
     return requireServerEnv("SALESFORCE_CLIENT_ID");
   },
@@ -105,5 +114,36 @@ export const env = {
 
   get SALESFORCE_API_VERSION() {
     return getOptionalServerEnv("SALESFORCE_API_VERSION", "v61.0");
+  },
+
+  get HUBSPOT_CLIENT_ID() {
+    return requireServerEnv("HUBSPOT_CLIENT_ID");
+  },
+
+  get HUBSPOT_CLIENT_SECRET() {
+    return requireServerEnv("HUBSPOT_CLIENT_SECRET");
+  },
+
+  get HUBSPOT_OAUTH_SCOPES() {
+    return getOptionalServerEnv(
+      "HUBSPOT_OAUTH_SCOPES",
+      "crm.objects.contacts.read crm.objects.contacts.write crm.objects.companies.read crm.objects.companies.write crm.objects.deals.read crm.objects.deals.write crm.objects.owners.read crm.objects.tasks.write crm.objects.meetings.write"
+    );
+  },
+
+  get GOOGLE_CLIENT_ID() {
+    return requireServerEnv("GOOGLE_CLIENT_ID");
+  },
+
+  get GOOGLE_CLIENT_SECRET() {
+    return requireServerEnv("GOOGLE_CLIENT_SECRET");
+  },
+
+  get N8N_BASE_URL() {
+    return requireServerEnv("N8N_BASE_URL");
+  },
+
+  get N8N_API_KEY() {
+    return requireServerEnv("N8N_API_KEY");
   },
 } as const;

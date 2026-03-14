@@ -41,3 +41,31 @@ export async function generateEmbedding(text: string): Promise<number[]> {
     clearTimeout(timer);
   }
 }
+
+export async function generateEmbeddings(texts: string[]): Promise<number[][]> {
+  if (texts.length === 0) return [];
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), EMBEDDING_TIMEOUT_MS);
+
+  try {
+    const response = await fetch("https://api.openai.com/v1/embeddings", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${env.OPENAI_API_KEY}`,
+      },
+      body: JSON.stringify({ model: EMBEDDING_MODEL, input: texts }),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      throw new Error(`OpenAI embeddings respondio con status ${response.status}`);
+    }
+
+    const data = (await response.json()) as EmbeddingResponse;
+    return data.data.map((item) => item.embedding);
+  } finally {
+    clearTimeout(timer);
+  }
+}

@@ -7,24 +7,32 @@ import { assertUsableIntegration } from "@/lib/integrations/access";
 import { getSafeProviderErrorMessage } from "@/lib/integrations/provider-gateway";
 import { isProviderRequestError, ProviderRequestError } from "@/lib/integrations/provider-errors";
 import {
-  buildSalesforceConfirmationSummary,
   auditSalesforceAction,
+  buildSalesforceConfirmationSummary,
   formatSalesforceToolResultForPrompt,
   getSalesforceAuditMetadata,
   getSalesforceExecutionFallback,
 } from "@/lib/integrations/salesforce-agent-runtime-utils";
 import {
   createSalesforceCase,
+  createSalesforceContact,
   createSalesforceLead,
   createSalesforceTask,
+  deleteSalesforceObject,
+  listSalesforceLeadsByStatus,
+  listSalesforceLeadsRecent,
   lookupSalesforceAccounts,
   lookupSalesforceCases,
   lookupSalesforceLeadOrContact,
   lookupSalesforceOpportunities,
+  summarizeSalesforcePipeline,
   updateSalesforceCase,
+  updateSalesforceLead,
   updateSalesforceOpportunity,
+  type SalesforceLeadListResult,
   type SalesforceLookupResult,
   type SalesforceMutationResult,
+  type SalesforcePipelineSummaryResult,
 } from "@/lib/integrations/salesforce-crm";
 import { refreshSalesforceAccessToken } from "@/lib/integrations/salesforce";
 import { selectPreferredSalesforceAgentTool } from "@/lib/integrations/salesforce-agent-tool-selection";
@@ -39,6 +47,11 @@ import type { Tables } from "@/types/database";
 type DbResult<T> = { data: T | null; error: string | null };
 type AgentTool = Tables<"agent_tools">;
 type Credentials = { accessToken: string; instanceUrl: string };
+type SalesforceToolData =
+  | SalesforceLookupResult
+  | SalesforceLeadListResult
+  | SalesforcePipelineSummaryResult
+  | SalesforceMutationResult;
 
 export type SalesforceAgentToolRuntime = {
   tool: AgentTool;
@@ -52,8 +65,12 @@ export type SalesforceToolExecutionResult = {
   requestId: string | null;
   providerObjectId: string | null;
   providerObjectType: string;
-  data: SalesforceLookupResult | SalesforceMutationResult;
+  data: SalesforceToolData;
 };
+
+export type SalesforceCompensationAction =
+  | "delete_created_contact"
+  | "delete_created_task";
 
 function isAuthFailure(error: unknown): error is ProviderRequestError {
   return isProviderRequestError(error) && (error.statusCode === 401 || error.statusCode === 403);
@@ -67,13 +84,33 @@ async function runSalesforceAction(
   input: ExecuteSalesforceCrmToolInput,
   credentials: Credentials,
   organizationId: string,
-  integrationId: string
+  integrationId: string,
+  workflow?: {
+    workflowRunId: string;
+    workflowStepId: string;
+  }
 ): Promise<SalesforceToolExecutionResult> {
-  const context = { organizationId, integrationId, methodKey: "salesforce.api_requests" };
+  const context = {
+    organizationId,
+    integrationId,
+    methodKey: "salesforce.api_requests",
+    workflowRunId: workflow?.workflowRunId,
+    workflowStepId: workflow?.workflowStepId,
+  };
   const audit = getSalesforceAuditMetadata(input.action);
 
   if (input.action === "lookup_records") {
     const data = await lookupSalesforceLeadOrContact(credentials, input, context);
+    return { action: input.action, isWrite: false, requestId: data.requestId, providerObjectId: null, providerObjectType: audit.providerObjectType, data };
+  }
+
+  if (input.action === "list_leads_recent") {
+    const data = await listSalesforceLeadsRecent(credentials, input, context);
+    return { action: input.action, isWrite: false, requestId: data.requestId, providerObjectId: null, providerObjectType: audit.providerObjectType, data };
+  }
+
+  if (input.action === "list_leads_by_status") {
+    const data = await listSalesforceLeadsByStatus(credentials, input, context);
     return { action: input.action, isWrite: false, requestId: data.requestId, providerObjectId: null, providerObjectType: audit.providerObjectType, data };
   }
 
@@ -92,6 +129,11 @@ async function runSalesforceAction(
     return { action: input.action, isWrite: false, requestId: data.requestId, providerObjectId: null, providerObjectType: audit.providerObjectType, data };
   }
 
+  if (input.action === "summarize_pipeline") {
+    const data = await summarizeSalesforcePipeline(credentials, context);
+    return { action: input.action, isWrite: false, requestId: data.requestId, providerObjectId: null, providerObjectType: audit.providerObjectType, data };
+  }
+
   if (input.action === "create_task") {
     const data = await createSalesforceTask(credentials, input, context);
     return { action: input.action, isWrite: true, requestId: data.requestId, providerObjectId: data.id, providerObjectType: audit.providerObjectType, data };
@@ -99,6 +141,16 @@ async function runSalesforceAction(
 
   if (input.action === "create_lead") {
     const data = await createSalesforceLead(credentials, input, context);
+    return { action: input.action, isWrite: true, requestId: data.requestId, providerObjectId: data.id, providerObjectType: audit.providerObjectType, data };
+  }
+
+  if (input.action === "update_lead") {
+    const data = await updateSalesforceLead(credentials, input, context);
+    return { action: input.action, isWrite: true, requestId: data.requestId, providerObjectId: data.id, providerObjectType: audit.providerObjectType, data };
+  }
+
+  if (input.action === "create_contact") {
+    const data = await createSalesforceContact(credentials, input, context);
     return { action: input.action, isWrite: true, requestId: data.requestId, providerObjectId: data.id, providerObjectType: audit.providerObjectType, data };
   }
 
@@ -114,6 +166,48 @@ async function runSalesforceAction(
 
   const data = await updateSalesforceOpportunity(credentials, input, context);
   return { action: input.action, isWrite: true, requestId: data.requestId, providerObjectId: data.id, providerObjectType: audit.providerObjectType, data };
+}
+
+async function runSalesforceCompensation(
+  input: {
+    compensationAction: SalesforceCompensationAction;
+    providerObjectId: string;
+  },
+  credentials: Credentials,
+  organizationId: string,
+  integrationId: string,
+  workflow?: {
+    workflowRunId: string;
+    workflowStepId: string;
+  }
+): Promise<SalesforceMutationResult> {
+  const context = {
+    organizationId,
+    integrationId,
+    methodKey: "salesforce.api_requests",
+    workflowRunId: workflow?.workflowRunId,
+    workflowStepId: workflow?.workflowStepId,
+  };
+
+  if (input.compensationAction === "delete_created_contact") {
+    return deleteSalesforceObject(
+      credentials,
+      {
+        objectType: "Contact",
+        recordId: input.providerObjectId,
+      },
+      context
+    );
+  }
+
+  return deleteSalesforceObject(
+    credentials,
+    {
+      objectType: "Task",
+      recordId: input.providerObjectId,
+    },
+    context
+  );
 }
 
 async function refreshSalesforceCredentials(input: {
@@ -225,6 +319,10 @@ export async function executeSalesforceToolAction(input: {
   agentId: string;
   integrationId: string;
   actionInput: ExecuteSalesforceCrmToolInput;
+  workflow?: {
+    workflowRunId: string;
+    workflowStepId: string;
+  };
 }): Promise<DbResult<SalesforceToolExecutionResult>> {
   const configResult = await getSalesforceIntegrationConfig(input.integrationId, input.organizationId);
   if (configResult.error || !configResult.data) {
@@ -238,10 +336,23 @@ export async function executeSalesforceToolAction(input: {
   let credentials: Credentials = { accessToken: configResult.data.accessToken, instanceUrl: configResult.data.instanceUrl };
 
   try {
-    const data = await runSalesforceAction(input.actionInput, credentials, input.organizationId, input.integrationId);
+    const data = await runSalesforceAction(
+      input.actionInput,
+      credentials,
+      input.organizationId,
+      input.integrationId,
+      input.workflow
+    );
     await auditSalesforceAction({ organizationId: input.organizationId, userId: input.userId, agentId: input.agentId, integrationId: input.integrationId, action: input.actionInput.action, requestId: data.requestId, providerObjectId: data.providerObjectId, status: "success" });
     return { data, error: null };
   } catch (error) {
+    console.error("salesforce.execution_error", {
+      agentId: input.agentId,
+      organizationId: input.organizationId,
+      action: input.actionInput.action,
+      error: error instanceof Error ? error.message : String(error),
+      statusCode: isProviderRequestError(error) ? error.statusCode : undefined,
+    });
     if (isAuthFailure(error) && configResult.data.refreshToken) {
       const refreshResult = await refreshSalesforceCredentials({ organizationId: input.organizationId, userId: input.userId, integrationId: input.integrationId, refreshToken: configResult.data.refreshToken, currentInstanceUrl: configResult.data.instanceUrl, currentScopes: configResult.data.grantedScopes });
 
@@ -249,10 +360,23 @@ export async function executeSalesforceToolAction(input: {
         credentials = refreshResult.data;
 
         try {
-          const retried = await runSalesforceAction(input.actionInput, credentials, input.organizationId, input.integrationId);
+          const retried = await runSalesforceAction(
+            input.actionInput,
+            credentials,
+            input.organizationId,
+            input.integrationId,
+            input.workflow
+          );
           await auditSalesforceAction({ organizationId: input.organizationId, userId: input.userId, agentId: input.agentId, integrationId: input.integrationId, action: input.actionInput.action, requestId: retried.requestId, providerObjectId: retried.providerObjectId, status: "success" });
           return { data: retried, error: null };
         } catch (retryError) {
+          console.error("salesforce.execution_error_after_refresh", {
+            agentId: input.agentId,
+            organizationId: input.organizationId,
+            action: input.actionInput.action,
+            error: retryError instanceof Error ? retryError.message : String(retryError),
+            statusCode: isProviderRequestError(retryError) ? retryError.statusCode : undefined,
+          });
           if (isAuthFailure(retryError)) {
             await markIntegrationReauthRequired(input.integrationId, input.organizationId, retryError.message);
           }
@@ -272,6 +396,88 @@ export async function executeSalesforceToolAction(input: {
   }
 }
 
+export async function executeSalesforceCompensationAction(input: {
+  organizationId: string;
+  userId: string;
+  agentId: string;
+  integrationId: string;
+  compensationAction: SalesforceCompensationAction;
+  providerObjectId: string;
+  workflow?: {
+    workflowRunId: string;
+    workflowStepId: string;
+  };
+}): Promise<DbResult<SalesforceMutationResult>> {
+  const configResult = await getSalesforceIntegrationConfig(input.integrationId, input.organizationId);
+  if (configResult.error || !configResult.data) {
+    if (configResult.error && isMissingSecretError(configResult.error)) {
+      await markIntegrationReauthRequired(input.integrationId, input.organizationId, configResult.error);
+    }
+
+    return { data: null, error: "La integracion necesita reautenticacion antes de volver a operar." };
+  }
+
+  let credentials: Credentials = {
+    accessToken: configResult.data.accessToken,
+    instanceUrl: configResult.data.instanceUrl,
+  };
+
+  try {
+    const data = await runSalesforceCompensation(
+      {
+        compensationAction: input.compensationAction,
+        providerObjectId: input.providerObjectId,
+      },
+      credentials,
+      input.organizationId,
+      input.integrationId,
+      input.workflow
+    );
+    return { data, error: null };
+  } catch (error) {
+    if (isAuthFailure(error) && configResult.data.refreshToken) {
+      const refreshResult = await refreshSalesforceCredentials({
+        organizationId: input.organizationId,
+        userId: input.userId,
+        integrationId: input.integrationId,
+        refreshToken: configResult.data.refreshToken,
+        currentInstanceUrl: configResult.data.instanceUrl,
+        currentScopes: configResult.data.grantedScopes,
+      });
+
+      if (!refreshResult.error && refreshResult.data) {
+        credentials = refreshResult.data;
+
+        try {
+          const retried = await runSalesforceCompensation(
+            {
+              compensationAction: input.compensationAction,
+              providerObjectId: input.providerObjectId,
+            },
+            credentials,
+            input.organizationId,
+            input.integrationId,
+            input.workflow
+          );
+          return { data: retried, error: null };
+        } catch (retryError) {
+          if (isAuthFailure(retryError)) {
+            await markIntegrationReauthRequired(input.integrationId, input.organizationId, retryError.message);
+          }
+
+          return { data: null, error: getSafeProviderErrorMessage(retryError, "No se pudo compensar la accion previa en Salesforce.") };
+        }
+      }
+
+      await markIntegrationReauthRequired(input.integrationId, input.organizationId, refreshResult.error ?? error.message);
+    } else if (isAuthFailure(error)) {
+      await markIntegrationReauthRequired(input.integrationId, input.organizationId, error.message);
+    }
+
+    return { data: null, error: getSafeProviderErrorMessage(error, "No se pudo compensar la accion previa en Salesforce.") };
+  }
+}
+
 export function assertSalesforceRuntimeUsable(runtime: SalesforceAgentToolRuntime): DbResult<SalesforceAgentToolRuntime> {
   const access = assertUsableIntegration(runtime.integration);
   return access.ok ? { data: runtime, error: null } : { data: null, error: access.message };
@@ -286,6 +492,3 @@ export function assertSalesforceActionEnabled(runtime: SalesforceAgentToolRuntim
 }
 
 export { buildSalesforceConfirmationSummary, formatSalesforceToolResultForPrompt };
-
-
-

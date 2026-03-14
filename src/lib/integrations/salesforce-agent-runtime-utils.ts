@@ -10,11 +10,16 @@ export function getSalesforceAuditMetadata(action: ExecuteSalesforceCrmToolInput
 } {
   const metadata: Record<ExecuteSalesforceCrmToolInput["action"], { auditAction: string; providerObjectType: string }> = {
     lookup_records: { auditAction: "provider.salesforce.lead_contact.lookup", providerObjectType: "lead_contact_search" },
+    list_leads_recent: { auditAction: "provider.salesforce.lead.list_recent", providerObjectType: "lead_list" },
+    list_leads_by_status: { auditAction: "provider.salesforce.lead.list_by_status", providerObjectType: "lead_list" },
     lookup_accounts: { auditAction: "provider.salesforce.account.lookup", providerObjectType: "account_search" },
     lookup_opportunities: { auditAction: "provider.salesforce.opportunity.lookup", providerObjectType: "opportunity_search" },
     lookup_cases: { auditAction: "provider.salesforce.case.lookup", providerObjectType: "case_search" },
+    summarize_pipeline: { auditAction: "provider.salesforce.pipeline.summary", providerObjectType: "pipeline_summary" },
     create_task: { auditAction: "provider.salesforce.task.created", providerObjectType: "task" },
     create_lead: { auditAction: "provider.salesforce.lead.created", providerObjectType: "lead" },
+    update_lead: { auditAction: "provider.salesforce.lead.updated", providerObjectType: "lead" },
+    create_contact: { auditAction: "provider.salesforce.contact.created", providerObjectType: "contact" },
     create_case: { auditAction: "provider.salesforce.case.created", providerObjectType: "case" },
     update_case: { auditAction: "provider.salesforce.case.updated", providerObjectType: "case" },
     update_opportunity: { auditAction: "provider.salesforce.opportunity.updated", providerObjectType: "opportunity" },
@@ -68,6 +73,15 @@ export function buildSalesforceConfirmationSummary(input: ExecuteSalesforceCrmTo
 
   if (input.action === "create_lead") {
     return `Crear un lead para ${input.firstName ? `${input.firstName} ` : ""}${input.lastName} en ${input.company}.`;
+  }
+
+  if (input.action === "update_lead") {
+    return `Actualizar el lead ${input.leadId}.`;
+  }
+
+  if (input.action === "create_contact") {
+    const accountReference = input.accountId ?? input.accountName ?? "sin cuenta asociada";
+    return `Crear un contacto para ${input.firstName ? `${input.firstName} ` : ""}${input.lastName} usando ${accountReference}.`;
   }
 
   if (input.action === "create_case") {

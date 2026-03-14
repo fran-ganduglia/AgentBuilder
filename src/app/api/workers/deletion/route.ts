@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { isAgentDeletionDeadlineReached } from "@/lib/agents/agent-deletion";
-import { validateCronRequest } from "@/lib/workers/auth";
+import { areWorkersEnabled, getWorkersDisabledResponse, validateCronRequest } from "@/lib/workers/auth";
 import { createServiceSupabaseClient } from "@/lib/supabase/service";
 import { processDeletionRequest } from "@/lib/workers/deletion-processor";
 
@@ -65,6 +65,10 @@ async function claimDeletionRequests(limit: number): Promise<DeletionRow[]> {
 export async function GET(request: Request) {
   if (!validateCronRequest(request)) {
     return NextResponse.json({ error: "No autorizado" }, { status: 401 });
+  }
+
+  if (!areWorkersEnabled()) {
+    return getWorkersDisabledResponse();
   }
 
   const rows = await claimDeletionRequests(CLAIM_BATCH_LIMIT);

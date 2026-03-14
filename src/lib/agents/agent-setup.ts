@@ -8,6 +8,42 @@ import {
   type CriteriaTaskData,
   type ScheduleTaskData,
 } from "@/lib/agents/agent-setup-task-data";
+import {
+  WIZARD_INTEGRATION_IDS,
+  type WizardIntegrationId,
+} from "@/lib/agents/wizard-integrations";
+import {
+  AUTOMATION_PRESETS,
+  SUCCESS_METRIC_IDS,
+  WORKFLOW_CATEGORIES,
+  WORKFLOW_TEMPLATE_IDS,
+  getWorkflowTemplateById,
+  type AutomationPreset,
+  type SuccessMetricId,
+  type WorkflowCategory,
+  type WorkflowInstanceConfig,
+  type WorkflowTemplateId,
+} from "@/lib/agents/workflow-templates";
+import {
+  GMAIL_TOOL_ACTIONS,
+  getGmailActionDescription,
+  getGmailActionLabel,
+  getGoogleCalendarActionDescription,
+  getGoogleCalendarActionLabel,
+  GOOGLE_CALENDAR_TOOL_ACTIONS,
+} from "@/lib/integrations/google-agent-tools";
+import {
+  getHubSpotActionDescription,
+  getHubSpotActionLabel,
+  HUBSPOT_CRM_ACTIONS,
+  HUBSPOT_LOOKUP_ACTIONS,
+} from "@/lib/integrations/hubspot-tools";
+import {
+  getSalesforceActionDescription,
+  getSalesforceActionLabel,
+  SALESFORCE_CRM_ACTIONS,
+  SALESFORCE_LOOKUP_ACTIONS,
+} from "@/lib/integrations/salesforce-tools";
 import type { Json } from "@/types/database";
 
 export const CHANNEL_INTENTS = ["whatsapp", "web", "api", "email"] as const;
@@ -20,7 +56,45 @@ export const CHANNEL_LABELS: Record<ChannelIntent, string> = {
   email: "Email",
 };
 
+export const AGENT_AREAS = ["sales", "marketing", "analysis", "support"] as const;
+export type AgentArea = (typeof AGENT_AREAS)[number];
+
+export const AGENT_AREA_LABELS: Record<AgentArea, string> = {
+  sales: "Ventas",
+  marketing: "Marketing",
+  analysis: "Analisis",
+  support: "Soporte",
+};
+
+export const TOOL_SCOPE_PRESETS = ["conservative", "full", "custom"] as const;
+export type ToolScopePreset = (typeof TOOL_SCOPE_PRESETS)[number];
+
+export const TOOL_SCOPE_PRESET_LABELS: Record<ToolScopePreset, string> = {
+  conservative: "Conservative",
+  full: "Full",
+  custom: "Custom",
+};
+
+export const TOOL_SCOPE_PRESET_DESCRIPTIONS: Record<ToolScopePreset, string> = {
+  conservative: "Lectura y acciones seguras como notas, tasks o mensajes.",
+  full: "Todas las tools disponibles en las integraciones seleccionadas.",
+  custom: "Seleccion manual por accion para cada integracion.",
+};
+
+export const AUTOMATION_PRESET_LABELS: Record<AutomationPreset, string> = {
+  copilot: "Copilot",
+  assisted: "Assisted",
+  autonomous: "Autonomous",
+};
+
+export const AUTOMATION_PRESET_DESCRIPTIONS: Record<AutomationPreset, string> = {
+  copilot: "Lecturas y analisis automaticos; toda escritura queda en sugerencia.",
+  assisted: "Lecturas automaticas y escrituras de bajo riesgo solo con confirmacion explicita.",
+  autonomous: "Reservado para fases futuras y no habilitable en produccion Fase 2.",
+};
+
 export const AGENT_TEMPLATE_IDS = [
+  "whatsapp_unified",
   "whatsapp_support",
   "whatsapp_sales",
   "whatsapp_appointment_booking",
@@ -58,7 +132,12 @@ export type AgentSetupStatus = (typeof AGENT_SETUP_STATUSES)[number];
 export const CHECKLIST_VERIFICATION_MODES = ["structured", "manual"] as const;
 export type AgentSetupChecklistVerificationMode = (typeof CHECKLIST_VERIFICATION_MODES)[number];
 
-export const PROVIDER_INTEGRATION_PROVIDERS = ["salesforce"] as const;
+export const PROVIDER_INTEGRATION_PROVIDERS = [
+  "salesforce",
+  "hubspot",
+  "gmail",
+  "google_calendar",
+] as const;
 export type ProviderIntegrationProvider = (typeof PROVIDER_INTEGRATION_PROVIDERS)[number];
 
 export const SETUP_INPUT_KINDS = [
@@ -122,7 +201,18 @@ export type AgentSetupTaskData = Record<string, unknown>;
 
 export type AgentSetupState = {
   version: 1;
-  template_id: AgentTemplateId;
+  template_id: AgentTemplateId | null;
+  workflowTemplateId: WorkflowTemplateId | null;
+  workflowCategory: WorkflowCategory | null;
+  requiredIntegrations: WizardIntegrationId[];
+  optionalIntegrations: WizardIntegrationId[];
+  allowedAutomationPresets: AutomationPreset[];
+  automationPreset: AutomationPreset | null;
+  instanceConfig: WorkflowInstanceConfig;
+  successMetrics: SuccessMetricId[];
+  areas: AgentArea[];
+  integrations: WizardIntegrationId[];
+  tool_scope_preset: ToolScopePreset;
   channel: ChannelIntent;
   setup_status: AgentSetupStatus;
   current_step: number;
@@ -140,6 +230,7 @@ export type ActivationReadiness = {
 export type SetupResolutionContext = {
   hasReadyDocuments?: boolean;
   fallbackTimezone?: string;
+  googleCalendarDetectedTimezone?: string | null;
   providerIntegrations?: Partial<Record<ProviderIntegrationProvider, {
     isUsable: boolean;
     hasEnabledTool: boolean;
@@ -160,6 +251,15 @@ export const promptBuilderDraftSchema = z.object({
   channel: z.enum(CHANNEL_INTENTS),
 });
 
+export const workflowInstanceConfigSchema = z.object({
+  language: z.string(),
+  ownerLabel: z.string(),
+  routingMode: z.string(),
+  handoffThreshold: z.string(),
+  scheduleSummary: z.string(),
+  toneSummary: z.string(),
+});
+
 export const agentSetupChecklistItemSchema = z.object({
   id: z.string().min(1, "Item de setup invalido"),
   label: z.string().min(1, "Etiqueta invalida"),
@@ -176,17 +276,35 @@ export const agentSetupChecklistItemSchema = z.object({
 
 export const agentSetupStateSchema = z.object({
   version: z.literal(1),
-  template_id: z.enum(AGENT_TEMPLATE_IDS),
+  template_id: z.enum(AGENT_TEMPLATE_IDS).nullable(),
+  workflowTemplateId: z.enum(WORKFLOW_TEMPLATE_IDS).nullable().optional().default(null),
+  workflowCategory: z.enum(WORKFLOW_CATEGORIES).nullable().optional().default(null),
+  requiredIntegrations: z.array(z.enum(WIZARD_INTEGRATION_IDS)).optional().default([]),
+  optionalIntegrations: z.array(z.enum(WIZARD_INTEGRATION_IDS)).optional().default([]),
+  allowedAutomationPresets: z.array(z.enum(AUTOMATION_PRESETS)).optional().default([]),
+  automationPreset: z.enum(AUTOMATION_PRESETS).nullable().optional().default(null),
+  instanceConfig: workflowInstanceConfigSchema.optional().default({
+    language: "es",
+    ownerLabel: "",
+    routingMode: "",
+    handoffThreshold: "",
+    scheduleSummary: "",
+    toneSummary: "",
+  }),
+  successMetrics: z.array(z.enum(SUCCESS_METRIC_IDS)).optional().default([]),
+  areas: z.array(z.enum(AGENT_AREAS)).optional().default([]),
+  integrations: z.array(z.enum(WIZARD_INTEGRATION_IDS)).optional().default([]),
+  tool_scope_preset: z.enum(TOOL_SCOPE_PRESETS).optional().default("full"),
   channel: z.enum(CHANNEL_INTENTS),
   setup_status: z.enum(AGENT_SETUP_STATUSES),
-  current_step: z.number().int().min(1).max(4),
+  current_step: z.number().int().min(1).max(6),
   builder_draft: promptBuilderDraftSchema.optional(),
   task_data: z.record(z.string(), z.unknown()).optional(),
   checklist: z.array(agentSetupChecklistItemSchema),
 });
 
 export const setupProgressPatchSchema = z.object({
-  currentStep: z.number().int().min(1).max(4).optional(),
+  currentStep: z.number().int().min(1).max(6).optional(),
   builderDraft: promptBuilderDraftSchema.partial().optional(),
   taskData: z.record(z.string(), z.unknown()).optional(),
   manualChecklist: z.array(
@@ -213,7 +331,18 @@ export function deriveSetupStatus(checklist: AgentSetupChecklistItem[]): AgentSe
 }
 
 export function createSetupState(input: {
-  templateId: AgentTemplateId;
+  templateId: AgentTemplateId | null;
+  workflowTemplateId?: WorkflowTemplateId | null;
+  workflowCategory?: WorkflowCategory | null;
+  requiredIntegrations?: WizardIntegrationId[];
+  optionalIntegrations?: WizardIntegrationId[];
+  allowedAutomationPresets?: AutomationPreset[];
+  automationPreset?: AutomationPreset | null;
+  instanceConfig?: WorkflowInstanceConfig;
+  successMetrics?: SuccessMetricId[];
+  areas?: AgentArea[];
+  integrations?: WizardIntegrationId[];
+  toolScopePreset?: ToolScopePreset;
   channel: ChannelIntent;
   builderDraft: PromptBuilderDraft;
   checklist: AgentSetupChecklistItem[];
@@ -225,12 +354,61 @@ export function createSetupState(input: {
     {
       version: 1,
       template_id: input.templateId,
+      workflowTemplateId: input.workflowTemplateId ?? null,
+      workflowCategory: input.workflowCategory ?? null,
+      requiredIntegrations: input.requiredIntegrations ?? [],
+      optionalIntegrations: input.optionalIntegrations ?? [],
+      allowedAutomationPresets: input.allowedAutomationPresets ?? [],
+      automationPreset: input.automationPreset ?? null,
+      instanceConfig: input.instanceConfig ?? createEmptyWorkflowInstanceConfig(),
+      successMetrics: input.successMetrics ?? [],
+      areas: input.areas ?? [],
+      integrations: input.integrations ?? [],
+      tool_scope_preset: input.toolScopePreset ?? "full",
       channel: input.channel,
       setup_status: "not_started",
       current_step: input.currentStep ?? 3,
       builder_draft: { ...input.builderDraft, channel: input.channel },
       task_data: input.taskData ?? {},
       checklist: input.checklist,
+    },
+    { fallbackTimezone: input.fallbackTimezone }
+  );
+}
+
+export function createDefaultAgentSetupState(input: {
+  templateId?: AgentTemplateId | null;
+  workflowTemplateId?: WorkflowTemplateId | null;
+  areas?: AgentArea[];
+  integrations?: WizardIntegrationId[];
+  toolScopePreset?: ToolScopePreset;
+  channel?: ChannelIntent;
+  currentStep?: number;
+  fallbackTimezone?: string;
+} = {}): AgentSetupState {
+  const channel = input.channel ?? "web";
+
+  return resolveSetupState(
+    {
+      version: 1,
+      template_id: input.templateId ?? null,
+      workflowTemplateId: input.workflowTemplateId ?? null,
+      workflowCategory: null,
+      requiredIntegrations: [],
+      optionalIntegrations: [],
+      allowedAutomationPresets: [],
+      automationPreset: null,
+      instanceConfig: createEmptyWorkflowInstanceConfig(),
+      successMetrics: [],
+      areas: input.areas ?? [],
+      integrations: input.integrations ?? [],
+      tool_scope_preset: input.toolScopePreset ?? "full",
+      channel,
+      setup_status: "not_started",
+      current_step: input.currentStep ?? 1,
+      builder_draft: createEmptyPromptBuilderDraft(channel),
+      task_data: {},
+      checklist: [],
     },
     { fallbackTimezone: input.fallbackTimezone }
   );
@@ -265,9 +443,71 @@ export function resolveSetupState(
   setupState: AgentSetupState,
   context: SetupResolutionContext = {}
 ): AgentSetupState {
+  const requiredIntegrationsSource = Array.isArray(setupState.requiredIntegrations)
+    ? setupState.requiredIntegrations
+    : [];
+  const optionalIntegrationsSource = Array.isArray(setupState.optionalIntegrations)
+    ? setupState.optionalIntegrations
+    : [];
+  const allowedAutomationPresetsSource = Array.isArray(setupState.allowedAutomationPresets)
+    ? setupState.allowedAutomationPresets
+    : [];
+  const successMetricsSource = Array.isArray(setupState.successMetrics)
+    ? setupState.successMetrics
+    : [];
+  const areasSource = Array.isArray(setupState.areas) ? setupState.areas : [];
+  const integrationsSource = Array.isArray(setupState.integrations)
+    ? setupState.integrations
+    : [];
+  const checklistSource = Array.isArray(setupState.checklist)
+    ? setupState.checklist
+    : [];
+  const instanceConfigSource =
+    setupState.instanceConfig ?? createEmptyWorkflowInstanceConfig();
+  const builderDraftSource = setupState.builder_draft ?? createEmptyPromptBuilderDraft(setupState.channel);
+  const taskDataSource = setupState.task_data ?? {};
+  const workflowTemplate = setupState.workflowTemplateId
+    ? getWorkflowTemplateById(setupState.workflowTemplateId)
+    : null;
+  const requiredIntegrations = workflowTemplate
+    ? [...workflowTemplate.requiredIntegrations]
+    : [...requiredIntegrationsSource];
+  const optionalIntegrations = workflowTemplate
+    ? workflowTemplate.optionalIntegrations.filter(
+      (integration) => !requiredIntegrations.includes(integration)
+    )
+    : optionalIntegrationsSource.filter(
+      (integration) => !requiredIntegrations.includes(integration)
+    );
+  const allowedAutomationPresets = workflowTemplate
+    ? [...workflowTemplate.allowedAutomationPresets]
+    : [...allowedAutomationPresetsSource];
+  const automationPreset =
+    setupState.automationPreset && allowedAutomationPresets.includes(setupState.automationPreset)
+      ? setupState.automationPreset
+      : workflowTemplate?.defaultAutomationPreset ?? null;
+  const instanceConfig = {
+    ...(workflowTemplate?.defaultInstanceConfig ?? createEmptyWorkflowInstanceConfig()),
+    ...instanceConfigSource,
+  };
+  const areas = workflowTemplate
+    ? deriveAreasForWorkflowCategory(workflowTemplate.category)
+    : areasSource;
+  const integrations = workflowTemplate
+    ? [
+      ...new Set([
+        ...requiredIntegrations,
+        ...integrationsSource.filter(
+          (integration) =>
+            requiredIntegrations.includes(integration) ||
+            optionalIntegrations.includes(integration)
+        ),
+      ]),
+    ]
+    : integrationsSource;
   const fallbackTimezone = context.fallbackTimezone ?? "UTC";
-  const taskData: AgentSetupTaskData = { ...setupState.task_data };
-  const checklist = setupState.checklist.map((item) => {
+  const taskData: AgentSetupTaskData = { ...taskDataSource };
+  const checklist = checklistSource.map((item) => {
     const normalizedItem = resolveChecklistItemPresentation({
       ...item,
       verification_mode: item.verification_mode ?? "manual",
@@ -283,7 +523,16 @@ export function resolveSetupState(
 
   return {
     ...setupState,
-    builder_draft: { ...createEmptyPromptBuilderDraft(setupState.channel), ...setupState.builder_draft, channel: setupState.channel },
+    workflowCategory: workflowTemplate?.category ?? setupState.workflowCategory,
+    requiredIntegrations: [...new Set(requiredIntegrations)],
+    optionalIntegrations: [...new Set(optionalIntegrations)],
+    allowedAutomationPresets: [...new Set(allowedAutomationPresets)],
+    automationPreset,
+    instanceConfig,
+    successMetrics: [...new Set(workflowTemplate?.successMetrics ?? successMetricsSource)],
+    areas: [...new Set(areas)],
+    integrations: [...new Set(integrations)],
+    builder_draft: { ...createEmptyPromptBuilderDraft(setupState.channel), ...builderDraftSource, channel: setupState.channel },
     task_data: taskData,
     checklist,
     setup_status: deriveSetupStatus(checklist),
@@ -363,6 +612,18 @@ function resolveChecklistItemStatus(
   if (item.verification_mode === "structured") {
     if (item.input_kind === "schedule") {
       const value = normalizeScheduleTaskData(taskData[item.id], fallbackTimezone);
+      const detectedTimezone =
+        typeof context.googleCalendarDetectedTimezone === "string" &&
+        context.googleCalendarDetectedTimezone.trim().length > 0
+          ? context.googleCalendarDetectedTimezone.trim()
+          : null;
+
+      value.detectedTimezone = detectedTimezone;
+
+      if (detectedTimezone && !value.timezoneManualOverride) {
+        value.timezone = detectedTimezone;
+      }
+
       taskData[item.id] = value;
       return hasValidScheduleTaskData(value) ? "completed" : value.deferred ? "deferred" : "pending";
     }
@@ -420,7 +681,7 @@ function resolveChecklistItemPresentation(
   };
 }
 
-function createEmptyPromptBuilderDraft(channel: ChannelIntent): PromptBuilderDraft {
+export function createEmptyPromptBuilderDraft(channel: ChannelIntent): PromptBuilderDraft {
   return {
     objective: "",
     role: "",
@@ -434,10 +695,139 @@ function createEmptyPromptBuilderDraft(channel: ChannelIntent): PromptBuilderDra
   };
 }
 
+export function createEmptyWorkflowInstanceConfig(): WorkflowInstanceConfig {
+  return {
+    language: "es",
+    ownerLabel: "",
+    routingMode: "",
+    handoffThreshold: "",
+    scheduleSummary: "",
+    toneSummary: "",
+  };
+}
 
+function deriveAreasForWorkflowCategory(category: WorkflowCategory): AgentArea[] {
+  if (category === "sales") return ["sales"];
+  if (category === "support") return ["support"];
+  if (category === "knowledge") return ["analysis"];
+  return ["analysis", "support"];
+}
 
+export type IntegrationToolScope = {
+  conservative: string[];
+  full: string[];
+};
 
+export type ToolScopeOption = {
+  id: string;
+  label: string;
+  description: string;
+};
 
+export const CUSTOM_TOOL_SCOPE_TASK_KEY = "tool_scope_custom";
+
+const SALESFORCE_TOOL_SCOPE: IntegrationToolScope = {
+  conservative: [...SALESFORCE_LOOKUP_ACTIONS, "create_task"],
+  full: [...SALESFORCE_CRM_ACTIONS],
+};
+
+const HUBSPOT_TOOL_SCOPE: IntegrationToolScope = {
+  conservative: [...HUBSPOT_LOOKUP_ACTIONS, "create_task"],
+  full: [...HUBSPOT_CRM_ACTIONS],
+};
+
+const GMAIL_TOOL_SCOPE: IntegrationToolScope = {
+  conservative: ["search_threads", "read_thread"],
+  full: ["search_threads", "read_thread"],
+};
+
+const GOOGLE_CALENDAR_TOOL_SCOPE: IntegrationToolScope = {
+  conservative: ["check_availability", "list_events"],
+  full: [...GOOGLE_CALENDAR_TOOL_ACTIONS],
+};
+
+const INTEGRATION_TOOL_SCOPES: Partial<Record<WizardIntegrationId, IntegrationToolScope>> = {
+  salesforce: SALESFORCE_TOOL_SCOPE,
+  hubspot: HUBSPOT_TOOL_SCOPE,
+  gmail: GMAIL_TOOL_SCOPE,
+  google_calendar: GOOGLE_CALENDAR_TOOL_SCOPE,
+};
+
+const INTEGRATION_TOOL_OPTIONS: Partial<Record<WizardIntegrationId, ToolScopeOption[]>> = {
+  salesforce: SALESFORCE_CRM_ACTIONS.map((action) => ({
+    id: action,
+    label: getSalesforceActionLabel(action),
+    description: getSalesforceActionDescription(action),
+  })),
+  hubspot: HUBSPOT_CRM_ACTIONS.map((action) => ({
+    id: action,
+    label: getHubSpotActionLabel(action),
+    description: getHubSpotActionDescription(action),
+  })),
+  gmail: GMAIL_TOOL_ACTIONS.map((action) => ({
+    id: action,
+    label: getGmailActionLabel(action),
+    description: getGmailActionDescription(action),
+  })),
+  google_calendar: GOOGLE_CALENDAR_TOOL_ACTIONS.map((action) => ({
+    id: action,
+    label: getGoogleCalendarActionLabel(action),
+    description: getGoogleCalendarActionDescription(action),
+  })),
+};
+
+export function getAvailableToolScopeOptions(integration: WizardIntegrationId): ToolScopeOption[] {
+  return INTEGRATION_TOOL_OPTIONS[integration] ?? [];
+}
+
+export function getToolsForScope(
+  integration: WizardIntegrationId,
+  preset: ToolScopePreset,
+  customActions?: string[]
+): string[] {
+  const scope = INTEGRATION_TOOL_SCOPES[integration];
+  if (!scope) {
+    return [];
+  }
+
+  if (preset === "conservative") {
+    return [...scope.conservative];
+  }
+
+  if (preset === "custom") {
+    const selected = customActions?.filter((action) => scope.full.includes(action)) ?? [];
+    return [...new Set(selected)];
+  }
+
+  return [...scope.full];
+}
+
+export function getCustomToolScopeSelections(
+  taskData: AgentSetupTaskData | undefined
+): Partial<Record<WizardIntegrationId, string[]>> {
+  const value = taskData?.[CUSTOM_TOOL_SCOPE_TASK_KEY];
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+
+  const entries = Object.entries(value).flatMap(([integration, actions]) => {
+    if (!Array.isArray(actions)) {
+      return [];
+    }
+
+    return [[integration, actions.filter((action): action is string => typeof action === "string")]] as const;
+  });
+
+  return Object.fromEntries(entries) as Partial<Record<WizardIntegrationId, string[]>>;
+}
+
+export function getResolvedToolsForIntegration(
+  setupState: Pick<AgentSetupState, "tool_scope_preset"> & { task_data?: AgentSetupTaskData | undefined },
+  integration: WizardIntegrationId
+): string[] {
+  const customSelections = getCustomToolScopeSelections(setupState.task_data);
+  return getToolsForScope(integration, setupState.tool_scope_preset, customSelections[integration]);
+}
 
 
 

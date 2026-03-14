@@ -30,10 +30,25 @@ export type SalesforcePromptConflict = {
   snippet: string | null;
 };
 
+export type HubSpotPromptConflict = SalesforcePromptConflict;
+
 const CRM_ACCESS_CONFLICT_PATTERNS = [
   /no tengo acceso[\s\S]{0,120}(salesforce|crm|base de datos externa)/i,
   /no estoy conectado[\s\S]{0,120}(salesforce|crm|base de datos externa)/i,
   /no puedo[\s\S]{0,160}(buscar|leer|consultar|actualizar)[\s\S]{0,120}(salesforce|crm|base de datos externa)/i,
+  /no prometas lecturas ni escrituras reales en Salesforce[^\n]*/i,
+  /Si el usuario pide una accion sobre Salesforce[^\n]*explica ese limite[^\n]*/i,
+  /No inventes datos del CRM[^\n]*Salesforce[^\n]*/i,
+] as const;
+
+const HUBSPOT_ACCESS_CONFLICT_PATTERNS = [
+  /no tengo acceso[\s\S]{0,120}(hubspot|crm|base de datos externa)/i,
+  /no estoy conectado[\s\S]{0,120}(hubspot|crm|base de datos externa)/i,
+  /no puedo[\s\S]{0,160}(crear|buscar|leer|consultar|actualizar)[\s\S]{0,120}(hubspot|crm|base de datos externa)/i,
+  /no tengo habilitada[\s\S]{0,140}(tool|herramienta)[\s\S]{0,140}(hubspot|crm|contact)/i,
+  /no prometas lecturas ni escrituras reales en HubSpot[^\n]*/i,
+  /Si el usuario pide una accion sobre HubSpot[^\n]*explica ese limite[^\n]*/i,
+  /No inventes datos del CRM[^\n]*HubSpot[^\n]*/i,
 ] as const;
 
 function getCreatedAtTimestamp(value: string | null | undefined): number {
@@ -45,6 +60,40 @@ function buildPromptConflictSnippet(prompt: string, matchIndex: number, matchLen
   const start = Math.max(0, matchIndex - 60);
   const end = Math.min(prompt.length, matchIndex + matchLength + 60);
   return prompt.slice(start, end).replace(/\s+/g, " ").trim();
+}
+
+function stripPromptConflicts(prompt: string, patterns: readonly RegExp[]): string {
+  let cleaned = prompt;
+
+  for (const pattern of patterns) {
+    cleaned = cleaned.replace(pattern, "");
+  }
+
+  return cleaned.replace(/\n{3,}/g, "\n\n").trim();
+}
+
+function detectPromptConflict(
+  prompt: string,
+  patterns: readonly RegExp[]
+): SalesforcePromptConflict {
+  const normalizedPrompt = prompt.trim();
+  if (!normalizedPrompt) {
+    return { hasConflict: false, snippet: null };
+  }
+
+  for (const pattern of patterns) {
+    const match = pattern.exec(normalizedPrompt);
+    if (!match || match.index === undefined) {
+      continue;
+    }
+
+    return {
+      hasConflict: true,
+      snippet: buildPromptConflictSnippet(normalizedPrompt, match.index, match[0].length),
+    };
+  }
+
+  return { hasConflict: false, snippet: null };
 }
 
 function isSalesforceTool<TTool extends SalesforceToolLike>(
@@ -150,32 +199,17 @@ export function getSalesforceAgentToolSelectionDiagnostics<TTool extends Salesfo
 }
 
 export function stripSalesforcePromptConflicts(prompt: string): string {
-  let cleaned = prompt;
-
-  for (const pattern of CRM_ACCESS_CONFLICT_PATTERNS) {
-    cleaned = cleaned.replace(pattern, "");
-  }
-
-  return cleaned.replace(/\n{3,}/g, "\n\n").trim();
+  return stripPromptConflicts(prompt, CRM_ACCESS_CONFLICT_PATTERNS);
 }
 
 export function detectSalesforcePromptConflict(prompt: string): SalesforcePromptConflict {
-  const normalizedPrompt = prompt.trim();
-  if (!normalizedPrompt) {
-    return { hasConflict: false, snippet: null };
-  }
+  return detectPromptConflict(prompt, CRM_ACCESS_CONFLICT_PATTERNS);
+}
 
-  for (const pattern of CRM_ACCESS_CONFLICT_PATTERNS) {
-    const match = pattern.exec(normalizedPrompt);
-    if (!match || match.index === undefined) {
-      continue;
-    }
+export function stripHubSpotPromptConflicts(prompt: string): string {
+  return stripPromptConflicts(prompt, HUBSPOT_ACCESS_CONFLICT_PATTERNS);
+}
 
-    return {
-      hasConflict: true,
-      snippet: buildPromptConflictSnippet(normalizedPrompt, match.index, match[0].length),
-    };
-  }
-
-  return { hasConflict: false, snippet: null };
+export function detectHubSpotPromptConflict(prompt: string): HubSpotPromptConflict {
+  return detectPromptConflict(prompt, HUBSPOT_ACCESS_CONFLICT_PATTERNS);
 }

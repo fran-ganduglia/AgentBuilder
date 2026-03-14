@@ -1,5 +1,6 @@
 import type { AgentModelValue } from "@/lib/agents/agent-config";
 import {
+  AGENT_AREA_LABELS,
   CHANNEL_LABELS,
   createSetupState,
   getCriteriaTaskData,
@@ -104,6 +105,63 @@ const manualConfirmItem = (input: {
 });
 
 export const AGENT_TEMPLATES: AgentTemplate[] = [
+  {
+    id: "whatsapp_unified",
+    name: "Agente inteligente de WhatsApp",
+    description: "Centraliza soporte, ventas, turnos y seguimiento en un solo agente por numero, con cambio de intencion segun cada mensaje real.",
+    ecosystem: "whatsapp",
+    channel: "whatsapp",
+    objectiveLabel: "Unificar atencion por WhatsApp",
+    recommendedModel: "gpt-4o-mini",
+    recommendedTemperature: 0.45,
+    builderDefaults: {
+      objective: "Resolver mensajes entrantes de WhatsApp detectando la intencion activa y respondiendo solo con el playbook correspondiente.",
+      role: "Agente inteligente de WhatsApp",
+      audience: "Clientes y leads que escriben al numero conectado por WhatsApp",
+      allowedTasks: "Identificar la intencion activa, responder con el playbook adecuado, pedir aclaracion inmediata con menu cuando el mensaje sea ambiguo y derivar a una persona cuando corresponda.",
+      tone: "friendly",
+      restrictions: "No mezclar playbooks entre si, no inventar disponibilidad, precios ni gestiones operativas, y no prometer acciones fuera de contexto o sin confirmacion real.",
+      humanHandoff: "Derivar a una persona si el caso excede el playbook activo, requiere una excepcion, implica riesgo, o necesita confirmacion humana.",
+      openingMessage: "Hola, soy el agente inteligente de WhatsApp. Contame que necesitas y te guio por el camino correcto.",
+      channel: "whatsapp",
+    },
+    setupChecklist: [
+      manualReviewItem({
+        id: "review-whatsapp-personality",
+        label: "Ajustar personalidad base",
+        description: "Revisa el rol, tono y mensaje inicial del agente antes de activarlo en el numero real.",
+        required_for_activation: true,
+        builder_field: "role",
+      }),
+      manualReviewItem({
+        id: "define-whatsapp-operating-context",
+        label: "Definir contexto operativo",
+        description: "Confirma objetivo, audiencia y tareas permitidas para que el router responda con el alcance correcto.",
+        required_for_activation: true,
+        builder_field: "allowedTasks",
+      }),
+      manualReviewItem({
+        id: "define-whatsapp-limits",
+        label: "Definir limites y reglas",
+        description: "Asegura que las restricciones expliciten que el agente no puede prometer acciones ni mezclar playbooks.",
+        required_for_activation: true,
+        builder_field: "restrictions",
+      }),
+      criteriaItem({
+        id: "define-whatsapp-unified-handoff",
+        label: "Definir reglas de handoff",
+        description: "Marca los escenarios donde el agente debe frenar y pasar la conversacion a una persona.",
+        required_for_activation: true,
+        options: [
+          "Caso sensible o cliente molesto",
+          "Negociacion o condicion especial",
+          "Excepcion operativa o fuera de politica",
+          "Necesidad de confirmar una gestion real",
+        ],
+        placeholder: "Agrega una regla propia de derivacion humana.",
+      }),
+    ],
+  },
   {
     id: "whatsapp_support",
     name: "Soporte por WhatsApp",
@@ -787,6 +845,13 @@ export const AGENT_TEMPLATES: AgentTemplate[] = [
       channel: "api",
     },
     setupChecklist: [
+      providerIntegrationItem({
+        id: "connect-hubspot-crm",
+        label: "Conectar HubSpot y habilitar tool CRM",
+        description: "Requiere una integracion HubSpot usable y la tool CRM habilitada para este agente.",
+        required_for_activation: true,
+        integration_provider: "hubspot",
+      }),
       criteriaItem({
         id: "define-hubspot-capture-fields",
         label: "Definir datos minimos a capturar",
@@ -842,6 +907,13 @@ export const AGENT_TEMPLATES: AgentTemplate[] = [
       channel: "api",
     },
     setupChecklist: [
+      providerIntegrationItem({
+        id: "connect-hubspot-crm",
+        label: "Conectar HubSpot y habilitar tool CRM",
+        description: "Requiere una integracion HubSpot usable y la tool CRM habilitada para este agente.",
+        required_for_activation: true,
+        integration_provider: "hubspot",
+      }),
       scheduleItem({
         id: "define-hubspot-followup-cadence",
         label: "Definir cadencia de seguimiento",
@@ -890,6 +962,13 @@ export const AGENT_TEMPLATES: AgentTemplate[] = [
       channel: "api",
     },
     setupChecklist: [
+      providerIntegrationItem({
+        id: "connect-hubspot-crm",
+        label: "Conectar HubSpot y habilitar tool CRM",
+        description: "Requiere una integracion HubSpot usable y la tool CRM habilitada para este agente.",
+        required_for_activation: true,
+        integration_provider: "hubspot",
+      }),
       scheduleItem({
         id: "define-hubspot-meeting-availability-window",
         label: "Definir ventana de disponibilidad",
@@ -938,6 +1017,13 @@ export const AGENT_TEMPLATES: AgentTemplate[] = [
       channel: "api",
     },
     setupChecklist: [
+      providerIntegrationItem({
+        id: "connect-hubspot-crm",
+        label: "Conectar HubSpot y habilitar tool CRM",
+        description: "Requiere una integracion HubSpot usable y la tool CRM habilitada para este agente.",
+        required_for_activation: true,
+        integration_provider: "hubspot",
+      }),
       scheduleItem({
         id: "define-hubspot-reactivation-cadence",
         label: "Definir cadencia de recontacto",
@@ -993,6 +1079,13 @@ export const AGENT_TEMPLATES: AgentTemplate[] = [
       channel: "email",
     },
     setupChecklist: [
+      providerIntegrationItem({
+        id: "connect-gmail-integration",
+        label: "Conectar Gmail",
+        description: "Conecta Google Workspace con los scopes de Gmail y guarda la tool Gmail del agente.",
+        required_for_activation: true,
+        integration_provider: "gmail",
+      }),
       criteriaItem({
         id: "define-gmail-priority-rules",
         label: "Definir reglas de prioridad",
@@ -1048,6 +1141,13 @@ export const AGENT_TEMPLATES: AgentTemplate[] = [
       channel: "email",
     },
     setupChecklist: [
+      providerIntegrationItem({
+        id: "connect-calendar-integration",
+        label: "Conectar Google Calendar",
+        description: "Conecta Google Workspace con los scopes de Calendar y guarda la tool Google Calendar del agente.",
+        required_for_activation: true,
+        integration_provider: "google_calendar",
+      }),
       scheduleItem({
         id: "define-calendar-availability-window",
         label: "Definir ventana de disponibilidad",
@@ -1096,6 +1196,13 @@ export const AGENT_TEMPLATES: AgentTemplate[] = [
       channel: "email",
     },
     setupChecklist: [
+      providerIntegrationItem({
+        id: "connect-gmail-follow-up-integration",
+        label: "Conectar Gmail",
+        description: "Conecta Google Workspace con los scopes de Gmail y guarda la tool Gmail del agente.",
+        required_for_activation: true,
+        integration_provider: "gmail",
+      }),
       scheduleItem({
         id: "define-gmail-follow-up-cadence",
         label: "Definir cadencia de seguimiento",
@@ -1145,6 +1252,13 @@ export const AGENT_TEMPLATES: AgentTemplate[] = [
       channel: "email",
     },
     setupChecklist: [
+      providerIntegrationItem({
+        id: "connect-calendar-reschedule-integration",
+        label: "Conectar Google Calendar",
+        description: "Conecta Google Workspace con los scopes de Calendar y guarda la tool Google Calendar del agente.",
+        required_for_activation: true,
+        integration_provider: "google_calendar",
+      }),
       criteriaItem({
         id: "define-calendar-reschedule-rules",
         label: "Definir reglas de reprogramacion",
@@ -1443,17 +1557,162 @@ export const AGENT_TEMPLATES: AgentTemplate[] = [
 ];
 
 export type PromptSyncMode = "recommended" | "custom";
+export type RecommendedPromptEnvironment = {
+  salesforceUsable?: boolean;
+  hubspotUsable?: boolean;
+  gmailConfigured?: boolean;
+  gmailRuntimeAvailable?: boolean;
+  googleCalendarConfigured?: boolean;
+  googleCalendarRuntimeAvailable?: boolean;
+};
+
+export type RecommendedPromptVariant = "current" | "legacy";
+
+export type RecommendedPromptCandidate = {
+  prompt: string;
+  variant: RecommendedPromptVariant;
+  salesforceUsable: boolean | null;
+  hubspotUsable: boolean | null;
+  gmailConfigured: boolean | null;
+  gmailRuntimeAvailable: boolean | null;
+  googleCalendarConfigured: boolean | null;
+  googleCalendarRuntimeAvailable: boolean | null;
+};
 
 type RecommendedPromptInput = PromptBuilderDraft | AgentSetupState;
 
-export function buildRecommendedSystemPrompt(input: RecommendedPromptInput): string {
+export function buildRecommendedSystemPrompt(
+  input: RecommendedPromptInput,
+  environment: RecommendedPromptEnvironment = {}
+): string {
+  return buildCurrentRecommendedSystemPrompt(input, environment);
+}
+
+export function getRecommendedPromptCandidates(
+  setupState: AgentSetupState,
+  environment: RecommendedPromptEnvironment = {}
+): RecommendedPromptCandidate[] {
+  const normalizedEnvironment = normalizeRecommendedPromptEnvironment(setupState, environment);
+  const environmentVariants = getRecommendedPromptEnvironmentVariants(normalizedEnvironment);
+
+  if (environmentVariants.length === 0) {
+    return [
+      {
+        prompt: buildCurrentRecommendedSystemPrompt(setupState, environment),
+        variant: "current",
+        salesforceUsable: null,
+        hubspotUsable: null,
+        gmailConfigured: null,
+        gmailRuntimeAvailable: null,
+        googleCalendarConfigured: null,
+        googleCalendarRuntimeAvailable: null,
+      },
+    ];
+  }
+
+  const candidates: RecommendedPromptCandidate[] = [];
+
+  for (const variantEnvironment of environmentVariants) {
+    candidates.push({
+      prompt: buildCurrentRecommendedSystemPrompt(
+        setupState,
+        variantEnvironment
+      ),
+      variant: "current",
+      salesforceUsable: variantEnvironment.salesforceUsable ?? null,
+      hubspotUsable: variantEnvironment.hubspotUsable ?? null,
+      gmailConfigured: variantEnvironment.gmailConfigured ?? null,
+      gmailRuntimeAvailable: variantEnvironment.gmailRuntimeAvailable ?? null,
+      googleCalendarConfigured: variantEnvironment.googleCalendarConfigured ?? null,
+      googleCalendarRuntimeAvailable:
+        variantEnvironment.googleCalendarRuntimeAvailable ?? null,
+    });
+  }
+
+  for (const variantEnvironment of environmentVariants) {
+    candidates.push({
+      prompt: buildLegacyRecommendedSystemPrompt(
+        setupState,
+        variantEnvironment
+      ),
+      variant: "legacy",
+      salesforceUsable: variantEnvironment.salesforceUsable ?? null,
+      hubspotUsable: variantEnvironment.hubspotUsable ?? null,
+      gmailConfigured: variantEnvironment.gmailConfigured ?? null,
+      gmailRuntimeAvailable: variantEnvironment.gmailRuntimeAvailable ?? null,
+      googleCalendarConfigured: variantEnvironment.googleCalendarConfigured ?? null,
+      googleCalendarRuntimeAvailable:
+        variantEnvironment.googleCalendarRuntimeAvailable ?? null,
+    });
+  }
+
+  return candidates;
+}
+
+export function detectPromptSyncMode(
+  currentPrompt: string,
+  setupState: AgentSetupState,
+  environment: RecommendedPromptEnvironment = {}
+): PromptSyncMode {
+  return getRecommendedPromptCandidates(setupState, environment).some(
+    (candidate) => normalizePrompt(currentPrompt) === normalizePrompt(candidate.prompt)
+  )
+    ? "recommended"
+    : "custom";
+}
+
+export function syncSystemPromptWithSetup(
+  currentPrompt: string,
+  previousSetupState: AgentSetupState,
+  nextSetupState: AgentSetupState,
+  previousEnvironment: RecommendedPromptEnvironment = {},
+  nextEnvironment: RecommendedPromptEnvironment = previousEnvironment
+): string {
+  return detectPromptSyncMode(currentPrompt, previousSetupState, previousEnvironment) === "recommended"
+    ? buildRecommendedSystemPrompt(nextSetupState, nextEnvironment)
+    : currentPrompt;
+}
+
+function buildCurrentRecommendedSystemPrompt(
+  input: RecommendedPromptInput,
+  environment: RecommendedPromptEnvironment
+): string {
   const draft = isSetupState(input) ? input.builder_draft : input;
+  const onboardingContext = isSetupState(input) ? buildOnboardingContext(input) : [];
+  const normalizedEnvironment = normalizeRecommendedPromptEnvironment(
+    input,
+    environment
+  );
+  const capabilityLines = resolveCapabilityLines(input, normalizedEnvironment);
+
+  return buildPromptFromSections(draft, onboardingContext, capabilityLines);
+}
+
+function buildLegacyRecommendedSystemPrompt(
+  input: RecommendedPromptInput,
+  environment: RecommendedPromptEnvironment
+): string {
+  const draft = isSetupState(input) ? input.builder_draft : input;
+  const onboardingContext = isSetupState(input) ? buildOnboardingContext(input) : [];
+  const normalizedEnvironment = normalizeRecommendedPromptEnvironment(
+    input,
+    environment
+  );
+  const capabilityLines = resolveLegacyCapabilityLines(input, normalizedEnvironment);
+
+  return buildPromptFromSections(draft, onboardingContext, capabilityLines);
+}
+
+function buildPromptFromSections(
+  draft: PromptBuilderDraft,
+  onboardingContext: string[],
+  capabilityLines: string[]
+): string {
   const channelLabel = CHANNEL_LABELS[draft.channel];
   const tasks = draft.allowedTasks.trim() || "Responder con claridad y orientar el siguiente paso";
   const restrictions = draft.restrictions.trim() || "No inventar informacion ni salir del alcance definido";
   const handoff = draft.humanHandoff.trim() || "Derivar a una persona cuando el caso exceda su alcance";
   const opening = draft.openingMessage.trim();
-  const onboardingContext = isSetupState(input) ? buildOnboardingContext(input) : [];
 
   const sections = [
     `Actua como ${draft.role.trim() || "un agente de IA profesional"} para ${draft.audience.trim() || "las personas usuarias de la organizacion"}.`,
@@ -1462,6 +1721,10 @@ export function buildRecommendedSystemPrompt(input: RecommendedPromptInput): str
     `Tono esperado: ${resolveToneInstruction(draft.tone)}.`,
     `Reglas y limites: ${restrictions}.`,
     `Derivacion a humano: ${handoff}.`,
+    capabilityLines.length > 0
+      ? `Capacidades operativas y limites:
+${capabilityLines.map((line) => `- ${line}`).join("\n")}`
+      : null,
     onboardingContext.length > 0
       ? `Contexto operativo del onboarding:
 ${onboardingContext.map((line) => `- ${line}`).join("\n")}`
@@ -1474,29 +1737,308 @@ ${onboardingContext.map((line) => `- ${line}`).join("\n")}`
   return sections.filter((value): value is string => Boolean(value)).join("\n\n");
 }
 
-export function detectPromptSyncMode(currentPrompt: string, setupState: AgentSetupState): PromptSyncMode {
-  return normalizePrompt(currentPrompt) === normalizePrompt(buildRecommendedSystemPrompt(setupState))
-    ? "recommended"
-    : "custom";
+function normalizeRecommendedPromptEnvironment(
+  input: RecommendedPromptInput,
+  environment: RecommendedPromptEnvironment
+): RecommendedPromptEnvironment {
+  if (
+    !isSalesforceRecommendedPromptInput(input) &&
+    !isHubSpotRecommendedPromptInput(input) &&
+    !isGmailRecommendedPromptInput(input) &&
+    !isGoogleCalendarRecommendedPromptInput(input)
+  ) {
+    return {};
+  }
+
+  return {
+    ...(isSalesforceRecommendedPromptInput(input)
+      ? { salesforceUsable: environment.salesforceUsable === true }
+      : {}),
+    ...(isHubSpotRecommendedPromptInput(input)
+      ? { hubspotUsable: environment.hubspotUsable === true }
+      : {}),
+    ...(isGmailRecommendedPromptInput(input)
+      ? {
+          gmailConfigured: environment.gmailConfigured === true,
+          gmailRuntimeAvailable:
+            environment.gmailConfigured === true &&
+            environment.gmailRuntimeAvailable === true,
+        }
+      : {}),
+    ...(isGoogleCalendarRecommendedPromptInput(input)
+      ? {
+          googleCalendarConfigured: environment.googleCalendarConfigured === true,
+          googleCalendarRuntimeAvailable:
+            environment.googleCalendarConfigured === true &&
+            environment.googleCalendarRuntimeAvailable === true,
+        }
+      : {}),
+  };
 }
 
-export function syncSystemPromptWithSetup(
-  currentPrompt: string,
-  previousSetupState: AgentSetupState,
-  nextSetupState: AgentSetupState
-): string {
-  const previousRecommended = buildRecommendedSystemPrompt(previousSetupState);
-  const nextRecommended = buildRecommendedSystemPrompt(nextSetupState);
-  return normalizePrompt(currentPrompt) === normalizePrompt(previousRecommended)
-    ? nextRecommended
-    : currentPrompt;
+function getRecommendedPromptEnvironmentVariants(
+  environment: RecommendedPromptEnvironment
+): RecommendedPromptEnvironment[] {
+  const dimensions: RecommendedPromptEnvironment[][] = [];
+
+  if (environment.salesforceUsable !== undefined) {
+    dimensions.push(
+      environment.salesforceUsable === true
+        ? [{ salesforceUsable: true }, { salesforceUsable: false }]
+        : [{ salesforceUsable: false }, { salesforceUsable: true }]
+    );
+  }
+
+  if (environment.hubspotUsable !== undefined) {
+    dimensions.push(
+      environment.hubspotUsable === true
+        ? [{ hubspotUsable: true }, { hubspotUsable: false }]
+        : [{ hubspotUsable: false }, { hubspotUsable: true }]
+    );
+  }
+
+  if (
+    environment.gmailConfigured !== undefined ||
+    environment.gmailRuntimeAvailable !== undefined
+  ) {
+    const currentState = environment.gmailRuntimeAvailable === true
+      ? { gmailConfigured: true, gmailRuntimeAvailable: true }
+      : environment.gmailConfigured === true
+        ? { gmailConfigured: true, gmailRuntimeAvailable: false }
+        : { gmailConfigured: false, gmailRuntimeAvailable: false };
+
+    dimensions.push([
+      currentState,
+      { gmailConfigured: true, gmailRuntimeAvailable: false },
+      { gmailConfigured: true, gmailRuntimeAvailable: true },
+      { gmailConfigured: false, gmailRuntimeAvailable: false },
+    ]);
+  }
+
+  if (
+    environment.googleCalendarConfigured !== undefined ||
+    environment.googleCalendarRuntimeAvailable !== undefined
+  ) {
+    const currentState = environment.googleCalendarRuntimeAvailable === true
+      ? { googleCalendarConfigured: true, googleCalendarRuntimeAvailable: true }
+      : environment.googleCalendarConfigured === true
+        ? { googleCalendarConfigured: true, googleCalendarRuntimeAvailable: false }
+        : {
+            googleCalendarConfigured: false,
+            googleCalendarRuntimeAvailable: false,
+          };
+
+    dimensions.push([
+      currentState,
+      { googleCalendarConfigured: true, googleCalendarRuntimeAvailable: false },
+      { googleCalendarConfigured: true, googleCalendarRuntimeAvailable: true },
+      {
+        googleCalendarConfigured: false,
+        googleCalendarRuntimeAvailable: false,
+      },
+    ]);
+  }
+
+  if (dimensions.length === 0) {
+    return [];
+  }
+
+  const combinations = dimensions.reduce<RecommendedPromptEnvironment[]>(
+    (accumulator, options) =>
+      accumulator.flatMap((base) =>
+        options.map((option) => ({ ...base, ...option }))
+      ),
+    [{}]
+  );
+
+  return combinations.filter(
+    (candidate, index) =>
+      combinations.findIndex((current) => JSON.stringify(current) === JSON.stringify(candidate)) === index
+  );
+}
+
+function resolveCapabilityLines(
+  input: RecommendedPromptInput,
+  environment: RecommendedPromptEnvironment
+): string[] {
+  const lines = [
+    ...resolveCrmCapabilityLines(input, environment),
+    ...resolveGoogleCapabilityLines(input, environment),
+  ];
+
+  return lines;
+}
+
+function resolveCrmCapabilityLines(
+  input: RecommendedPromptInput,
+  environment: RecommendedPromptEnvironment
+): string[] {
+  if (isSalesforceRecommendedPromptInput(input)) {
+    if (environment.salesforceUsable === true) {
+      return [
+        "Tienes acceso operativo al CRM mediante la integracion backend de Salesforce y las tools habilitadas de este agente.",
+        "Si el usuario pregunta por Salesforce o por el CRM, confirma ese acceso operativo sin prometer acciones que todavia no ejecutaste en este turno.",
+        "Si falta contexto para leer o escribir algo puntual, describe esa situacion concreta sin negar el acceso general al CRM.",
+      ];
+    }
+
+    return [];
+  }
+
+  if (!isHubSpotRecommendedPromptInput(input)) {
+    return [];
+  }
+
+  if (environment.hubspotUsable === true) {
+    return [
+      "Tienes acceso operativo al CRM mediante la integracion backend de HubSpot y las tools habilitadas de este agente.",
+      "Si el usuario pregunta por HubSpot o por el CRM, confirma ese acceso operativo sin prometer acciones que todavia no ejecutaste en este turno.",
+      "Si falta contexto para leer o escribir algo puntual, describe esa situacion concreta sin negar el acceso general al CRM.",
+    ];
+  }
+
+  return [];
+}
+
+function resolveGoogleCapabilityLines(
+  input: RecommendedPromptInput,
+  environment: RecommendedPromptEnvironment
+): string[] {
+  const lines: string[] = [];
+
+  if (isGmailRecommendedPromptInput(input) && environment.gmailConfigured === true) {
+    if (environment.gmailRuntimeAvailable === true) {
+      lines.push(
+        "Gmail esta configurado y disponible en chat web para lectura segura basada en metadata y para writes asistidas que pasan por approval inbox.",
+        "Puedes buscar hilos y leer resumentes de threads usando headers, snippets y conteo de adjuntos, pero nunca bodies completos ni HTML.",
+        "Las acciones reales habilitadas en esta fase son crear borradores, aplicar labels existentes y archivar hilos; `send_reply`, bodies completos y adjuntos siguen fuera de alcance."
+      );
+    } else {
+      lines.push(
+        "Gmail esta configurado para este agente, pero la ejecucion real solo esta disponible en chat web.",
+        "No simules busquedas, lecturas, borradores, labels ni archivado en Gmail mientras esta superficie no tenga runtime usable.",
+        "Si el usuario pide una accion real sobre Gmail fuera del chat web, explica que la ejecucion segura existe en chat web y que `send_reply` sigue deshabilitado en esta fase."
+      );
+    }
+  }
+
+  if (
+    isGoogleCalendarRecommendedPromptInput(input) &&
+    environment.googleCalendarConfigured === true
+  ) {
+    if (environment.googleCalendarRuntimeAvailable === true) {
+      lines.push(
+        "Google Calendar esta conectado y puedes consultar disponibilidad o listar eventos reales en este chat.",
+        "Para consultar disponibilidad di algo como: 'estoy libre el viernes', 'tengo hueco manana', 'hay espacio esta semana'.",
+        "Para listar eventos di algo como: 'que tengo el martes', 'que hay en mi agenda hoy', 'muestra mis reuniones del lunes'.",
+        "Fechas que el sistema puede resolver: hoy, manana, pasado manana, esta semana, proximos N dias (ej. proximos 3 dias), el lunes/martes/miercoles/jueves/viernes/sabado/domingo, o una fecha exacta en formato AAAA-MM-DD.",
+        "Nunca inventes disponibilidad ni eventos — si la consulta no puede ejecutarse, explica el motivo con exactitud y sugiere como reformularla."
+      );
+    } else {
+      lines.push(
+        "Google Calendar esta configurado pero la ejecucion de consultas reales no esta disponible en esta superficie.",
+        "No simules disponibilidad, no inventes eventos y no describas resultados de Calendar como si los hubieras consultado.",
+        "Si el usuario pide revisar su agenda, disponibilidad o eventos, explica que esa funcionalidad esta preparada pero aun no activa aqui, y sugerile que use el chat web del agente.",
+        "Puedes explicar como funciona la integracion de Google Calendar y que tipos de consultas podra hacer cuando este disponible: ver disponibilidad por dia, listar eventos de la semana, consultar un dia especifico."
+      );
+    }
+  }
+
+  return lines;
+}
+
+function resolveLegacyCapabilityLines(
+  input: RecommendedPromptInput,
+  environment: RecommendedPromptEnvironment
+): string[] {
+  const lines = [...resolveLegacyCrmCapabilityLines(input, environment)];
+
+  if (isGmailRecommendedPromptInput(input) && environment.gmailConfigured === true) {
+    lines.push(
+      environment.gmailRuntimeAvailable === true
+        ? "Trabaja con Gmail usando metadata segura para lectura y approval inbox para borradores, labels y archivado, sin inventar resultados."
+        : "Gmail esta configurado, pero no debes simular acciones fuera del chat web ni prometer `send_reply` en esta fase."
+    );
+  }
+
+  if (
+    isGoogleCalendarRecommendedPromptInput(input) &&
+    environment.googleCalendarConfigured === true
+  ) {
+    lines.push(
+      environment.googleCalendarRuntimeAvailable === true
+        ? "Trabaja con Google Calendar usando solo acciones confirmadas y sin inventar resultados."
+        : "Google Calendar esta configurado, pero solo debes asumir ejecucion real en chat web y nunca en `/run` mientras esa superficie siga sin runtime."
+    );
+  }
+
+  return lines;
+}
+
+function resolveLegacyCrmCapabilityLines(
+  input: RecommendedPromptInput,
+  environment: RecommendedPromptEnvironment
+): string[] {
+  if (isSalesforceRecommendedPromptInput(input)) {
+    return environment.salesforceUsable === true
+      ? ["Trabaja con contexto de CRM cuando este disponible, sin inventar datos ni asumir cambios no confirmados."]
+      : [];
+  }
+
+  if (isHubSpotRecommendedPromptInput(input)) {
+    return environment.hubspotUsable === true
+      ? ["Trabaja con contexto de CRM cuando este disponible, sin inventar datos ni asumir cambios no confirmados."]
+      : [];
+  }
+
+  return [];
 }
 
 function isSetupState(value: RecommendedPromptInput): value is AgentSetupState {
   return "builder_draft" in value;
 }
 
+function isSalesforceRecommendedPromptInput(
+  value: RecommendedPromptInput
+): value is AgentSetupState {
+  return isSetupState(value) && (isSalesforceTemplateId(value.template_id) || value.integrations.includes("salesforce"));
+}
+
+function isHubSpotRecommendedPromptInput(
+  value: RecommendedPromptInput
+): value is AgentSetupState {
+  return isSetupState(value) && (isHubSpotTemplateId(value.template_id) || value.integrations.includes("hubspot"));
+}
+
+function isGmailRecommendedPromptInput(
+  value: RecommendedPromptInput
+): value is AgentSetupState {
+  return (
+    isSetupState(value) &&
+    (value.template_id === "gmail_inbox_assistant" ||
+      value.template_id === "gmail_follow_up_assistant" ||
+      value.integrations.includes("gmail"))
+  );
+}
+
+function isGoogleCalendarRecommendedPromptInput(
+  value: RecommendedPromptInput
+): value is AgentSetupState {
+  return (
+    isSetupState(value) &&
+    (value.template_id === "calendar_booking_assistant" ||
+      value.template_id === "calendar_reschedule_assistant" ||
+      value.integrations.includes("google_calendar"))
+  );
+}
+
 function buildOnboardingContext(setupState: AgentSetupState): string[] {
+  const areaLine = setupState.areas.length > 0
+    ? `Areas de negocio: ${setupState.areas.map((area) => AGENT_AREA_LABELS[area]).join(", ")}.`
+    : null;
+  const integrationLine = setupState.integrations.length > 0
+    ? `Integraciones previstas: ${setupState.integrations.join(", ")}.`
+    : null;
   const scheduleLines = setupState.checklist
     .filter((item) => item.input_kind === "schedule")
     .map((item) => summarizeScheduleItem(setupState, item.id))
@@ -1506,7 +2048,12 @@ function buildOnboardingContext(setupState: AgentSetupState): string[] {
     .map((item) => summarizeCriteriaItem(setupState, item))
     .filter((value): value is string => Boolean(value));
 
-  return [`Canal principal: ${CHANNEL_LABELS[setupState.channel]}.`, ...scheduleLines, ...criteriaLines];
+  return [
+    `Canal principal: ${CHANNEL_LABELS[setupState.channel]}.`,
+    ...[areaLine, integrationLine].filter((value): value is string => Boolean(value)),
+    ...scheduleLines,
+    ...criteriaLines,
+  ];
 }
 
 function summarizeScheduleItem(setupState: AgentSetupState, itemId: string): string {
@@ -1551,8 +2098,8 @@ export function getAgentTemplateById(templateId: AgentTemplateId): AgentTemplate
   return template ?? AGENT_TEMPLATES[AGENT_TEMPLATES.length - 1];
 }
 
-export function isSalesforceTemplateId(templateId: AgentTemplateId): boolean {
-  return getAgentTemplateById(templateId).ecosystem === "salesforce";
+export function isSalesforceTemplateId(templateId: AgentTemplateId | null | undefined): boolean {
+  return Boolean(templateId && getAgentTemplateById(templateId).ecosystem === "salesforce");
 }
 
 export function createSetupStateForTemplate(
@@ -1610,4 +2157,10 @@ function resolveToneInstruction(tone: PromptBuilderDraft["tone"]): string {
 
 
 
+
+
+
+export function isHubSpotTemplateId(templateId: AgentTemplateId | null | undefined): boolean {
+  return Boolean(templateId && getAgentTemplateById(templateId).ecosystem === "hubspot");
+}
 

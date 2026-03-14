@@ -1,5 +1,6 @@
 import "server-only";
 
+import { publishEventQueueNotification } from "@/lib/workers/queue-notify";
 import { createServiceSupabaseClient } from "@/lib/supabase/service";
 import type { Json, TablesInsert } from "@/types/database";
 
@@ -43,6 +44,7 @@ export async function enqueueEvent(input: EnqueueEventInput): Promise<void> {
       .insert(buildInsertPayload(input));
 
     if (!error) {
+      await notifyQueue(input.eventType, input.entityId);
       return;
     }
 
@@ -52,6 +54,7 @@ export async function enqueueEvent(input: EnqueueEventInput): Promise<void> {
         entityId: input.entityId,
         idempotencyKey: input.idempotencyKey,
       });
+      await notifyQueue(input.eventType, input.entityId);
       return;
     }
 
@@ -64,6 +67,18 @@ export async function enqueueEvent(input: EnqueueEventInput): Promise<void> {
     console.error("event_queue.unexpected_enqueue_error", {
       eventType: input.eventType,
       entityId: input.entityId,
+      error: error instanceof Error ? error.message : "unknown",
+    });
+  }
+}
+
+async function notifyQueue(eventType: string, entityId: string | null): Promise<void> {
+  try {
+    await publishEventQueueNotification();
+  } catch (error) {
+    console.error("event_queue.notify_error", {
+      eventType,
+      entityId,
       error: error instanceof Error ? error.message : "unknown",
     });
   }

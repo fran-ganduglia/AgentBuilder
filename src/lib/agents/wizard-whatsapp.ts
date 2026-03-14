@@ -7,11 +7,11 @@ export type WhatsAppWizardTutorialStep = {
 };
 
 export const WHATSAPP_WIZARD_SUMMARY =
-  "Conectas la misma integracion real de WhatsApp Cloud API que luego usa tu organizacion para observar conversaciones y validar el canal sin salir del wizard.";
+  "Conectas la misma integracion real de WhatsApp Cloud API que luego usa tu organizacion para que un solo agente inteligente responda mensajes reales del numero conectado.";
 
 export const WHATSAPP_WIZARD_BENEFITS = [
-  "La conexion habilita QA y futuras vinculaciones del canal, pero no crea el agente automaticamente.",
-  "Si la validacion falla o prefieres dejarla para despues, igual puedes elegir template y seguir armando el draft.",
+  "La conexion deja listo el numero para que el auto-reply asincrono opere desde el worker, sin usar chat local operativo.",
+  "Si la validacion falla o prefieres dejarla para despues, igual puedes crear el borrador del agente inteligente y terminar el setup mas tarde.",
 ];
 
 export const WHATSAPP_WIZARD_TUTORIAL_STEPS: WhatsAppWizardTutorialStep[] = [

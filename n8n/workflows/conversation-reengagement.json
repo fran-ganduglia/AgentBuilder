@@ -1,0 +1,166 @@
+{
+  "name": "Conversation Reengagement",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 1
+            }
+          ]
+        }
+      },
+      "id": "e1f2a3b4-c5d6-7890-abcd-666666666601",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -656,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.APP_BASE_URL }}/api/workers/conversations/reengagement",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 55000
+        }
+      },
+      "id": "e2f2a3b4-c5d6-7890-abcd-666666666602",
+      "name": "HTTP Request — Conversation Reengagement",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -448,
+        128
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "iU2pm59vosdoAGqW",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "check-204",
+              "leftValue": "={{ $json.statusCode }}",
+              "rightValue": 204,
+              "operator": {
+                "type": "number",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "e3f2a3b4-c5d6-7890-abcd-666666666603",
+      "name": "IF — Cola vacía",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -224,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "log-processed",
+              "name": "processed",
+              "value": "={{ $json.body.data.processed }}",
+              "type": "number"
+            },
+            {
+              "id": "log-failed",
+              "name": "failed",
+              "value": "={{ $json.body.data.failed }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "e4f2a3b4-c5d6-7890-abcd-666666666604",
+      "name": "Set — Log resultado",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        0,
+        0
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request — Conversation Reengagement",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request — Conversation Reengagement": {
+      "main": [
+        [
+          {
+            "node": "IF — Cola vacía",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF — Cola vacía": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Set — Log resultado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "e5f2a3b4-c5d6-7890-abcd-666666666605",
+  "meta": {
+    "instanceId": "383bde83c8f40f9807dee2626a62ac57bbcfa0c3c0b2b2551b71dd028bdd21cd"
+  },
+  "id": "wConversationReengagement",
+  "tags": []
+}

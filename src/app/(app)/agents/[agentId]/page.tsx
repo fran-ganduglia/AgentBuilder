@@ -3,6 +3,21 @@ import { AgentDetailWorkspace } from "@/components/agents/agent-detail-workspace
 import { buildAgentConnectionSummary } from "@/lib/agents/connection-policy";
 import { readAgentSetupState } from "@/lib/agents/agent-setup-state";
 import {
+  buildGmailSetupResolutionContext,
+  getGmailAgentIntegrationState,
+  getGmailIntegrationCta,
+} from "@/lib/agents/gmail-agent-integration";
+import {
+  buildGoogleCalendarSetupResolutionContext,
+  getGoogleCalendarIntegrationCta,
+  getGoogleCalendarAgentIntegrationState,
+} from "@/lib/agents/google-calendar-agent-integration";
+import {
+  buildHubSpotSetupResolutionContext,
+  getHubSpotIntegrationCta,
+  getHubSpotAgentIntegrationState,
+} from "@/lib/agents/hubspot-agent-integration";
+import {
   buildSalesforceSetupResolutionContext,
   getSalesforceAgentIntegrationState,
   getSalesforceIntegrationCta,
@@ -19,6 +34,7 @@ import {
   getAgentConnectionSummaryByAgentId,
 } from "@/lib/db/agent-connections";
 import { getPrimaryWhatsAppIntegration } from "@/lib/db/whatsapp-integrations";
+import { resolveGoogleCalendarIntegrationTimezone } from "@/lib/integrations/google-calendar-timezone";
 
 type AgentDetailSearchParams = {
   tab?: string | string[];
@@ -83,35 +99,136 @@ export default async function AgentDetailPage({ params, searchParams }: AgentDet
   const baseSetupState = readAgentSetupState(agent, {
     hasReadyDocuments: hasReadyDocumentsResult,
   });
-  const salesforceIntegrationStateResult = baseSetupState
-    ? await getSalesforceAgentIntegrationState({
-      agentId,
-      organizationId: session.organizationId,
-      setupState: baseSetupState,
-    })
-    : { data: null, error: null };
+
+  const [salesforceIntegrationStateResult, hubspotIntegrationStateResult, gmailIntegrationStateResult, googleCalendarIntegrationStateResult] = await Promise.all([
+    baseSetupState
+      ? getSalesforceAgentIntegrationState({
+          agentId,
+          organizationId: session.organizationId,
+          setupState: baseSetupState,
+        })
+      : Promise.resolve({ data: null, error: null }),
+    baseSetupState
+      ? getHubSpotAgentIntegrationState({
+          agentId,
+          organizationId: session.organizationId,
+          setupState: baseSetupState,
+        })
+      : Promise.resolve({ data: null, error: null }),
+    baseSetupState
+      ? getGmailAgentIntegrationState({
+          agentId,
+          organizationId: session.organizationId,
+          setupState: baseSetupState,
+        })
+      : Promise.resolve({ data: null, error: null }),
+    baseSetupState
+      ? getGoogleCalendarAgentIntegrationState({
+          agentId,
+          organizationId: session.organizationId,
+          setupState: baseSetupState,
+        })
+      : Promise.resolve({ data: null, error: null }),
+  ]);
+
   const salesforceIntegrationState = salesforceIntegrationStateResult.error
     ? null
     : salesforceIntegrationStateResult.data;
+  const hubspotIntegrationState = hubspotIntegrationStateResult.error
+    ? null
+    : hubspotIntegrationStateResult.data;
+  const gmailIntegrationState = gmailIntegrationStateResult.error
+    ? null
+    : gmailIntegrationStateResult.data;
+  const googleCalendarIntegrationState = googleCalendarIntegrationStateResult.error
+    ? null
+    : googleCalendarIntegrationStateResult.data;
+
+  const providerIntegrations = {
+    ...buildSalesforceSetupResolutionContext(salesforceIntegrationState),
+    ...buildHubSpotSetupResolutionContext(hubspotIntegrationState),
+    ...buildGmailSetupResolutionContext(gmailIntegrationState),
+    ...buildGoogleCalendarSetupResolutionContext(googleCalendarIntegrationState),
+  };
+  const googleCalendarTimezoneResult =
+    googleCalendarIntegrationState?.integration &&
+    googleCalendarIntegrationState.hasUsableIntegration
+      ? await resolveGoogleCalendarIntegrationTimezone({
+          integrationId: googleCalendarIntegrationState.integration.id,
+          organizationId: session.organizationId,
+        })
+      : { data: null, error: null };
+
   const setupState = readAgentSetupState(agent, {
     hasReadyDocuments: hasReadyDocumentsResult,
-    providerIntegrations: buildSalesforceSetupResolutionContext(salesforceIntegrationState),
+    googleCalendarDetectedTimezone:
+      googleCalendarTimezoneResult.data?.detectedTimezone ?? null,
+    providerIntegrations: Object.keys(providerIntegrations).length > 0 ? providerIntegrations : undefined,
   });
+
   const salesforceIntegrationCta = salesforceIntegrationState
     ? getSalesforceIntegrationCta(salesforceIntegrationState)
     : null;
   const salesforceIntegrationNotice =
     salesforceIntegrationState?.expectsSalesforceIntegration && !salesforceIntegrationState.isLinked
       ? {
-        title: salesforceIntegrationState.integration
-          ? `Salesforce: ${salesforceIntegrationState.integrationView.label}`
-          : "Salesforce pendiente",
-        message: salesforceIntegrationState.message,
-        tone: salesforceIntegrationState.integrationView.tone,
-        href: salesforceIntegrationCta?.href ?? "/settings/integrations",
-        label: salesforceIntegrationCta?.label ?? "Abrir integraciones",
-      }
+          title: salesforceIntegrationState.integration
+            ? `Salesforce: ${salesforceIntegrationState.integrationView.label}`
+            : "Salesforce pendiente",
+          message: salesforceIntegrationState.message,
+          tone: salesforceIntegrationState.integrationView.tone,
+          href: salesforceIntegrationCta?.href ?? "/settings/integrations",
+          label: salesforceIntegrationCta?.label ?? "Abrir integraciones",
+        }
       : null;
+
+  const hubspotIntegrationCta = hubspotIntegrationState
+    ? getHubSpotIntegrationCta(hubspotIntegrationState)
+    : null;
+  const hubspotIntegrationNotice =
+    hubspotIntegrationState?.expectsHubSpotIntegration && !hubspotIntegrationState.isLinked
+      ? {
+          title: hubspotIntegrationState.integration
+            ? `HubSpot: ${hubspotIntegrationState.integrationView.label}`
+            : "HubSpot pendiente",
+          message: hubspotIntegrationState.message,
+          tone: hubspotIntegrationState.integrationView.tone,
+          href: hubspotIntegrationCta?.href ?? "/settings/integrations",
+          label: hubspotIntegrationCta?.label ?? "Abrir integraciones",
+        }
+      : null;
+  const gmailIntegrationCta = gmailIntegrationState
+    ? getGmailIntegrationCta(gmailIntegrationState)
+    : null;
+  const gmailIntegrationNotice =
+    gmailIntegrationState?.expectsGmailIntegration && !gmailIntegrationState.isLinked
+      ? {
+          title: gmailIntegrationState.integration
+            ? `Gmail: ${gmailIntegrationState.integrationView.label}`
+            : "Gmail pendiente",
+          message: gmailIntegrationState.message,
+          tone: gmailIntegrationState.integrationView.tone,
+          href: gmailIntegrationCta?.href ?? "/settings/integrations",
+          label: gmailIntegrationCta?.label ?? "Abrir integraciones",
+        }
+      : null;
+  const googleCalendarIntegrationCta = googleCalendarIntegrationState
+    ? getGoogleCalendarIntegrationCta(googleCalendarIntegrationState)
+    : null;
+  const googleCalendarIntegrationNotice =
+    googleCalendarIntegrationState?.expectsGoogleCalendarIntegration &&
+    !googleCalendarIntegrationState.isLinked
+      ? {
+          title: googleCalendarIntegrationState.integration
+            ? `Google Calendar: ${googleCalendarIntegrationState.integrationView.label}`
+            : "Google Calendar pendiente",
+          message: googleCalendarIntegrationState.message,
+          tone: googleCalendarIntegrationState.integrationView.tone,
+          href: googleCalendarIntegrationCta?.href ?? "/settings/integrations",
+          label: googleCalendarIntegrationCta?.label ?? "Abrir integraciones",
+        }
+      : null;
+
   const connection = canViewConnectionDetails ? connectionResult.data : null;
   const connectionSummary = buildAgentConnectionSummary(connection ?? connectionSummaryResult.data);
   const isWhatsAppChannelIntent = setupState?.channel === "whatsapp";
@@ -136,8 +253,27 @@ export default async function AgentDetailPage({ params, searchParams }: AgentDet
       initialTab={initialTab}
       whatsappIntegrationId={whatsappIntegrationResult.data?.id ?? null}
       salesforceIntegrationNotice={salesforceIntegrationNotice}
+      hubspotIntegrationNotice={hubspotIntegrationNotice}
+      gmailIntegrationNotice={gmailIntegrationNotice}
+      googleCalendarIntegrationNotice={googleCalendarIntegrationNotice}
+      promptEnvironment={{
+        salesforceUsable: Boolean(
+          salesforceIntegrationState?.hasUsableIntegration && salesforceIntegrationState?.hasEnabledTool
+        ),
+        hubspotUsable: Boolean(
+          hubspotIntegrationState?.hasUsableIntegration && hubspotIntegrationState?.hasEnabledTool
+        ),
+        gmailConfigured: Boolean(
+          gmailIntegrationState?.hasUsableIntegration && gmailIntegrationState?.hasEnabledTool
+        ),
+        gmailRuntimeAvailable: false,
+        googleCalendarConfigured: Boolean(
+          googleCalendarIntegrationState?.hasUsableIntegration &&
+          googleCalendarIntegrationState?.hasEnabledTool
+        ),
+        googleCalendarRuntimeAvailable: false,
+      }}
     />
   );
 }
-
 

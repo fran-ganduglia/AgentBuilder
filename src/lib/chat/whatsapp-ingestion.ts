@@ -1,10 +1,16 @@
-import "server-only";
+﻿import "server-only";
 
 import { readConversationMetadata } from "@/lib/chat/conversation-metadata";
-import { createConversation, findConversationByExternalId, updateConversationMetadata } from "@/lib/db/conversations";
+import {
+  createConversation,
+  findConversationByExternalId,
+  updateConversationMetadata,
+} from "@/lib/db/conversations";
+import { enqueueEvent } from "@/lib/db/event-queue";
 import { findMessageByFingerprint, insertMessageWithServiceRole } from "@/lib/db/messages";
-import type { AgentConnection, Conversation } from "@/types/app";
 import { normalizeWhatsAppIdentifier } from "@/lib/whatsapp-cloud";
+import type { AgentConnection, Conversation } from "@/types/app";
+import type { Json } from "@/types/database";
 
 type WhatsAppWebhookPayload = {
   entry?: Array<{
@@ -22,6 +28,7 @@ type WhatsAppWebhookPayload = {
           };
         }>;
         messages?: Array<{
+          id?: string;
           from?: string;
           timestamp?: string;
           type?: string;
@@ -39,6 +46,7 @@ type IngestionResult = {
   messagesInserted: number;
   duplicateMessages: number;
   skippedEvents: number;
+  enqueuedInboundEvents: number;
 };
 
 type ConversationSeed = {
@@ -56,7 +64,6 @@ function normalizePhoneLikeValue(value: string | null | undefined): string | nul
 
 function toIsoTimestamp(timestamp: string | null | undefined): string {
   const numericTimestamp = Number(timestamp ?? 0);
-
   if (!Number.isFinite(numericTimestamp) || numericTimestamp <= 0) {
     return new Date().toISOString();
   }
@@ -64,28 +71,35 @@ function toIsoTimestamp(timestamp: string | null | undefined): string {
   return new Date(numericTimestamp * 1000).toISOString();
 }
 
-function buildConversationExternalId(
-  phoneNumberId: string,
-  contactId: string
-): string {
+function buildConversationExternalId(phoneNumberId: string, contactId: string): string {
   return `whatsapp:${phoneNumberId}:${contactId}`;
+}
+
+function getConnectionMetadataValue(metadata: Json | null | undefined, key: string): string | null {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    return null;
+  }
+
+  const value = Reflect.get(metadata, key);
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function isWorkerAutoReplyConnection(connection: AgentConnection): boolean {
+  return getConnectionMetadataValue(connection.metadata, "auto_reply_mode") === "worker";
 }
 
 function getSourceLabel(
   connection: AgentConnection,
   displayPhoneNumber: string | null | undefined
 ): string {
-  const metadata = connection.metadata && typeof connection.metadata === "object" && !Array.isArray(connection.metadata)
-    ? connection.metadata
-    : null;
-  const connectionLabel = metadata ? Reflect.get(metadata, "display_phone_number") : null;
+  const connectionLabel = getConnectionMetadataValue(connection.metadata, "display_phone_number");
 
   if (typeof displayPhoneNumber === "string" && displayPhoneNumber.trim().length > 0) {
     return displayPhoneNumber.trim();
   }
 
-  if (typeof connectionLabel === "string" && connectionLabel.trim().length > 0) {
-    return connectionLabel.trim();
+  if (connectionLabel) {
+    return connectionLabel;
   }
 
   return "WhatsApp conectado";
@@ -136,22 +150,17 @@ async function getOrCreateWhatsAppConversation(
     return updatedConversation.data;
   }
 
-  const createdConversation = await createConversation(
-    connection.agent_id,
-    connection.organization_id,
-    null,
-    {
-      channel: "whatsapp",
-      status: "active",
-      externalId: seed.externalId,
-      startedAt: seed.startedAt,
-      useServiceRole: true,
-      metadata: {
-        chat_mode: "live_external",
-        source_context: sourceContext,
-      },
-    }
-  );
+  const createdConversation = await createConversation(connection.agent_id, connection.organization_id, null, {
+    channel: "whatsapp",
+    status: "active",
+    externalId: seed.externalId,
+    startedAt: seed.startedAt,
+    useServiceRole: true,
+    metadata: {
+      chat_mode: "live_external",
+      source_context: sourceContext,
+    },
+  });
 
   if (createdConversation.error || !createdConversation.data) {
     throw new Error(createdConversation.error ?? "No se pudo crear la conversacion conectada");
@@ -174,6 +183,38 @@ function resolveMessageRole(
   return "user";
 }
 
+function shouldIgnoreAssistantReflection(connection: AgentConnection, role: "user" | "assistant"): boolean {
+  return role === "assistant" && isWorkerAutoReplyConnection(connection);
+}
+
+function enqueueInboundWhatsAppEvent(input: {
+  connection: AgentConnection;
+  conversationId: string;
+  messageId: string;
+  whatsappMessageId: string;
+  content: string;
+  createdAt: string;
+}): void {
+  void enqueueEvent({
+    organizationId: input.connection.organization_id,
+    eventType: "whatsapp.inbound_message_received",
+    entityType: "message",
+    entityId: input.messageId,
+    idempotencyKey: `whatsapp.inbound_message_received:${input.whatsappMessageId}`,
+    payload: {
+      message_id: input.messageId,
+      conversation_id: input.conversationId,
+      agent_id: input.connection.agent_id,
+      connection_id: input.connection.id,
+      integration_id: input.connection.integration_id,
+      phone_number_id: input.connection.provider_agent_id,
+      whatsapp_message_id: input.whatsappMessageId,
+      content: input.content,
+      created_at: input.createdAt,
+    },
+  });
+}
+
 export async function ingestWhatsAppWebhookPayload(
   connection: AgentConnection,
   payload: WhatsAppWebhookPayload
@@ -183,6 +224,7 @@ export async function ingestWhatsAppWebhookPayload(
     messagesInserted: 0,
     duplicateMessages: 0,
     skippedEvents: 0,
+    enqueuedInboundEvents: 0,
   };
   const touchedConversationIds = new Set<string>();
 
@@ -224,12 +266,18 @@ export async function ingestWhatsAppWebhookPayload(
 
         const content = message.text?.body?.trim();
         const senderId = normalizeWhatsAppIdentifier(message.from);
-        if (!content || !senderId) {
+        const whatsappMessageId = normalizeWhatsAppIdentifier(message.id);
+        if (!content || !senderId || !whatsappMessageId) {
           result.skippedEvents += 1;
           continue;
         }
 
         const role = resolveMessageRole(senderId, displayPhoneNumber);
+        if (shouldIgnoreAssistantReflection(connection, role)) {
+          result.skippedEvents += 1;
+          continue;
+        }
+
         const contactId = role === "assistant" ? fallbackContactId : senderId;
         if (!contactId) {
           result.skippedEvents += 1;
@@ -274,11 +322,23 @@ export async function ingestWhatsAppWebhookPayload(
           createdAt,
         });
 
-        if (insertResult.error) {
-          throw new Error(insertResult.error);
+        if (insertResult.error || !insertResult.data) {
+          throw new Error(insertResult.error ?? "No se pudo guardar el mensaje de WhatsApp");
         }
 
         result.messagesInserted += 1;
+
+        if (role === "user") {
+          enqueueInboundWhatsAppEvent({
+            connection,
+            conversationId: conversation.id,
+            messageId: insertResult.data.id,
+            whatsappMessageId,
+            content,
+            createdAt,
+          });
+          result.enqueuedInboundEvents += 1;
+        }
       }
     }
   }

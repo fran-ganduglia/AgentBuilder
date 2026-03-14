@@ -1,11 +1,19 @@
 import "server-only";
 
 import {
+  createRecentCrmToolContext,
+  createRecentSalesforceToolContext,
   isPendingToolActionExpired,
-  readPendingToolAction,
+  isRecentSalesforceToolContextExpired,
+  readPendingCrmAction,
+  readRecentCrmToolContext,
+  type PendingCrmAction,
   type PendingSalesforceToolAction,
 } from "@/lib/chat/conversation-metadata";
+import { orchestrateCrmForChat, type CrmChatAdapter } from "@/lib/chat/crm-core";
 import { planSalesforceToolAction } from "@/lib/chat/salesforce-tool-planner";
+import { readAgentSetupState } from "@/lib/agents/agent-setup-state";
+import { resolveEffectiveAgentPrompt } from "@/lib/agents/effective-prompt";
 import { updateConversationMetadata } from "@/lib/db/conversations";
 import {
   assertSalesforceActionEnabled,
@@ -14,25 +22,15 @@ import {
   executeSalesforceToolAction,
   formatSalesforceToolResultForPrompt,
   getSalesforceAgentToolRuntime,
+  type SalesforceAgentToolRuntime,
+  type SalesforceToolExecutionResult,
 } from "@/lib/integrations/salesforce-agent-runtime";
-import { isSalesforceWriteAction } from "@/lib/integrations/salesforce-tools";
 import {
-  detectSalesforcePromptConflict,
-  stripSalesforcePromptConflicts,
-} from "@/lib/integrations/salesforce-selection";
+  isSalesforceWriteAction,
+  type ExecuteSalesforceCrmToolInput,
+} from "@/lib/integrations/salesforce-tools";
+import { createApprovalRequest } from "@/lib/workflows/approval-request";
 import type { Agent, Conversation } from "@/types/app";
-
-const MAX_TOOL_CALLS = 5;
-const MAX_TOOL_RECURSION_DEPTH = 3;
-const PENDING_TOOL_TTL_MS = 10 * 60 * 1000;
-const STRICT_CONFIRMATIONS = new Set([
-  "confirmo",
-  "confirmar",
-  "si confirmo",
-  "sí confirmo",
-  "si, confirmo",
-  "sí, confirmo",
-]);
 
 type ChatMessage = {
   role: "user" | "assistant";
@@ -40,38 +38,171 @@ type ChatMessage = {
 };
 
 export type SalesforceChatOrchestrationResult =
-  | { kind: "continue"; toolContext?: string }
+  | {
+      kind: "continue";
+      toolContext?: string;
+      hasUsableSalesforceRuntime: boolean;
+      allowedActions: ExecuteSalesforceCrmToolInput["action"][];
+    }
   | { kind: "respond_now"; content: string };
 
-function isStrictConfirmation(content: string): boolean {
-  return STRICT_CONFIRMATIONS.has(content.trim().toLowerCase());
-}
-
-function buildPendingAction(input: {
-  integrationId: string;
-  initiatedBy: string;
-  summary: string;
-  actionInput: PendingSalesforceToolAction["actionInput"];
-}): PendingSalesforceToolAction {
-  const createdAt = new Date().toISOString();
-  const expiresAt = new Date(Date.now() + PENDING_TOOL_TTL_MS).toISOString();
+function toLegacyPendingToolAction(
+  pendingAction: PendingCrmAction<ExecuteSalesforceCrmToolInput> | null
+): PendingSalesforceToolAction | null {
+  if (!pendingAction) {
+    return null;
+  }
 
   return {
     tool: "salesforce_crm",
-    integrationId: input.integrationId,
-    actionInput: input.actionInput,
-    summary: input.summary,
-    initiatedBy: input.initiatedBy,
-    createdAt,
-    expiresAt,
+    integrationId: pendingAction.integrationId,
+    actionInput: pendingAction.actionInput,
+    summary: pendingAction.summary,
+    initiatedBy: pendingAction.initiatedBy,
+    createdAt: pendingAction.createdAt,
+    expiresAt: pendingAction.expiresAt,
   };
 }
 
-function buildConfirmationResponse(action: PendingSalesforceToolAction): string {
-  return [
-    `Necesito confirmacion antes de escribir en Salesforce: ${action.summary}`,
-    "Si quieres ejecutarlo, responde exactamente `confirmo` dentro de esta conversacion.",
-  ].join(" ");
+function buildSalesforceAdapter(input: {
+  agent: Agent;
+  conversationId: string;
+  workflowTemplateId: string | null;
+  automationPreset: "copilot" | "assisted" | "autonomous" | null;
+}): CrmChatAdapter<
+  SalesforceAgentToolRuntime,
+  ExecuteSalesforceCrmToolInput,
+  SalesforceToolExecutionResult
+> {
+  return {
+    provider: "salesforce",
+    toolName: "salesforce_crm",
+    loadRuntime: () => getSalesforceAgentToolRuntime(input.agent.id, input.agent.organization_id),
+    isRuntimeUsable: assertSalesforceRuntimeUsable,
+    planNextAction: ({ runtime, systemPrompt, latestUserMessage, recentMessages, toolResults, recentToolContext }) =>
+      planSalesforceToolAction({
+        model: input.agent.llm_model,
+        organizationId: input.agent.organization_id,
+        agentId: input.agent.id,
+        conversationId: input.conversationId,
+        systemPrompt,
+        config: runtime.config,
+        latestUserMessage,
+        recentMessages,
+        toolResults,
+        recentToolContext,
+      }),
+    isActionAllowed: assertSalesforceActionEnabled,
+    executeAction: ({ organizationId, userId, agentId, runtime, actionInput }) =>
+      executeSalesforceToolAction({
+        organizationId,
+        userId,
+        agentId,
+        integrationId: runtime.integration.id,
+        actionInput,
+      }),
+    formatResultForPrompt: formatSalesforceToolResultForPrompt,
+    buildConfirmationSummary: buildSalesforceConfirmationSummary,
+    isWriteAction: isSalesforceWriteAction,
+    readConversationState: (metadata) => {
+      const pendingAction = readPendingCrmAction<ExecuteSalesforceCrmToolInput>(metadata, "salesforce");
+      const recentToolContext = readRecentCrmToolContext(metadata, "salesforce");
+
+      return {
+        pendingAction,
+        recentToolContext: recentToolContext?.context,
+        hasExpiredPendingAction: pendingAction ? isPendingToolActionExpired(pendingAction) : false,
+        hasExpiredRecentToolContext: recentToolContext
+          ? isRecentSalesforceToolContextExpired(recentToolContext)
+          : false,
+      };
+    },
+    writeConversationState: async ({
+      conversationId,
+      agentId,
+      organizationId,
+      userId,
+      pendingAction,
+      recentToolContext,
+    }) => {
+      await updateConversationMetadata(
+        conversationId,
+        agentId,
+        organizationId,
+        {
+          ...(pendingAction !== undefined
+            ? {
+                pending_crm_action: pendingAction,
+                pending_tool_action: toLegacyPendingToolAction(pendingAction),
+              }
+            : {}),
+          ...(recentToolContext !== undefined
+            ? {
+                recent_crm_tool_context: recentToolContext
+                  ? createRecentCrmToolContext("salesforce", recentToolContext)
+                  : null,
+                recent_salesforce_tool_context: recentToolContext
+                  ? createRecentSalesforceToolContext(recentToolContext)
+                  : null,
+              }
+            : {}),
+        },
+        {
+          initiatedBy: userId,
+          useServiceRole: true,
+        }
+      );
+    },
+    onLoadRuntimeFailure: (error) => {
+      console.info("chat.salesforce_runtime_skipped", {
+        agentId: input.agent.id,
+        organizationId: input.agent.organization_id,
+        error,
+      });
+
+      if (error === "El agente no tiene la tool CRM de Salesforce habilitada") {
+        return {
+          kind: "respond_now",
+          content:
+            "Salesforce no esta conectado para este agente. Ve a Configuracion > Integraciones para conectar tu cuenta de Salesforce y luego habilita la tool CRM en la configuracion del agente.",
+        };
+      }
+
+      return {
+        kind: "respond_now",
+        content: error ?? "No se pudo cargar Salesforce para este agente.",
+      };
+    },
+    createApprovalRequest: ({
+      runtime,
+      conversationId,
+      organizationId,
+      userId,
+      agentId,
+      actionInput,
+      summary,
+    }) =>
+      createApprovalRequest({
+        organizationId,
+        agentId,
+        conversationId,
+        userId,
+        provider: "salesforce",
+        action: actionInput.action,
+        integrationId: runtime.integration.id,
+        toolName: "salesforce_crm",
+        summary,
+        payloadSummary: {
+          action: actionInput.action,
+          action_input: actionInput as never,
+        },
+        context: {
+          source: "chat",
+        },
+        workflowTemplateId: input.workflowTemplateId,
+        automationPreset: input.automationPreset,
+      }),
+  };
 }
 
 export async function orchestrateSalesforceForChat(input: {
@@ -82,173 +213,48 @@ export async function orchestrateSalesforceForChat(input: {
   latestUserMessage: string;
   recentMessages: ChatMessage[];
 }): Promise<SalesforceChatOrchestrationResult> {
-  const runtimeResult = await getSalesforceAgentToolRuntime(input.agent.id, input.organizationId);
-  if (runtimeResult.error || !runtimeResult.data) {
-    console.info("chat.salesforce_runtime_skipped", {
-      agentId: input.agent.id,
-      organizationId: input.organizationId,
-      error: runtimeResult.error,
-    });
-    return runtimeResult.error === "El agente no tiene la tool CRM de Salesforce habilitada"
-      ? { kind: "continue" }
-      : { kind: "respond_now", content: runtimeResult.error ?? "No se pudo cargar Salesforce para este agente." };
-  }
+  const setupState = readAgentSetupState(input.agent);
+  const promptResolution = resolveEffectiveAgentPrompt({
+    savedPrompt: input.agent.system_prompt,
+    setupState,
+    promptEnvironment: { salesforceUsable: true },
+    allowConflictCleanupForCustom: true,
+  });
 
-  const usableRuntime = assertSalesforceRuntimeUsable(runtimeResult.data);
-  if (usableRuntime.error || !usableRuntime.data) {
-    return { kind: "respond_now", content: usableRuntime.error ?? "La integracion de Salesforce no esta disponible." };
-  }
-
-  const pendingAction = readPendingToolAction(input.conversation.metadata);
-  if (pendingAction) {
-    if (isPendingToolActionExpired(pendingAction)) {
-      await updateConversationMetadata(input.conversation.id, input.agent.id, input.organizationId, {
-        pending_tool_action: null,
-      }, {
-        initiatedBy: input.userId,
-        useServiceRole: true,
-      });
-
-      if (isStrictConfirmation(input.latestUserMessage)) {
-        return {
-          kind: "respond_now",
-          content: "La confirmacion pendiente para Salesforce expiro. Vuelve a pedir la accion si quieres intentarlo otra vez.",
-        };
-      }
-    } else if (isStrictConfirmation(input.latestUserMessage)) {
-      const enabledRuntime = assertSalesforceActionEnabled(usableRuntime.data, pendingAction.actionInput.action);
-      if (enabledRuntime.error) {
-        await updateConversationMetadata(input.conversation.id, input.agent.id, input.organizationId, {
-          pending_tool_action: null,
-        }, {
-          initiatedBy: input.userId,
-          useServiceRole: true,
-        });
-
-        return { kind: "respond_now", content: enabledRuntime.error };
-      }
-
-      const execution = await executeSalesforceToolAction({
-        organizationId: input.organizationId,
-        userId: input.userId,
-        agentId: input.agent.id,
-        integrationId: pendingAction.integrationId,
-        actionInput: pendingAction.actionInput,
-      });
-
-      await updateConversationMetadata(input.conversation.id, input.agent.id, input.organizationId, {
-        pending_tool_action: null,
-      }, {
-        initiatedBy: input.userId,
-        useServiceRole: true,
-      });
-
-      if (execution.error || !execution.data) {
-        return { kind: "respond_now", content: execution.error ?? "No se pudo ejecutar la accion en Salesforce." };
-      }
-
-      return {
-        kind: "continue",
-        toolContext: formatSalesforceToolResultForPrompt(execution.data),
-      };
-    } else {
-      await updateConversationMetadata(input.conversation.id, input.agent.id, input.organizationId, {
-        pending_tool_action: null,
-      }, {
-        initiatedBy: input.userId,
-        useServiceRole: true,
-      });
-    }
-  }
-
-  const promptConflict = detectSalesforcePromptConflict(input.agent.system_prompt);
-  const plannerSystemPrompt = promptConflict.hasConflict
-    ? stripSalesforcePromptConflicts(input.agent.system_prompt)
-    : input.agent.system_prompt;
-
-  if (promptConflict.hasConflict) {
+  if (promptResolution.hasPromptConflict) {
     console.warn("chat.salesforce_prompt_conflict", {
       agentId: input.agent.id,
       organizationId: input.organizationId,
-      snippet: promptConflict.snippet,
+      snippet: promptResolution.promptConflictSnippet,
     });
   }
 
-  const toolResults: Array<{ action: string; result: string }> = [];
-
-  for (let depth = 0; depth < MAX_TOOL_RECURSION_DEPTH && toolResults.length < MAX_TOOL_CALLS; depth += 1) {
-    const plannerDecision = await planSalesforceToolAction({
-      model: input.agent.llm_model,
-      organizationId: input.organizationId,
-      agentId: input.agent.id,
+  const orchestration = await orchestrateCrmForChat({
+    adapter: buildSalesforceAdapter({
+      agent: input.agent,
       conversationId: input.conversation.id,
-      systemPrompt: plannerSystemPrompt,
-      config: usableRuntime.data.config,
-      latestUserMessage: input.latestUserMessage,
-      recentMessages: input.recentMessages,
-      toolResults,
-    });
+      workflowTemplateId: setupState?.workflowTemplateId ?? null,
+      automationPreset: setupState?.automationPreset ?? null,
+    }),
+    conversation: input.conversation,
+    agentId: input.agent.id,
+    organizationId: input.organizationId,
+    userId: input.userId,
+    systemPrompt: promptResolution.effectivePrompt,
+    latestUserMessage: input.latestUserMessage,
+    recentMessages: input.recentMessages,
+  });
 
-    if (plannerDecision.kind === "respond") {
-      console.info("chat.salesforce_planner_respond", {
-        agentId: input.agent.id,
-        organizationId: input.organizationId,
-        depth,
-        hasToolResults: toolResults.length > 0,
-        latestUserMessage: input.latestUserMessage.slice(0, 100),
-      });
-      return toolResults.length > 0
-        ? { kind: "continue", toolContext: toolResults.map((item) => item.result).join("\n\n") }
-        : { kind: "continue" };
-    }
-
-    const enabledRuntime = assertSalesforceActionEnabled(usableRuntime.data, plannerDecision.input.action);
-    if (enabledRuntime.error) {
-      return { kind: "continue" };
-    }
-
-    if (plannerDecision.requiresConfirmation || isSalesforceWriteAction(plannerDecision.input.action)) {
-      const pending = buildPendingAction({
-        integrationId: usableRuntime.data.integration.id,
-        initiatedBy: input.userId,
-        summary: buildSalesforceConfirmationSummary(plannerDecision.input),
-        actionInput: plannerDecision.input,
-      });
-
-      await updateConversationMetadata(input.conversation.id, input.agent.id, input.organizationId, {
-        pending_tool_action: pending,
-      }, {
-        initiatedBy: input.userId,
-        useServiceRole: true,
-      });
-
-      return {
-        kind: "respond_now",
-        content: buildConfirmationResponse(pending),
-      };
-    }
-
-    const execution = await executeSalesforceToolAction({
-      organizationId: input.organizationId,
-      userId: input.userId,
-      agentId: input.agent.id,
-      integrationId: usableRuntime.data.integration.id,
-      actionInput: plannerDecision.input,
-    });
-
-    if (execution.error || !execution.data) {
-      return { kind: "respond_now", content: execution.error ?? "No se pudo consultar Salesforce." };
-    }
-
-    toolResults.push({
-      action: execution.data.action,
-      result: formatSalesforceToolResultForPrompt(execution.data),
-    });
-  }
-
-  return toolResults.length > 0
-    ? { kind: "continue", toolContext: toolResults.map((item) => item.result).join("\n\n") }
-    : { kind: "continue" };
+  return orchestration.kind === "continue"
+    ? {
+        kind: "continue",
+        toolContext: orchestration.toolContext,
+        hasUsableSalesforceRuntime: orchestration.hasUsableRuntime,
+        allowedActions: [
+          ...(
+            orchestration.runtime as SalesforceAgentToolRuntime
+          ).config.allowed_actions,
+        ],
+      }
+    : orchestration;
 }
-
-

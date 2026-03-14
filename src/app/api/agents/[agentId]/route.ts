@@ -1,15 +1,33 @@
-import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
 import { z } from "zod";
 import { buildAgentConnectionSummary } from "@/lib/agents/connection-policy";
+import { haveIntegrationSelectionsChanged, validateIntegrationSelection } from "@/lib/agents/agent-integration-limits";
 import { getSession } from "@/lib/auth/get-session";
 import { agentModelSchema } from "@/lib/agents/agent-config";
-import { agentSetupStateSchema, getActivationReadiness } from "@/lib/agents/agent-setup";
+import {
+  agentSetupStateSchema,
+  getActivationReadiness,
+  toSetupStateJson,
+} from "@/lib/agents/agent-setup";
+import {
+  buildGmailSetupResolutionContext,
+  getGmailAgentIntegrationState,
+} from "@/lib/agents/gmail-agent-integration";
+import {
+  buildGoogleCalendarSetupResolutionContext,
+  getGoogleCalendarAgentIntegrationState,
+} from "@/lib/agents/google-calendar-agent-integration";
+import {
+  buildHubSpotSetupResolutionContext,
+  getHubSpotAgentIntegrationState,
+} from "@/lib/agents/hubspot-agent-integration";
 import {
   buildSalesforceSetupResolutionContext,
   getSalesforceAgentIntegrationState,
 } from "@/lib/agents/salesforce-agent-integration";
 import { getAgentDeletionDeadlineIso } from "@/lib/agents/agent-deletion";
 import { normalizeSetupState, readAgentSetupState } from "@/lib/agents/agent-setup-state";
+import { resolveEffectiveAgentPrompt } from "@/lib/agents/effective-prompt";
 import { hasReadyDocuments } from "@/lib/db/agent-documents";
 import { getAgentById, softDeleteAgent, updateAgent } from "@/lib/db/agents";
 import {
@@ -23,15 +41,16 @@ import {
 } from "@/lib/db/agent-connections";
 import { insertAuditLog } from "@/lib/db/audit";
 import { enqueueEvent } from "@/lib/db/event-queue";
+import { getOrganizationPlanName } from "@/lib/db/organization-plans";
 import {
   getOpenAIIntegrationApiKey,
   getOpenAIIntegrationById,
 } from "@/lib/db/integrations";
 import { assertUsableIntegration } from "@/lib/integrations/access";
 import { insertProviderActionAudit } from "@/lib/integrations/audit";
+import { resolveGoogleCalendarIntegrationTimezone } from "@/lib/integrations/google-calendar-timezone";
 import { getSafeProviderErrorMessage } from "@/lib/integrations/provider-gateway";
 import { isSalesforceCrmAgentTool } from "@/lib/integrations/salesforce-agent-tool-selection";
-import { detectSalesforcePromptConflict } from "@/lib/integrations/salesforce-selection";
 import { listAgentTools } from "@/lib/db/agent-tools";
 import {
   buildAssistantConnectionMetadata,
@@ -127,13 +146,31 @@ export async function PATCH(request: Request, context: RouteContext): Promise<Ne
     hasReadyDocuments: hasDocumentsReady,
   });
   let providerIntegrations;
+  let googleCalendarDetectedTimezone: string | null = null;
 
   if (baseSetupState) {
-    const salesforceIntegrationStateResult = await getSalesforceAgentIntegrationState({
-      agentId,
-      organizationId: session.organizationId,
-      setupState: baseSetupState,
-    });
+    const [salesforceIntegrationStateResult, hubspotIntegrationStateResult, gmailIntegrationStateResult, googleCalendarIntegrationStateResult] = await Promise.all([
+      getSalesforceAgentIntegrationState({
+        agentId,
+        organizationId: session.organizationId,
+        setupState: baseSetupState,
+      }),
+      getHubSpotAgentIntegrationState({
+        agentId,
+        organizationId: session.organizationId,
+        setupState: baseSetupState,
+      }),
+      getGmailAgentIntegrationState({
+        agentId,
+        organizationId: session.organizationId,
+        setupState: baseSetupState,
+      }),
+      getGoogleCalendarAgentIntegrationState({
+        agentId,
+        organizationId: session.organizationId,
+        setupState: baseSetupState,
+      }),
+    ]);
 
     if (salesforceIntegrationStateResult.error) {
       return NextResponse.json(
@@ -142,16 +179,56 @@ export async function PATCH(request: Request, context: RouteContext): Promise<Ne
       );
     }
 
-    providerIntegrations = buildSalesforceSetupResolutionContext(salesforceIntegrationStateResult.data);
+    if (hubspotIntegrationStateResult.error) {
+      return NextResponse.json(
+        { error: "No se pudo validar la vinculacion HubSpot del agente" },
+        { status: 500 }
+      );
+    }
+
+    if (gmailIntegrationStateResult.error) {
+      return NextResponse.json(
+        { error: "No se pudo validar la vinculacion Gmail del agente" },
+        { status: 500 }
+      );
+    }
+
+    if (googleCalendarIntegrationStateResult.error) {
+      return NextResponse.json(
+        { error: "No se pudo validar la vinculacion Google Calendar del agente" },
+        { status: 500 }
+      );
+    }
+
+    providerIntegrations = {
+      ...buildSalesforceSetupResolutionContext(salesforceIntegrationStateResult.data),
+      ...buildHubSpotSetupResolutionContext(hubspotIntegrationStateResult.data),
+      ...buildGmailSetupResolutionContext(gmailIntegrationStateResult.data),
+      ...buildGoogleCalendarSetupResolutionContext(googleCalendarIntegrationStateResult.data),
+    };
+
+    if (
+      googleCalendarIntegrationStateResult.data?.integration &&
+      googleCalendarIntegrationStateResult.data.hasUsableIntegration
+    ) {
+      const googleCalendarTimezoneResult = await resolveGoogleCalendarIntegrationTimezone({
+        integrationId: googleCalendarIntegrationStateResult.data.integration.id,
+        organizationId: session.organizationId,
+      });
+      googleCalendarDetectedTimezone =
+        googleCalendarTimezoneResult.data?.detectedTimezone ?? null;
+    }
   }
 
   const existingSetupState = readAgentSetupState(existingAgent, {
     hasReadyDocuments: hasDocumentsReady,
+    googleCalendarDetectedTimezone,
     providerIntegrations,
   });
   const nextSetupState = parsedBody.data.setupState
     ? normalizeSetupState(parsedBody.data.setupState, {
       hasReadyDocuments: hasDocumentsReady,
+      googleCalendarDetectedTimezone,
       providerIntegrations,
     })
     : existingSetupState;
@@ -164,6 +241,33 @@ export async function PATCH(request: Request, context: RouteContext): Promise<Ne
     status: parsedBody.data.status,
     ...(parsedBody.data.setupState ? { setupState: nextSetupState ?? undefined } : {}),
   };
+
+  const integrationsChanged = parsedBody.data.setupState
+    ? haveIntegrationSelectionsChanged(
+      existingSetupState?.integrations ?? [],
+      nextSetupState?.integrations ?? []
+    )
+    : false;
+
+  if (parsedBody.data.setupState && integrationsChanged && nextSetupState) {
+    const planResult = await getOrganizationPlanName(session.organizationId);
+
+    if (planResult.error || !planResult.data) {
+      return NextResponse.json(
+        { error: planResult.error ?? "No se pudo validar el plan de la organizacion" },
+        { status: 500 }
+      );
+    }
+
+    const integrationValidationError = validateIntegrationSelection({
+      planName: planResult.data,
+      integrationIds: nextSetupState.integrations,
+    });
+
+    if (integrationValidationError) {
+      return NextResponse.json({ error: integrationValidationError }, { status: 422 });
+    }
+  }
 
   if (updateInput.status === "active") {
     const readiness = getActivationReadiness({
@@ -351,16 +455,25 @@ export async function PATCH(request: Request, context: RouteContext): Promise<Ne
       updated_at: agent.updated_at ?? null,
       changed_fields: Object.keys(updateInput),
       source: connection?.provider_type ?? "local",
+      setup_state: nextSetupState ? toSetupStateJson(nextSetupState) : null,
     },
   });
 
   let salesforcePromptWarning: string | undefined;
 
   if (parsedBody.data.systemPrompt) {
-    const finalPrompt = agent.system_prompt;
-    const promptConflict = detectSalesforcePromptConflict(finalPrompt);
+    const promptResolution = resolveEffectiveAgentPrompt({
+      savedPrompt: agent.system_prompt,
+      setupState: nextSetupState,
+      promptEnvironment: {
+        salesforceUsable: Boolean(
+          providerIntegrations?.salesforce?.isUsable && providerIntegrations?.salesforce?.hasEnabledTool
+        ),
+      },
+      allowConflictCleanupForCustom: false,
+    });
 
-    if (promptConflict.hasConflict) {
+    if (promptResolution.syncMode === "custom" && promptResolution.hasPromptConflict) {
       const toolsResult = await listAgentTools(agentId, session.organizationId);
       const hasSalesforceTool = (toolsResult.data ?? []).some(isSalesforceCrmAgentTool);
 
@@ -476,6 +589,10 @@ export async function DELETE(request: Request, context: RouteContext): Promise<N
     },
   });
 }
+
+
+
+
 
 
 

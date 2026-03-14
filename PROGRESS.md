@@ -1,647 +1,214 @@
-﻿## 2026-03-12
-
-- Se consolido un paquete amplio de integraciones y setup de agentes: quedaron nuevas rutas API para OpenAI Assistants, WhatsApp, Salesforce y revocacion/importacion por integracion, junto con endpoints de `setup`, `tools`, `qa`, `resync` y workers de integraciones para cubrir mejor el ciclo completo del agente.
-- La UI principal se reorganizo con nuevas vistas y paneles para agentes, dashboard y settings; tambien se modularizaron mas piezas del wizard/detail workspace y se actualizaron `README.md`, `SCHEMA.md`, `.env.local.example` y `SECURITY.md` para reflejar el estado actual del producto y sus reglas de seguridad.
-- Se sumaron helpers server-side para conexiones, tools, secretos, `event_queue`, `deletion_requests` e integraciones, ademas de migraciones en `supabase/migrations` para `agent_connections`, `setup_state`, `deletion_requests`, WhatsApp y Salesforce.
-- En esta sesion no se ejecuto verificacion adicional; el objetivo fue dejar el estado documentado y listo para `git add`, `git commit` y `git push`.
-## 2026-03-12
-
-- Se unifico la seleccion canonica de Salesforce para evitar falsos "sin acceso": `src/lib/db/salesforce-integrations.ts` ahora reutiliza la misma resolucion de la integracion mas reciente tanto al leer como al reconectar, en lugar de mezclar la fila mas nueva en runtime con la mas vieja en OAuth.
-- La UI y el runtime ya leen la misma tool CRM de Salesforce: `src/lib/integrations/salesforce-selection.ts`, `src/lib/integrations/salesforce-agent-tool-selection.ts`, `src/app/api/agents/[agentId]/tools/route.ts` y `src/components/agents/agent-tools-panel.tsx` exponen la tool seleccionada realmente usada por `/api/chat`, junto con diagnosticos de duplicados, desalineacion, falta de `lookup_records` y prompts que todavia dicen "no tengo acceso al CRM".
-- `/api/chat` dejo de degradar en silencio cuando explota la orquestacion Salesforce: ahora responde con un mensaje operativo explicito para que el modelo no tape el error real con un disclaimer generico de "no tengo acceso".
-- Se agrego cobertura puntual para la seleccion y el diagnostico puro de Salesforce en `src/lib/integrations/salesforce-selection.test.ts`.
-## 2026-03-11
-
-- Se corrigio un bug de resolucion de tools Salesforce que podia dejar al agente en un estado falso de bloqueo aunque el usuario ya hubiera guardado una tool CRM activa. El sistema ahora prioriza la tool Salesforce correcta segun la integracion activa de la organizacion, en lugar de tomar una fila historica o desalineada.
-- `src/lib/integrations/salesforce-agent-tool-selection.ts`, `src/lib/agents/salesforce-agent-integration.ts` y `src/lib/integrations/salesforce-agent-runtime.ts` quedaron alineados para usar la misma seleccion de tool tanto en activacion/setup como en el sandbox de `/api/chat`, y cuando detectan una tool vieja o mal vinculada devuelven un error explicito de desalineacion en vez de fallar con un lookup generico.
-- Verificacion completada: `npm.cmd run typecheck` y `npm.cmd run lint` OK.
-## 2026-03-11
-
-- Se corrigio la lectura confusa de Salesforce en el onboarding del agente: cuando la integracion org-level ya esta conectada pero falta la tool CRM del agente, el checklist ya no lo presenta como si Salesforce estuviera desconectado.
-- `src/lib/agents/salesforce-agent-integration.ts`, `src/lib/agents/agent-setup.ts` y `src/components/agents/setup-checklist-item-fields.tsx` ahora traducen el estado real a copy contextual (`Conectar Salesforce`, `Reconectar Salesforce` o `Habilitar tool CRM de Salesforce`) y muestran la causa concreta dentro del item del checklist.
-- Verificacion completada: `npm.cmd run typecheck` y `npm.cmd run lint` OK.
-## 2026-03-11
-
-- Se cerro el gap de agentes Salesforce no vinculados: `src/app/api/agents/route.ts` ahora detecta templates Salesforce desde `setupState.template_id` y, cuando la organizacion ya tiene una integracion usable, crea o actualiza automaticamente la tool CRM del agente con la configuracion por defecto y deja el `setup_state` resuelto como conectado.
-- El setup guiado ya trata Salesforce como requisito estructurado y no manual: `src/lib/agents/agent-setup.ts`, `src/lib/agents/agent-templates.ts`, `src/lib/agents/salesforce-agent-integration.ts`, `src/app/api/agents/[agentId]/route.ts` y `src/app/api/agents/[agentId]/setup/route.ts` agregan el input `provider_integration`, recalculan el checklist desde servidor y bloquean activacion cuando falta integracion usable o tool habilitada.
-- El wizard y el detalle del agente ahora muestran el estado real de Salesforce sin contradicciones: `src/app/(app)/agents/new/page.tsx`, `src/components/agents/wizard/*`, `src/lib/agents/wizard-ecosystems.ts`, `src/app/(app)/agents/[agentId]/page.tsx`, `src/components/agents/agent-detail-workspace.tsx` y `src/components/agents/agent-detail-config-panel.tsx` explican si la vinculacion sera automatica, si el borrador quedara pendiente, y exponen CTA a `Settings > Integraciones` o al panel de tools del agente segun la causa.
-- `src/components/agents/agent-tools-panel.tsx` ahora refresca el detalle despues de guardar o eliminar la tool CRM, para que el checklist y los banners de Salesforce se actualicen al instante sin recarga manual.
-- Verificacion completada: `npm.cmd run typecheck` y `npm.cmd run lint` OK.
-## 2026-03-11
-
-- Se cerro la Fase -1 operativa de integraciones: `src/app/api/workers/integrations/route.ts` ahora acepta `GET` y `POST`, `vercel.json` ya agenda el cron real `/api/workers/integrations` cada 5 minutos, `.env.local.example` y `src/lib/utils/env.ts` incorporan `APP_BASE_URL`, `INTEGRATION_SECRETS_ENCRYPTION_KEY` y el set base de variables OAuth para Salesforce.
-- `README.md` ahora documenta el drill corto de operacion para revocacion, `reauth_required`, secreto faltante y budget/error de proveedor, para que esta fase no quede solo en codigo.
-- Se preparo la migracion revisable `supabase/migrations/20260311213000_enable_salesforce_integrations.sql` para habilitar `integrations.type = 'salesforce'` sin tocar datos existentes; no se ejecuto en esta sesion.
-- Se implemento la base org-level de Salesforce en `src/lib/integrations/oauth-state.ts`, `src/lib/integrations/salesforce.ts`, `src/lib/integrations/salesforce-crm.ts`, `src/lib/db/salesforce-integrations.ts` y las rutas `GET /api/integrations/salesforce/start`, `GET /api/integrations/salesforce/callback` y `POST /api/integrations/salesforce/disconnect`.
-- `src/app/(app)/settings/integrations/page.tsx` y `src/components/settings/salesforce-connection-form.tsx` ahora muestran la card real de Salesforce en `Settings > Integraciones`, con estado operativo, scopes, callback OAuth y desconexion segura.
-- Se agrego CRUD base de `agent_tools` por agente con `src/lib/db/agent-tools.ts`, `GET/POST/DELETE /api/agents/[agentId]/tools` y el panel `src/components/agents/agent-tools-panel.tsx`, integrado en `src/components/agents/agent-detail-config-panel.tsx`.
-- Se implemento el primer tool CRM de Salesforce en `POST /api/agents/[agentId]/tools/salesforce`: soporta lookup de lead/contact, creacion de task y creacion de lead, audita cada accion como `provider.salesforce.*`, usa budgets del gateway comun y degrada con mensaje seguro cuando la integracion expira, se revoca o le faltan secretos.
-- Verificacion completada: `npm.cmd run typecheck`, `npm.cmd run lint` y `npm.cmd run build` OK (el build requirio ejecutarse fuera del sandbox por `spawn EPERM`).
-## 2026-03-11
-
-- Se implemento la Fase -1 transversal de operabilidad para integraciones reales sobre OpenAI y WhatsApp: nuevas utilidades en `src/lib/integrations/` para estado operativo, budgets por proveedor, gateway server-side, errores tipados y auditoria fina de acciones externas del agente.
-- `src/lib/db/integration-operations.ts`, `src/lib/db/integration-notifications.ts`, `src/lib/workers/integration-health.ts` y `src/app/api/workers/integrations/route.ts` ahora permiten revocar integraciones, borrar secretos locales, desactivar `agent_tools`/`agent_connections`, marcar `reauth_required` cuando faltan secretos y generar alertas visibles en `notifications` sin tocar schema.
-- Se agregaron los endpoints admin-only `POST /api/integrations/[integrationId]/revoke` y `POST /api/integrations/revoke-all`, con auditoria en `audit_logs`, notificaciones por integracion y degradacion segura cuando una integracion revocada o expirada intenta seguir operando.
-- OpenAI y WhatsApp ya usan el gateway comun: `src/lib/llm/openai-assistants.ts`, `src/lib/whatsapp-cloud.ts` y las rutas que consumen esos providers ahora propagan errores seguros, marcan reautenticacion en fallos 401/403 y bloquean usos cuando la integracion deja de ser operable.
-- `src/app/(app)/settings/integrations/page.tsx`, `src/components/settings/openai-connection-form.tsx`, `src/components/settings/whatsapp-connection-form.tsx`, `src/components/settings/openai-assistants-import-form.tsx` y los nuevos componentes de estado/revocacion ahora muestran badges operativos (`conectado`, `expira pronto`, `requiere reautenticacion`, `revocado`, `con error`) y exponen revocacion individual o masiva desde la UI.
-- `src/app/api/agents/route.ts` y `src/app/api/agents/[agentId]/route.ts` ahora registran acciones remotas sobre OpenAI con el formato `provider.openai.assistant.*` en `audit_logs`; `src/components/agents/agent-connection-panel.tsx` tambien explica cuando una conexion quedo bloqueada por revocacion.
-- Verificacion completada: `cmd /c npm run typecheck` y `cmd /c npm run lint` OK.
-## 2026-03-11
-
-- Se reformo el Paso 1 del wizard de creacion de agentes para arrancar por ecosistema: `src/components/agents/wizard/step-template-select.tsx`, `src/components/agents/wizard/wizard-ecosystem-tutorial.tsx`, `src/components/agents/wizard/wizard-ecosystem-icons.tsx` y `src/lib/agents/wizard-ecosystems.ts` ahora muestran 5 cards visuales (WhatsApp, Salesforce, HubSpot, Gmail + Calendar, Slack + Teams), tutorial inline por opcion y CTA secundario `Desde cero` fuera de la grilla principal.
-- `src/lib/agents/agent-templates.ts` y `src/lib/agents/agent-setup.ts` ganaron catalogo extendido para ecosistemas y nuevos templates hardcodeados (`salesforce_*`, `hubspot_*`, `gmail_*`, `calendar_*`, `slack_teams_*`) sin tocar schema ni `POST /api/agents`; los templates legacy sin ecosistema siguen existiendo para compatibilidad pero ya no aparecen en el nuevo Paso 1.
-- `src/components/agents/wizard/agent-creation-wizard.tsx`, `src/components/agents/wizard/wizard-step-indicator.tsx` y `src/app/(app)/agents/new/page.tsx` ahora manejan seleccion de ecosistema + template, limpian el estado al cambiar de card, renombran el primer paso a `Integracion` y pasan `session.role` para que WhatsApp muestre el bloqueo suave de admin antes de `Settings > Integraciones`.
-- Verificacion completada: `npm.cmd run lint`, `npm.cmd run typecheck` y `npm.cmd run build` OK (el build requirio ejecutarse fuera del sandbox por `spawn EPERM`).
-## 2026-03-11
-
-- Se restauro la navegacion global al listado desde el detalle del agente: `src/components/agents/agent-detail-workspace-header.tsx` vuelve a mostrar `Volver a agentes`, que se habia perdido durante el refactor del header del workspace.
-- Verificacion completada: `npm.cmd run typecheck` y `npm.cmd run lint` OK.
-## 2026-03-11
-
-- Se alineo la regla de chat para agentes orientados a WhatsApp aunque todavia no tengan una fuente real conectada: `src/app/(app)/agents/[agentId]/page.tsx`, `src/app/(app)/agents/[agentId]/chat/page.tsx` y `src/app/api/chat/route.ts` ahora bloquean `live_local` si `setup_state.channel = ''whatsapp''`.
-- `src/lib/agents/agent-setup-state.ts` ahora expone `isWhatsAppChannelAgent()` para reutilizar la clasificacion de canal objetivo sin duplicar parsing de `setup_state`.
-- Resultado esperado de la UX: agente WhatsApp sin conexion real muestra solo sandbox; agente WhatsApp conectado muestra sandbox + QA; el chat operativo local queda reservado para agentes locales no orientados a WhatsApp.
-- Verificacion completada: `npm.cmd run typecheck`, `npm.cmd run lint` y `npm.cmd run build` OK (el primer build fallo de forma transitoria al resolver `/forgot-password`; el rerun paso bien fuera del sandbox por `spawn EPERM`).
-## 2026-03-11
-
-- Se corrigio la resolucion visual de chat para agentes con WhatsApp conectado: `src/lib/db/agent-connections.ts` ya no usa `maybeSingle()` para resumir conexiones por agente y ahora elige una conexion preferida, priorizando `whatsapp` sobre filas heredadas inconsistentes en lugar de degradar el agente a `local`.
-- `src/components/agents/agent-detail-workspace.tsx`, `src/components/agents/agent-detail-workspace-main.tsx` y `src/components/agents/agent-setup-panel.tsx` ahora separan mejor el acceso a chat: cuando el agente solo puede usar sandbox, el CTA del setup pasa a decir `Abrir sandbox` y apunta explicitamente a `chatMode=sandbox`, evitando confundirlo con chat operativo local.
-- Verificacion completada: `npm.cmd run typecheck`, `npm.cmd run lint` y `npm.cmd run build` OK (el build requirio ejecutarse fuera del sandbox por `spawn EPERM`).
-## 2026-03-11
-
-- Se preparo la migracion revisable `supabase/migrations/20260311195000_enable_whatsapp_agent_connections.sql` para habilitar `agent_connections.provider_type = ''whatsapp''` sin tocar datos de negocio existentes.
-- La migracion reemplaza el `CHECK` heredado de OpenAI por uno que permite `openai` y `whatsapp`, y agrega guardrails para esta fase: una sola integracion WhatsApp no borrada por organizacion, una sola conexion WhatsApp por agente y un `phone_number_id` de WhatsApp unico en `agent_connections`.
-- Incluye validaciones previas que abortan con un error explicito si ya existieran duplicados incompatibles con esas reglas.
-- La migracion no se ejecuto en esta sesion; queda lista para revision y aplicacion explicita.
-## 2026-03-11
-
-- Se implemento la Fase 2 de WhatsApp conectado + un solo chat sin migracion de schema: ahora existe clasificacion explicita de conexiones (`local`, `remote_managed`, `channel_connected`) y la politica de acceso diferencia sandbox, chat operativo local y QA segun el tipo de agente.
-- Se agrego integracion org-level con Meta Cloud API en `Settings > Integraciones`, attach de fuente WhatsApp por agente desde QA, webhook publico `GET/POST` con validacion de challenge/firma, refresh manual de reconciliacion y helpers backend para credenciales, fuentes y metadata de conexion.
-- QA ahora soporta conversaciones reales conectadas con `chat_mode = live_external`, mantiene `qa_imported` como fallback de import manual, separa contadores (sandbox/local/conectadas/importadas) y renderiza el inbox WhatsApp reutilizando el scoring existente solo sobre mensajes del agente.
-- El workspace y `/agents/[agentId]/chat` quedaron alineados con la regla nueva: agentes locales activos siguen con sandbox + live local, agentes WhatsApp conectados tienen sandbox + QA y bloquean `live_local`, y agentes OpenAI conservan el comportamiento remoto actual.
-- Durante la verificacion se corrigio una incidencia operativa: varios archivos reescritos desde PowerShell habian quedado con codificacion invalida para Next; se normalizaron a UTF-8 y el build volvio a quedar verde.
-- Riesgo abierto detectado: el codigo ya usa `agent_connections.provider_type = 'whatsapp'`, pero `supabase/migrations/20260308223000_openai_agent_connections.sql` todavia muestra un `CHECK` limitado a `openai`; si esa restriccion sigue vigente en la base real, la conexion WhatsApp requerira una migracion aprobada antes de desplegarse.
-- Verificacion completada: `npm.cmd run typecheck`, `npm.cmd run lint` y `npm.cmd run build` OK (el build requirio ejecutarse fuera del sandbox por `spawn EPERM`).
-## 2026-03-11
-
-- Se ajusto la generacion de propuestas QA usando la evidencia de logs de produccion/dev: las dos llamadas a `gemini-pro` estaban respondiendo `success` pero saturando el techo de salida, asi que `src/app/api/agents/[agentId]/qa/proposal/route.ts` ahora sube `maxTokens` a 2400 y registra un warning seguro si falla el parseo.
-- La ruta mantiene el fallback de reparacion y ahora deja trazabilidad minima (`tokensOutput` y largo de contenido) sin loguear prompts ni texto sensible, para distinguir mejor entre truncado y JSON malformado.
-- Verificacion completada: `npm.cmd run typecheck`, `npm.cmd run lint` y `npm.cmd run build` OK (el build requirio ejecutarse fuera del sandbox por `spawn EPERM`).
-## 2026-03-11
-
-- Se endurecio `POST /api/agents/[agentId]/qa/proposal` para que la generacion de propuestas QA no dependa de JSON perfecto en la primera respuesta del modelo.
-- La ruta ahora intenta parseo directo, parseo desde bloques/cercos JSON y un segundo paso de reparacion con LLM si la primera salida viene mal formada; si aun asi no se puede normalizar, devuelve un error controlado de interpretacion en lugar de caer en un fallo generico.
-- Verificacion completada: `npm.cmd run typecheck`, `npm.cmd run lint` y `npm.cmd run build` OK (el build requirio ejecutarse fuera del sandbox por `spawn EPERM`).
-## 2026-03-11
-
-- Se endurecio el flujo de propuesta QA para esquivar fallos runtime de navegacion cliente en dev: `src/components/agents/qa/agent-qa-panel.tsx` ahora usa recarga completa al abrir la propuesta en `Configuracion`, en lugar de `router.push`.
-- `src/components/agents/agent-detail-workspace.tsx` limpia el query transitorio `proposal=1` apenas consume la propuesta y, al guardar cambios con una propuesta QA cargada, fuerza una navegacion completa del detalle en vez de depender de `router.refresh()`.
-- Esto apunta al crash `Cannot read properties of undefined (reading ''call'')` que aparecia en Webpack/Next dev al crear o guardar propuestas despues del refactor del workspace.
-- Verificacion completada: `npm.cmd run typecheck`, `npm.cmd run lint` y `npm.cmd run build` OK (el build requirio ejecutarse fuera del sandbox por `spawn EPERM`).
-## 2026-03-11
-
-- Se refino QA de conversaciones en `src/components/agents/qa/agent-qa-panel.tsx` y `src/app/api/agents/[agentId]/qa/route.ts`: el panel ya no entra en loop al cambiar de chat, conserva la conversacion seleccionada al guardar/importar y el resumen elimino el separador corrupto de la lista.
-- La revision QA por mensaje quedo limitada a respuestas del agente en `src/components/agents/qa/agent-qa-conversation-view.tsx`; los mensajes del cliente siguen visibles solo como contexto y el backend ahora rechaza `messageReviews` sobre mensajes que no sean `assistant`.
-- `src/lib/chat/conversation-metadata.ts` y `src/lib/chat/qa.ts` ahora permiten revision global opcional y limpieza real de QA: `conversationStatus` paso a ser opcional, la UI puede limpiar revision global o por mensaje, y `qa_review` se borra de `conversations.metadata` cuando no queda ningun dato de QA persistible.
-- Se mantuvo sin cambios la topologia actual de chat local: `draft` sigue usando sandbox y `active` conserva sandbox + chat operativo local.
-- Verificacion completada: `npm.cmd run typecheck`, `npm.cmd run lint` y `npm.cmd run build` OK (el build requirio ejecutarse fuera del sandbox por `spawn EPERM`).
-## 2026-03-11
-
-- Se refino el listado de agentes con un cambio minimo en UI: src/components/agents/agent-card.tsx ya no muestra el boton rapido Editar, pero la card activa sigue abriendo el detalle del agente al hacer click.
-- src/components/agents/agents-page-view.tsx dejo de forzar el salto a la solapa Eliminados despues de un soft delete; ahora el borrado actualiza los listados locales y mantiene al usuario en la pesta?a en la que estaba.
-- src/components/agents/agent-list.tsx quedo alineado con ese flujo quitando la navegacion rapida a ?tab=config desde la grilla, sin tocar restauracion ni el detalle del agente.
-- Verificacion de esta sesion: 
-pm.cmd run lint y 
-pm.cmd run typecheck OK.
-
-## 2026-03-11
-
-- Se agrego la migracion revisable `supabase/migrations/20260311183000_create_deletion_requests.sql` para crear `public.deletion_requests` con los checks, indices y policy admin-only que ya espera el flujo de borrado/restauracion y el worker de purga definitiva.
-- La migracion no se ejecuto en esta sesion; queda lista para revision y aplicacion explicita en Supabase.
-- Se reviso el nuevo flujo de restauracion y se confirmo la causa raiz del error `Could not find the table ''public.deletion_requests'' in the schema cache`: la app estaba usando `deletion_requests`, pero esa tabla no existe en el schema real ni en `src/types/database.ts`, y `SCHEMA.md` la sigue marcando como pendiente de `Milestone 3`.
-- `src/lib/db/deletion-requests.ts`, `src/app/api/agents/restore/route.ts` y `src/app/api/agents/[agentId]/route.ts` ahora degradan con elegancia cuando `deletion_requests` no esta desplegada: restaurar agentes ya no falla por ese motivo y el delete registra la ausencia como warning en lugar de tratarla como error logico.
-- Verificacion de esta correccion: `npm.cmd run typecheck` y `npm.cmd run lint` OK.
-- Se corrigio el fallo runtime de restauracion de agentes en `src/lib/db/deletion-requests.ts`, `src/app/api/workers/deletion/route.ts` y `src/lib/workers/deletion-processor.ts`: ya no se desacopla `supabase.from` del cliente, porque eso dejaba `this` en `undefined` y disparaba `Cannot read properties of undefined (reading 'rest')` al tocar `deletion_requests`.
-- Verificacion de esta correccion: `npm.cmd run typecheck` y `npm.cmd run lint` OK.
-
-
-- Se agrego restauracion masiva desde la tab `Eliminados`: `/agents` ahora cambia el CTA principal a `Restaurar agentes`, entra en modo seleccion con `Seleccionar todos` y permite devolver agentes al listado activo sin perder su status original.
-- Se creo `POST /api/agents/restore` para admins y editores, junto con helpers en `src/lib/db/agents.ts` y `src/lib/db/deletion-requests.ts` para restaurar filas soft-deleted y marcar como `completed` los `deletion_requests` pendientes, evitando que el worker purgue agentes ya restaurados.
-- Verificacion completada: `npm.cmd run typecheck`, `npm.cmd run lint` y `npm.cmd run build` OK (el build requirio ejecutarse fuera del sandbox por `spawn EPERM`; un primer intento devolvio un error transitorio de build-id faltante y el rerun paso bien).
-
-- Se mejoro `/agents` con acciones rapidas por tarjeta: `Editar` ahora abre directo `Configuracion del agente` via `?tab=config`, `Eliminar` pide confirmacion y mueve el agente a una nueva solapa `Eliminados` con retencion visual de 7 dias para activos y borradores.
-- Se agrego persistencia de borrado diferido para agentes sin cambiar schema: `src/app/api/agents/[agentId]/route.ts` crea `deletion_requests` al soft delete, `src/app/api/workers/deletion/route.ts` solo reclama agentes cuya retencion ya vencio, y `src/lib/workers/deletion-processor.ts` ahora hace la purga definitiva limpiando chunks, documentos, conexiones y la fila del agente.
-- Verificacion completada: `npm.cmd run typecheck`, `npm.cmd run lint` y `npm.cmd run build` OK (el build requirio ejecutarse fuera del sandbox por `spawn EPERM`).
-
-- Ajuste minimo en `src/app/(app)/agents/[agentId]/page.tsx`: el detalle del agente ahora abre siempre en la solapa `Onboarding guiado`, incluso cuando el setup ya este completo, para mantener la primera tab como punto de entrada consistente.
-
-- Se unifico la edicion del detalle de agentes en `src/components/agents/agent-detail-workspace.tsx`: onboarding y configuracion ahora comparten un mismo borrador local, dirty flags por solapa, guardado manual unico y rail sticky visible tambien desde `Base de conocimientos`.
-- `src/components/agents/agent-setup-panel.tsx`, `src/components/agents/setup-checklist-editor.tsx` y `src/components/agents/setup-checklist-item-editor.tsx` dejaron el autosave y el doble click en categorias estructuradas: `Canal y horarios` y `Criterios y derivacion` abren sus controles editables con una sola interaccion, y la activacion queda bloqueada si hay cambios sin guardar.
-- Se alineo la sincronizacion inteligente del prompt en `src/lib/agents/agent-templates.ts`, `src/components/agents/wizard/agent-creation-wizard.tsx` y el workspace de detalle: el prompt recomendado ahora incorpora canal, horarios y criterios del onboarding; se actualiza solo cuando sigue en modo recomendado y ofrece aplicar la version sugerida si el usuario ya lo personalizo manualmente.
-- `src/app/api/agents/[agentId]/route.ts` y `src/lib/db/agents.ts` ahora aceptan `setupState` en el `PATCH` del agente para persistir `system_prompt` y `setup_state` en un mismo guardado, manteniendo `src/app/api/agents/[agentId]/setup/route.ts` por compatibilidad pero fuera del flujo principal del detalle.
-- Verificacion completada: `npm.cmd run typecheck`, `npm.cmd run lint` y `npm.cmd run build` OK (el build requirio ejecutarse fuera del sandbox por `spawn EPERM`).
-## 2026-03-10
-
-- Se corrigio el conflicto de `agent_versions_agent_id_version_number_key` que seguia apareciendo al usar guardado rapido: `src/lib/db/agents.ts` ahora incrementa `agents.current_version` con control optimista de concurrencia, y `src/lib/db/agent-versions.ts` inserta el snapshot usando esa version exacta y acepta como valido el caso en que un trigger o escritura paralela ya haya creado la misma version.
-- `src/app/api/agents/[agentId]/route.ts` y `src/app/api/agents/[agentId]/resync/route.ts` quedaron alineados con el helper compartido `createAgentVersionSnapshot`, para que tanto el guardado manual como la resincronizacion remota usen el mismo contrato de versionado sin duplicar logica.
-- Verificacion completada: `npm.cmd run typecheck`, `npm.cmd run lint` y `npm.cmd run build` OK (el build requirio ejecutarse fuera del sandbox por `spawn EPERM`).
-## 2026-03-10
-
-- Se corrigio la generacion de snapshots en `agent_versions` para evitar choques con la constraint `agent_versions_agent_id_version_number_key`: el alta de versiones ahora pasa por `src/lib/db/agent-versions.ts`, que recalcula el siguiente numero y reintenta automaticamente si detecta un `23505` por version duplicada.
-- `src/app/api/agents/[agentId]/route.ts` dejo de insertar la version inline y ahora delega ese paso al helper nuevo, manteniendo el resto del flujo de update igual pero sin dejar versiones duplicadas ni fallos intermitentes por guardados concurrentes.
-- Verificacion completada: `npm.cmd run typecheck`, `npm.cmd run lint` y `npm.cmd run build` OK (el build requirio ejecutarse fuera del sandbox por `spawn EPERM`).
-## 2026-03-10
-
-- Se rediseÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¾ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¾ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¾ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¾ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¾ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¾ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¾ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¾ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¯ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¾ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¾ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¾ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¾ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¾ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¾ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¾ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¿ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¾ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¾ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¾ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¾ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¾ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¾ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¾ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â½o el detalle de agentes como un workspace por solapas: `Onboarding guiado`, `Configuracion del agente` y `Base de conocimientos` ahora viven dentro de `AgentDetailWorkspace`, con boton visible para volver a `/agents` y CTA a `/dashboard?agentId=...` para abrir la analitica filtrada por el agente actual.
-- Se elimino del detalle el bloque `Consumo del mes actual`, se compactaron las secciones de onboarding en categorias colapsables con items expandibles, y el formulario de configuracion paso a un layout tipo character creator con resumen lateral persistente y boton flotante de guardado.
-- La base documental quedo separada como solapa propia, el onboarding ahora puede abrir esa solapa programaticamente, y el detalle conserva estado local al cambiar de tab sin desmontar componentes cliente.
-- Verificacion completada: `npm.cmd run typecheck`, `npm.cmd run lint` y `npm.cmd run build` OK (el build requirio ejecutarse fuera del sandbox por `spawn EPERM`).
-## 2026-03-08
-
-- Se regenero `src/types/database.ts` directamente desde el proyecto Supabase real `jjryoawtbxqtuaxfmuve` usando `npx supabase gen types typescript --project-id ... --schema public`.
-- Despues de la generacion se normalizo el encoding del archivo a UTF-8 para evitar que ESLint lo leyera como binario.
-- Verificacion posterior: `npm run typecheck` y `npm run lint` OK.
-## 2026-03-08
-
-- Se reseteo `.next` de forma no destructiva renombrando el directorio previo a `.next-runtime-reset-*` y regenerando el build completo para limpiar posibles artefactos mezclados de Webpack/HMR despues del error `__webpack_modules__[moduleId] is not a function`.
-- Verificacion posterior al reset: `npm run build` OK.
-## 2026-03-08
-
-- Se endurecio la pantalla `/settings/integrations` para evitar fallos runtime al listar assistants remotos durante el render server-side: el listado de OpenAI se movio a `GET /api/integrations/[integrationId]/assistants` y ahora se carga desde cliente con manejo de error visible y recarga manual.
-- Verificacion complementaria completada despues del ajuste: `npm run typecheck`, `npm run lint` y `npm run build` OK.
-## 2026-03-08
-
-- Se implemento la base de integraciones OpenAI Assistants para centralizar agentes externos en AgentBuilder: nueva migracion `supabase/migrations/20260308223000_openai_agent_connections.sql`, tabla `agent_connections`, soporte de `integrations.type = openai` y helpers server-side para credenciales cifradas, sync y lectura de assistants remotos.
-- Se agregaron los endpoints admin-only `POST /api/integrations/openai/connect`, `POST /api/integrations/[integrationId]/agents/import` y `POST /api/agents/[agentId]/resync`; ademas, `POST /api/agents` ya puede crear un assistant remoto al recibir `integrationId`, y `PATCH /api/agents/[agentId]` sincroniza cambios remotos para agentes conectados.
-- La UI ahora expone `/settings/integrations` para conectar OpenAI e importar assistants, muestra badges de origen en la grilla/detalle de agentes, deja ver estado de sync y deshabilita el chat local para agentes gestionados por OpenAI.
-- Tambien se extendio la edicion de agentes con `description`, se actualizaron los tipos de Supabase/app para `agent_connections` e `integrations`, y se anoto todo el flujo para que el espejo local preserve documentos/uso mientras OpenAI sigue siendo la fuente para los campos sincronizados.
-- Verificacion completada: `npm run typecheck`, `npm run lint` y `npm run build` OK (el build requirio correr fuera del sandbox por un `spawn EPERM`).
-## 2026-03-08
-
-- Se alineo la subida de documentos con el schema real de `agent_documents`: la app ahora persiste `file_type` como `pdf`, `txt`, `csv` o `docx` en vez de MIME types, que era lo que disparaba la constraint `agent_documents_file_type_check`.
-- `src/app/api/agents/[agentId]/documents/route.ts` y `src/lib/workers/text-extractor.ts` quedaron ajustados al mismo contrato; tambien se removio `md` del copy/UI porque el schema actual no lo admite.
-- Se agregaron logs server-side para distinguir mejor fallos de Storage vs fallos de metadata si vuelve a aparecer un error de subida.
-## 2026-03-08
-
-- Se corrigio la persistencia de `agent_documents`: `src/lib/db/agent-documents.ts` ahora crea el registro con `service_role` dentro de la API route validada, evitando el fallo de insercion autenticada que dejaba el upload sin metadata y disparaba el cleanup del archivo.
-- `listDocuments` y `deleteDocument` se mantuvieron con su acceso original; el cambio se limito al alta de documentos para destrabar la subida desde UI.
-- Verificacion local completada: `npm.cmd run typecheck` y `npm.cmd run lint` OK.
-## 2026-03-08
-
-- Se expuso por UI la subida de documentos RAG en el detalle del agente con `src/components/agents/agent-documents-panel.tsx`, reutilizando el backend existente de `/api/agents/[agentId]/documents`.
-- `src/app/(app)/agents/[agentId]/page.tsx` ahora carga y muestra documentos del agente, y la UI permite subir PDF/TXT/MD/CSV/DOCX cuando el usuario tiene rol `admin` o `editor`.
-- En chat se dejo explicita la limitacion actual: `src/components/chat/chat-input.tsx` aclara que el envio de imagenes/fotos todavia no esta soportado por la app, para no sugerir una capacidad inexistente.
-## 2026-03-08
-
-- Se revisaron los otros flujos de auth despues del fix del dashboard: `register` y `forgot-password` estaban bien, pero `logout` seguia usando navegacion cliente tras limpiar cookies.
-- Se corrigieron `src/components/layout/app-sidebar.tsx` y `src/components/auth/auth-session-notice.tsx` para redirigir con recarga completa a `/login` o `/register` segun corresponda, evitando estados cacheados tras cerrar sesion o cambiar de cuenta.
-- Verificacion local completada: `npm.cmd run typecheck` y `npm.cmd run lint` OK.
-## 2026-03-08
-
-- Se corrigio el primer acceso al dashboard tras login: `src/components/auth/login-form.tsx` ahora fuerza navegacion completa con `window.location.assign("/dashboard")` en lugar de navegar con el router cliente sobre un arbol que podia seguir cacheado como anonimo.
-- Esto evita el estado inconsistente donde el dashboard no cargaba inmediatamente despues de iniciar sesion pero si aparecia al refrescar manualmente.
-- Verificacion local completada: `npm.cmd run typecheck` y `npm.cmd run lint` OK.
-## 2026-03-08
-
-- Se activo `event_queue` como bus real para la app actual: ahora se encolan `agent.created`, `agent.updated`, `agent.deleted`, `conversation.created`, `message.created`, `document.uploaded`, `document.ready` y `plan.limit_*` desde los flujos ya implementados.
-- Se agrego `src/lib/db/event-queue.ts` para centralizar inserts con service role e idempotency keys por evento, evitando duplicados entre `document.uploaded` y `document.ready` y dejando lista la integracion con webhooks.
-- Se propuso la migracion `supabase/migrations/20260308182000_claim_event_queue_events.sql` y el worker ahora reclama eventos via RPC atomica con `FOR UPDATE SKIP LOCKED` en lugar del claim optimista en dos pasos.
-- Pendiente externo a esta sesion: aplicar la migracion en Supabase real antes de ejecutar el worker de webhooks/RAG en produccion con el nuevo claim atomico.
-## 2026-03-08
-
-- Se ajustaron los endpoints de workers para compatibilidad con Vercel Cron: `rag`, `webhooks` y `deletion` ahora exponen `GET` en lugar de `POST`.
-- El cambio deja alineados los cron jobs declarados en `vercel.json` con el metodo HTTP que usa Vercel al dispararlos.
-- Verificacion manual completada revisando el diff de los tres route handlers; no se ejecutaron tests automatizados en esta sesion.
-## 2026-03-08
-
-- Se audito la implementacion real contra `SCHEMA.md` para identificar que partes del schema ya existen solo en DB/tipos y cuales todavia no estan aplicadas end-to-end en la app.
-- Confirmado: `vercel.json` y los workers de `rag`, `webhooks` y `deletion` existen, pero `event_queue` sigue con claim no atomico en dos pasos y no con el patron `SELECT FOR UPDATE SKIP LOCKED` documentado.
-- Hallazgos principales: faltan flujos de producto para `integrations`, `integration_secrets`, `organization_webhooks`, `webhook_deliveries`, `agent_tools`, `user_sessions` y una UI/gestion de `agent_versions` y `audit_logs`.
-- Tambien se detecto que el worker de webhooks espera eventos como `agent.created`, `agent.updated`, `message.created` y `plan.limit_*`, pero hoy la app solo encola `document.uploaded`, por lo que los webhooks no quedan operativos end-to-end.
-- Revision documental completada sin cambios funcionales ni ejecucion de tests; solo inspeccion de codigo y contraste con el schema.
-## 2026-03-08
-
-- Se agrego verificacion server-side contra contrasenas comprometidas usando el modelo k-anonymity de Pwned Passwords en auth/register y auth/reset-password, sin enviar la contrasena completa a terceros.
-- Si la contrasena aparece en filtraciones conocidas, ahora el registro y el cambio de contrasena responden con un rechazo explicito para obligar a elegir una clave no comprometida.
-- Se elimino la carpeta temporal .next-stale-20260308-145939 para no contaminar lint con artefactos obsoletos.
-- Verificacion completada: npm.cmd run typecheck, npm.cmd run lint y npm.cmd run build OK.
-
-## 2026-03-08
-
-- Se aislo una carpeta .next inconsistente en .next-stale-20260308-145939 y se regenero un build limpio para corregir un runtime mezclado que intentaba cargar chunks inexistentes/obsoletos en login y home.
-- Verificacion completada tras limpiar artefactos: npm.cmd run build OK.
-
-## 2026-03-08
-
-- Se corrigio el runtime de autenticacion en Route Handlers creando src/lib/supabase/route.ts para aplicar cookies de Supabase sobre el NextResponse final en login, logout y reset-password.
-- /api/auth/login ahora captura errores no controlados y deja trazas seguras de auth.login.unhandled_error en lugar de responder con un 500 opaco.
-- Verificacion completada tras el fix: npm.cmd run typecheck, npm.cmd run lint y npm.cmd run build OK.
-
-## 2026-03-08
-
-- Se corrigio el acceso desde la landing y las paginas auth para que una sesion previa no redirija automaticamente a dashboard; ahora /login y /register piden confirmacion explicita o cierre de sesion si habia una cuenta activa.
-- Se creo /api/auth/login con validacion same-origin + JSON, rate limit por IP y sanitizacion compartida para centralizar el inicio de sesion en servidor.
-- Se unificaron reglas de credenciales en src/lib/auth/credentials.ts: sanitizacion de email/nombres, politica de contrasenas fuertes (minimo 15 caracteres, bloqueo de claves comunes y datos obvios) y reutilizacion en register, login, forgot-password y reset-password.
-- Verificacion completada: npm.cmd run typecheck y npm.cmd run lint OK.
-
-## 2026-03-08
-
-- Se implemento el aislamiento de conversaciones por usuario usando conversations.initiated_by en chat page, DB helpers y /api/chat.
-- El reset de contrasena ahora valida same-origin + JSON, usa la sesion/cookies del recovery flow en el PATCH y el formulario cliente inicializa la sesion desde code, token_hash o access_token del enlace.
-- El worker de deletion_requests ahora procesa solo filas efectivamente reclamadas y el deletion processor paso a soft delete para users, agents, agent_documents y organizations, manteniendo solo limpieza derivada segura.
-- Se unifico validacion de mutaciones JSON/same-origin en request-security.ts y se aplico en auth/register, auth/logout, organizations y agents/[agentId].
-- Verificacion completada: npm run lint y npm run typecheck OK.
-## 2026-03-08
-
-- Se realizo una code review del repo contra CLAUDE.md sin cambios funcionales.
-- Hallazgos principales: el chat reutiliza conversaciones activas por agente a nivel organizacion en lugar de por usuario, el reset de contrasena PATCH usa un cliente service_role sin sesion de recovery, y el worker de deletion_requests mezcla hard deletes con un claim no atomico.
-- Tambien se detectaron desalineaciones menores en validaciones de mutaciones (CSRF/content-type) frente a las reglas documentadas.
-## 2026-03-08 - Workers + Observability + MVP Essentials
-
-### Fase 1: Workers Asincronos
-- CREAR src/lib/workers/auth.ts: validateCronRequest() valida CRON_SECRET en header Authorization.
-- CREAR src/lib/workers/event-queue.ts: claimEvents(), markDone(), markFailed() via service_role con lock optimista.
-- CREAR src/lib/workers/text-chunker.ts: chunkText() - funcion pura que divide texto en chunks de ~500 tokens con overlap de ~50.
-- CREAR src/lib/workers/text-extractor.ts: extractText() - soporta .txt/.md/.csv directo, .pdf via pdf-parse y .docx via mammoth.
-- CREAR src/lib/workers/rag-processor.ts: orquesta descarga desde Storage, extraccion, chunking, embeddings, INSERT document_chunks y UPDATE agent_documents status.
-- CREAR src/lib/workers/webhook-crypto.ts: signPayload() con HMAC-SHA256, decryptWebhookSecret() via RPC.
-- CREAR src/lib/workers/webhook-deliverer.ts: entrega webhooks con firma, retry con backoff exponencial, INSERT webhook_deliveries.
-- CREAR src/lib/workers/deletion-processor.ts: hard delete por entity_type (user/conversation/agent/org) con orden correcto de dependencias.
-- CREAR src/app/api/workers/rag/route.ts: POST, valida cron, reclama eventos document.uploaded, procesa batch de 5.
-- CREAR src/app/api/workers/webhooks/route.ts: POST, valida cron, reclama eventos de webhook, entrega batch de 5.
-- CREAR src/app/api/workers/deletion/route.ts: POST, valida cron, procesa deletion_requests pendientes.
-- CREAR vercel.json: cron jobs para rag (cada minuto), webhooks (cada minuto), deletion (cada 5 min).
-- Deps nuevas: pdf-parse, mammoth (justificadas para formatos PDF y DOCX).
-- CRON_SECRET agregado a env.ts y .env.local.example.
-
-### Fase 2: Observability
-- CREAR src/app/api/usage/route.ts: GET uso org actual.
-- CREAR src/app/api/usage/history/route.ts: GET tendencias mensuales (max 12 meses).
-- CREAR src/app/api/usage/agents/route.ts: GET desglose por agente.
-- AGREGAR getAllAgentsUsage() en src/lib/db/usage.ts: uso por agente con latencia promedio.
-- CREAR src/app/(app)/usage/page.tsx: pagina dedicada de observability (admin only).
-- CREAR src/components/usage/usage-summary-cards.tsx: mensajes, tokens, costo, progreso de plan.
-- CREAR src/components/usage/agent-usage-table.tsx: tabla por agente con mensajes, tokens, costo, latencia.
-- CREAR src/components/usage/usage-trend-chart.tsx: chart SVG simple de barras sin dependencias externas.
-- CREAR src/components/usage/plan-limit-banner.tsx: banner reutilizable 80%/100% con link a billing.
-- Sidebar actualizado con link "Uso" (admin only).
-
-### Fase 3: MVP Essentials
-- CREAR src/app/(auth)/forgot-password/page.tsx + forgot-password-form.tsx: solicitud de reset.
-- CREAR src/app/api/auth/reset-password/route.ts: POST para solicitar, PATCH para actualizar, rate limit 5/hora.
-- CREAR src/app/(auth)/reset-password/page.tsx + reset-password-form.tsx: formulario de nueva contrasena.
-- CREAR src/app/(app)/settings/page.tsx: nombre org editable, info de plan, fecha trial.
-- CREAR src/components/settings/organization-form.tsx: form de edicion de nombre con toast.
-- CREAR src/app/api/organizations/route.ts: PATCH nombre, admin only, audit log, origin validation.
-- CREAR src/app/(app)/settings/billing/page.tsx: plan actual, uso vs limites, comparacion de planes.
-- CREAR src/components/settings/plan-comparison.tsx: tabla comparativa de planes con indicador "Actual".
-- CREAR src/app/not-found.tsx: 404 con link a dashboard.
-- CREAR src/app/error.tsx: error boundary global con boton reintentar.
-- CREAR src/app/(app)/unauthorized/page.tsx: acceso denegado por rol.
-- CREAR src/components/ui/skeleton.tsx: componente base reutilizable para loading states.
-- CREAR loading.tsx para: dashboard, agents, agents/[agentId], agents/[agentId]/chat, usage.
-- CREAR src/components/ui/toast.tsx + toast-provider.tsx: toasts con auto-dismiss, tipos success/error/info.
-- CREAR src/lib/hooks/use-toast.ts: hook useToast() con context.
-- ToastProvider integrado en src/app/(app)/layout.tsx.
-- Sidebar actualizado: responsive con hamburger menu mobile, links Uso y Configuracion.
-
-### Verificacion
-- npm run typecheck: 0 errores.
-- npm run lint: 0 errores.
-- npm run build: exitoso, todas las rutas generadas correctamente.
-
-## 2026-03-08
-
-- Completado Milestone 1 - Agent Runtime: implementados los 11 items faltantes de la auditoria.
-- CREAR src/lib/utils/errors.ts: clase AppError con tipos, factory createAppError y helper toErrorResponse.
-- CREAR src/lib/db/audit.ts: insertAuditLog() via service_role, non-fatal (nunca rompe flujos).
-- CREAR src/lib/db/usage-writer.ts: recordUsage() que upsertea usage_records por org+agent+periodo mensual.
-- CREAR src/lib/db/notifications-writer.ts: insertPlanLimitNotification() con deduplicacion mensual (80% y 100%).
-- FIX CRITICO #1: /api/chat ahora llama recordUsage() e insertPlanLimitNotification() en onComplete.
-- FIX CRITICO #3: /api/chat verifica user_agent_permissions para roles operador y viewer antes de permitir chat.
-- FIX CRITICO #2 documentado: agents.is_active no existe en el schema real; el check agent.status !== "active" ya cubre el kill switch.
-- /api/agents/[agentId] DELETE: soft delete con audit log, solo admin.
-- /api/agents/[agentId] PATCH: crea agent_versions snapshot y actualiza current_version, con audit log.
-- /api/users/invite: audit log despues de crear perfil, rate limit 10/hora por org via Redis (fail-open).
-- /api/agents/[agentId]/documents POST: rate limit 20/hora por org via Redis (fail-open).
-- softDeleteAgent() agregada a src/lib/db/agents.ts.
-- npm run typecheck paso sin errores.
-- npm run lint paso sin errores.
-
-## 2026-03-08
-
-- Se agrego el script typecheck y el script ci:verify en package.json.
-- Se creo .github/workflows/ci.yml con jobs separados de lint, typecheck y build en Ubuntu usando variables de entorno placeholder para validacion de CI.
-- Se actualizo README.md con los checks locales y la estrategia de CI como fuente de verdad para build.
-- npm.cmd run lint paso sin errores.
-- npm.cmd run typecheck paso sin errores.
-- No se reintento npm.cmd run build local porque el bloqueo de workers de Next.js en este entorno Windows ya fue aislado previamente.
-
-## 2026-03-08
-
-- Se migro el script lint a ESLint CLI para evitar la dependencia de next lint deprecado.
-- Se actualizaron eslint.config.mjs y los ignores para excluir .next, next-env.d.ts y archivos temporales del chequeo.
-- Se agrego una Content-Security-Policy minima en next.config.ts junto con los demas headers de seguridad.
-- Se corrigieron textos con encoding roto en la metadata y la landing publica.
-- Se endurecio .github/workflows/ci.yml con permissions de solo lectura y envs compartidas a nivel workflow.
-- Se actualizo README.md para reflejar la nueva base de seguridad.
-- npm.cmd run lint paso con ESLint CLI.
-- npm.cmd run typecheck paso sin errores.
-- No se reintento npm.cmd run build local porque el problema de workers de Next.js en este entorno Windows sigue siendo un issue separado ya aislado.
-
-## 2026-03-08
-
-- Se realizo una auditoria funcional del proyecto para identificar que falta para un MVP usable.
-- Conclusion general: el core de auth, agentes, chat, invitaciones, notificaciones y documentos existe, pero faltan procesos async e integraciones operativas para que varias capacidades funcionen end-to-end.
-- Se identificaron como gaps principales: workers para event_queue/RAG/usage, UI real de documentos, historial de conversaciones, billing y validacion final de build en entorno Linux/CI.
-
-## 2026-03-08
-
-- Se integro Redis de forma server-only en src/lib/redis.ts sin agregar dependencias nuevas.
-- /api/auth/register ahora usa Redis para rate limiting distribuido en lugar de un Map en memoria.
-- Si Redis falla o REDIS_URL no esta disponible, el rate limit hace fail-open y el registro no se cae completo.
-- npm.cmd run lint paso sin errores.
-- npm.cmd run typecheck paso sin errores.
-## 2026-03-08
-
-- /api/chat ahora aplica rate limiting distribuido por organizacion usando Redis antes de ejecutar llamadas costosas al LLM.
-- Se agrego memoria corta de conversacion en Redis con TTL de 6 horas y limite de 20 mensajes, con fallback seguro a Postgres si Redis falla o devuelve datos invalidos.
-- El historial cacheado se actualiza al guardar el mensaje del usuario y al persistir la respuesta final del asistente al cerrar el stream.
-- src/lib/redis.ts ahora expone helpers JSON minimos para GET/SET con TTL sin agregar dependencias externas.
-- npm.cmd run lint paso sin errores.
-- npm.cmd run typecheck paso sin errores.
-
-## 2026-03-08
-
-- src/lib/db/usage.ts ahora usa createServiceSupabaseClient() para leer usage_records, organizations, plans, conversations y messages desde server-only.
-- Se alineo la lectura de metricas con el mismo patron privilegiado que ya usaba recordUsage() para escritura.
-- Esto evita que el dashboard y la vista de agente dependan de RLS sobre usage_records para mostrar metricas a roles no admin.
-- npm.cmd run lint paso sin errores.
-- npm.cmd run typecheck paso sin errores.
-
-## 2026-03-08
-
-- Se optimizo /api/chat para reducir tiempo hasta el primer token solapando checks de plan y resolucion de conversacion, y tambien el guardado del mensaje del usuario con la carga del historial y el armado de contexto RAG.
-- Se agrego log server-side chat.pre_stream_ready para medir la latencia previa al streaming sin registrar contenido sensible.
-- sendStreamingChatCompletion() ahora usa timeout explicito de 15 segundos, alineado con la variante no streaming, para evitar esperas largas cuando LiteLLM o el proveedor se cuelgan.
-- npm.cmd run lint paso sin errores.
-- npm.cmd run typecheck paso sin errores.
-
-## 2026-03-08
-
-- Se agrego timeout de 500 ms a las conexiones Redis server-only para evitar que handshakes o respuestas lentas bloqueen rutas sensibles.
-- /api/chat ahora pone presupuesto duro a Redis (150 ms) y al armado de contexto RAG (1200 ms); si alguno tarda demasiado, el chat sigue con fallback seguro en lugar de demorar la respuesta.
-- La carga de historial desde Redis y Postgres ahora corre en paralelo para reducir el tiempo hasta el primer token cuando la cache remota no ayuda.
-- npm.cmd run lint paso sin errores.
-- npm.cmd run typecheck paso sin errores.
-
-## 2026-03-08
-
-- Se migro la persistencia post-stream de /api/chat a next/server after() para que el guardado del mensaje del asistente, el registro de uso y las notificaciones de limite se ejecuten de forma confiable despues de completar la respuesta.
-- src/lib/db/messages.ts ahora admite guardar llm_model, response_time_ms, tokens_input y tokens_output, y agrega una variante con service_role para persistencia backend sin depender de cookies de sesion.
-- Con esto, usage_records deja de depender de un callback suelto no esperado por el ciclo de vida del request, que era el principal sospechoso para el dashboard en cero.
-- npm.cmd run lint paso sin errores.
-- npm.cmd run typecheck paso sin errores.
-
-## 2026-03-08
-
-- Se corrigio el orden de la persistencia post-stream en /api/chat para que recordUsage() y las notificaciones de plan se ejecuten antes de la escritura opcional de memoria corta en Redis.
-- Con esto, un timeout o fallo de Redis ya no deberia impedir que usage_records se actualice y que el dashboard refleje mensajes, tokens y costo.
-- npm.cmd run lint paso sin errores.
-- npm.cmd run typecheck paso sin errores.
-
-## 2026-03-08
-
-- Se corrigio el filtro del periodo actual en src/lib/db/usage.ts y en checkPlanLimits() de /api/chat: ahora se compara por igualdad exacta de period_start y period_end en lugar de usar lt(period_end), que excluia siempre el registro del mes actual.
-- Esta correccion alinea la lectura con recordUsage(), que guarda usage_records con period_end exactamente igual al primer dia del mes siguiente.
-- npm.cmd run lint paso sin errores.
-- npm.cmd run typecheck paso sin errores.
-
-## 2026-03-08
-
-- Se reemplazo la lectura de metricas en src/lib/db/usage.ts para calcular mensajes, tokens, costo y latencia directamente desde messages del asistente en lugar de depender de usage_records.
-- Esto vuelve funcionales el dashboard y la vista por agente incluso si la agregacion async de usage_records sigue siendo inconsistente.
-- getUsageHistory() tambien fue alineado para agrupar por created_at de messages y estimar costo desde tokens persistidos.
-- npm.cmd run lint paso sin errores.
-- npm.cmd run typecheck paso sin errores.
-
-## 2026-03-08
-
-- Se reparo src/lib/db/usage-writer.ts para que recordUsage() deje de sumar incrementalmente y pase a reconciliar de forma deterministica el uso mensual real desde messages del asistente antes de upsertear usage_records.
-- El upsert de usage_records ahora incluye total_conversations y usa la clave logica organization_id + agent_id + period_start + llm_provider.
-- /api/chat ahora valida limites con getOrganizationUsage(), evitando depender de lectura RLS sobre usage_records y de agregados potencialmente desfasados en tiempo real.
-- Se mantiene el dashboard leyendo desde messages por seguridad, mientras usage_records queda reparado como capa agregada para limites, notificaciones y analitica backend.
-- npm.cmd run lint paso sin errores.
-- npm.cmd run typecheck paso sin errores.
-
-## 2026-03-08
-
-- Se devolvio src/lib/db/usage.ts a usage_records como fuente del dashboard y de la vista por agente, pero ahora con backfill server-side previo desde messages para garantizar consistencia antes de leer.
-- Se agrego backfillUsageRecordsForOrganization() en src/lib/db/usage-writer.ts, que reconstruye usage_records por organizacion, agente, provider y mes a partir de messages del asistente.
-- recordUsage() ahora dispara ese backfill del mes actual en lugar de sumar incrementalmente, dejando usage_records deterministico y alineado con la fuente real.
-- /api/chat vuelve a verificar limites contra usage_records usando service_role y el periodo correcto, sin depender de RLS de usage_records.
-- npm.cmd run lint paso sin errores.
-- npm.cmd run typecheck paso sin errores.
-
-## 2026-03-08
-
-- Se optimizo la lectura del dashboard y de la vista por agente: usage.ts ya no hace backfill completo del mes actual en cada request, sino que usa ensureUsageRecordsCurrentForOrganization() para reconstruir solo si usage_records esta desactualizada respecto del ultimo mensaje del asistente.
-- recordUsage() mantiene la reconciliacion deterministica del mes actual despues de cada respuesta del chat, por lo que el path caliente sigue corrigiendo usage_records sin depender del dashboard.
-- getUsageHistory() conserva backfill explicito para rangos historicos, donde la consistencia vale mas que micro-optimizar una vista poco frecuente.
-- npm.cmd run lint paso sin errores.
-- npm.cmd run typecheck paso sin errores.
-
-## 2026-03-08
-
-- npm run dev ahora levanta el proxy LiteLLM via docker compose up -d litellm antes de iniciar Next.js.
-- Se agrego compose.yaml con un servicio litellm que monta litellm_config.yaml, expone el puerto 4000 y carga credenciales desde .env.local.
-- .env.local.example ahora documenta ANTHROPIC_API_KEY y GEMINI_API_KEY, ademas de OPENAI_API_KEY, para completar las tres provider keys del proxy.
-
-
-## 2026-03-08
-
-- Se corrigio la indentacion del bloque claude-sonnet-4-6 en litellm_config.yaml; model y api_key habian quedado fuera de litellm_params, lo que dejaba al contenedor LiteLLM en restart loop durante el startup.
-
-
-## 2026-03-08
-
-- /api/chat ahora espera que el stream de LiteLLM confirme response.ok y entregue response.body antes de responder al cliente, evitando 200 enganiosos cuando el proveedor falla antes de iniciar el stream.
-- sendStreamingChatCompletion() expone onReady, ademas de onComplete, para separar errores de arranque del stream de errores posteriores durante la persistencia async.
-
-
-## 2026-03-08
-
-- Se resolvio el error Cannot find module './611.js' apartando una carpeta .next corrupta/bloqueada por procesos viejos de 
-ext dev; el runtime estaba intentando cargar chunks con artefactos inconsistentes del build previo.
-
-
-## 2026-03-08
-
-- Se cambio el backfill de usage_records a upsert con conflicto en organization_id,agent_id,period_start,llm_provider para evitar errores por recomputaciones concurrentes del mismo mes durante chat y dashboard.
-
-
-## 2026-03-08
-
-- Se unifico la experiencia principal en /dashboard: ahora reutiliza los componentes de uso, muestra resumen operativo para todos y analitica detallada solo para admins.
-- /usage paso a redirigir a /dashboard para mantener compatibilidad sin duplicar la navegacion.
-- Se elimino la tab duplicada Uso de la sidebar y se ignora .next-backup-* en ESLint para evitar ruido de artefactos temporales.
-
-
-## 2026-03-08
-
-- Se estabilizo la carga del dashboard admin: ahora usa getDashboardUsageData() para reconstruir usage_records una sola vez y leer resumen, historia y uso por agente desde un snapshot consistente.
-- Tambien se agrego un banner de error visible en /dashboard cuando fallan metricas, en lugar de esconder silenciosamente los bloques de datos.
-
-
-## 2026-03-08
-
-- Se mejoro UsageTrendChart: ahora rellena meses faltantes con cero, muestra etiquetas mes+ano, agrega escala visual con grid y resumen del periodo para que la tendencia mensual sea legible y consistente.
-
-
-## 2026-03-08
-
-- Se mejoro UsageTrendChart: ahora rellena meses faltantes con cero, muestra etiquetas mes+ano, agrega escala visual con grid y resumen del periodo para que la tendencia mensual sea legible y consistente.
-
-
-## 2026-03-08
-
-- Se corrigio el corrimiento por zona horaria en UsageTrendChart: ahora agrupa y etiqueta meses por clave YYYY-MM y renderiza labels en UTC, evitando que marzo se muestre como febrero con valores incorrectos.
-
-
-## 2026-03-08
-
-- Se agregaron nuevos graficos al dashboard admin: Costo por mes y Tokens in/out por mes, reutilizando la misma serie historica de usage_records sin sumar nuevas queries.
-- Se extrajo logica compartida de series mensuales y etiquetas a src/lib/utils/usage-chart.ts para mantener consistencia entre mensajes, costo y tokens.
-
-
-## 2026-03-08
-
-- Se corrigio un warning de React en usage-cost-chart.tsx: los ticks del eje podian redondearse al mismo valor y generar keys duplicadas; ahora la key combina indice y valor.
-
-
-## 2026-03-08
-
-- Se agregaron filtros de analitica al dashboard admin: presets de rango 3M/6M/12M y selector por agente via search params, sin dependencias nuevas.
-- El filtro de agente se valida server-side contra la organizacion antes de consultar analitica, y ahora historia + tabla por agente respetan el rango y el agente seleccionado.
-
-
-## 2026-03-08
-
-- Se corrigieron keys duplicadas en los ejes de usage-trend-chart y usage-tokens-chart: los ticks redondeados podian repetir valores, asi que ahora usan una key compuesta por indice y valor.
-
-
-
-
-## 2026-03-08
-
-- Se rediseno la landing de / con una hero mas trabajada, bloques de valor y una vista previa visual para que la pagina se sienta mas pulida en desktop y mobile.
-- Se agrego acceso claro a /login desde la cabecera y desde los CTA principales de la landing; si ya hay sesion activa, el CTA principal ahora lleva directo a /dashboard.
-- Se mejoro la presentacion global con metadata mas descriptiva, tipografia Manrope y una base visual mas consistente en src/app/layout.tsx y src/app/globals.css.
-
-
-
-
-
-
-
-
-## 2026-03-08
-
-- Se endurecio la gestion de API keys de integraciones OpenAI: el cifrado nuevo ya no deriva de SUPABASE_SERVICE_ROLE_KEY, ahora usa INTEGRATION_SECRETS_ENCRYPTION_KEY con payload versionado y compatibilidad de lectura para secretos legacy.
-- Se sanitizaron errores de proveedor en rutas de connect, import, listado, update y resync: el cliente recibe mensajes seguros y el detalle queda solo en logs server-side.
-- Se redujo la exposicion de agent_connections: se agregaron helpers server-side minimos para detectar agentes conectados sin abrir metadata completa, el panel oculta detalles sensibles fuera de admin y se creo la migracion supabase/migrations/20260308235900_harden_agent_connections_select_policy.sql para cerrar SELECT a admin/editor.
-- Validacion local completada: cmd /c npm run typecheck OK y cmd /c npm run lint OK.
-
-## 2026-03-08
-
-- Se resolvio un runtime de Next.js tipo "Cannot find module './1331.js'" provocado por artefactos corruptos en .next: se aislo la carpeta previa renombrando a .next-runtime-reset-20260308193105 y se regenero el build completo desde cero.
-- Verificacion posterior al reset: cmd /c npm run build OK.
-
-## 2026-03-08
-
-- Se redujo la presion sobre Supabase Auth: getSession ahora usa memoizacion por request en server-side y el middleware deja de consultar auth para rutas /api, evitando validaciones duplicadas y disminuyendo la probabilidad de 429 over_request_rate_limit.
-- El dashboard ya no expone errores SQL crudos al usuario final cuando falla una consulta protegida por RLS.
-- Se agrego la migracion supabase/migrations/20260308194500_grant_rls_helper_function_execute.sql para restaurar EXECUTE sobre get_user_organization_id() y get_user_role() al rol authenticated y revocarlo de anon.
-- Validacion posterior a estos cambios: cmd /c npm run typecheck OK, cmd /c npm run lint OK y cmd /c npm run build OK.
-## 2026-03-09
-
-- Se realizo una revision tecnica del proyecto enfocada en seguridad, autorizacion multi-tenant, rutas API y operacion de workers.
-- Hallazgos principales detectados: endpoints de usage sin restriccion por rol, chequeos de permisos de agente inconsistentes fuera de chat, entrega de webhooks sin validacion SSRF y divergencia entre el flujo documentado del chat y la implementacion actual.
-- Verificacion local de esta sesion: cmd /c npm run lint OK y cmd /c npm run typecheck OK. cmd /c npm run build no pudo completarse en este entorno por spawn EPERM.
-- Se implemento autorizacion centralizada por agente en src/lib/auth/agent-access.ts: ahora listados, detalle, chat y documentos respetan capacidades por rol y permisos asignados, devolviendo 404 cuando un agente no es visible para ese usuario.
-- Se cerro la exposicion de metrics agregadas: /api/usage, /api/usage/agents y /api/usage/history ahora son admin-only, y el dashboard deja de cargar/resumir usage organizacional para roles no admin.
-- Se endurecio la entrega de webhooks con validacion SSRF previa en src/lib/workers/webhook-url-validator.ts y rechazo seguro de hosts/protocolos internos antes de cualquier fetch.
-- Se reordeno el flujo de src/app/api/chat/route.ts para validar acceso/estado del agente antes de revisar plan y antes de crear o reutilizar conversaciones.
-- Validacion posterior a la implementacion: cmd /c npm run typecheck OK, cmd /c npm run lint OK. cmd /c npm run build sigue bloqueado en este entorno por spawn EPERM.
-
-## 2026-03-09
-
-- Se reviso la planificacion del wizard de creacion de agentes contra la implementacion actual del repo.
-- Hallazgos principales: conviene compartir definiciones de modelos/validacion para evitar drift con AgentForm y la API, preservar el flujo actual de integracion OpenAI en el wizard, y tratar status en create como un cambio real de API porque hoy el alta no lo acepta ni lo reenvia en ninguna rama.
-- No hubo cambios funcionales ni ejecucion de tests en esta sesion; solo inspeccion de codigo y registro de recomendaciones.
-## 2026-03-09
-
-- Se reemplazo el alta plana de agentes por un wizard guiado en /agents/new: seleccion de template por canal+objetivo, prompt builder editable, setup interactivo del canal y creacion directa en estado draft.
-- Se agrego persistencia resumible de onboarding via setupState en la app y se propuso la migracion supabase/migrations/20260309143000_add_agents_setup_state.sql para sumar agents.setup_state como JSONB sin ejecutar cambios en la base.
-- Se extendio POST /api/agents para aceptar setupState, se creo PATCH /api/agents/[agentId]/setup para actualizar checklist/paso actual y PATCH /api/agents/[agentId] ahora bloquea activaciones si faltan requisitos obligatorios del setup.
-- El detalle del agente ahora muestra un panel operativo de onboarding con progreso, quick actions, checklist persistente y boton de activacion condicionado por gating server-side.
-- Se extrajeron modelos permitidos, templates y helpers de setup/prompt builder a src/lib/agents/ para evitar drift entre wizard, formularios y API.
-- Verificacion completada: 
-pm.cmd run typecheck, 
-pm.cmd run lint y 
-pm.cmd run build OK (el build requirio ejecutarse fuera del sandbox por spawn EPERM).
-## 2026-03-09
-
-- Se endurecio el onboarding guiado de agentes: los items obligatorios del setup dejaron de ser checks manuales y ahora se resuelven desde datos estructurados en `setup_state` (`builder_draft`, `task_data` y checklist con `verification_mode` / `input_kind`).
-- El wizard de creacion y el panel de detalle ahora comparten UI de setup verificable: horarios de atencion con grilla semanal, criterios guiados de derivacion/reglas y revision manual del mensaje inicial con prerequisitos reales.
-- `PATCH /api/agents/[agentId]/setup` ya no confia en estados enviados por el cliente: acepta parches de `taskData` / `builderDraft` / `manualChecklist`, recalcula el checklist en servidor y solo permite completar manualmente items que correspondan.
-- La activacion server-side vuelve a evaluar evidencia real antes de activar un agente, incluyendo documentos listos para items `documents_presence` y compatibilidad con setups previos normalizados desde templates actuales.
-- Se agregaron los modulos `src/lib/agents/agent-setup-task-data.ts`, `src/lib/agents/agent-setup-state.ts` y `src/components/agents/setup-checklist-editor.tsx` para centralizar validacion, normalizacion y UI compartida.
-- Verificacion de esta sesion: `npm.cmd run typecheck` OK, `npm.cmd run lint` OK y `npm.cmd run build` OK (el build requirio permisos elevados por `spawn EPERM` en el sandbox).
-
-## 2026-03-10
-
-- Se verifico en el codigo y la documentacion del repo que el modelo de OpenAI usado para embeddings es text-embedding-3-small.
-- La implementacion activa esta centralizada en src/lib/llm/embeddings.ts y usa el endpoint https://api.openai.com/v1/embeddings; no hubo cambios funcionales ni ejecucion de tests en esta sesion.
-
-
-
-## 2026-03-11
-
-- Se recupero el refactor cortado de Chat de Afinacion + QA Activo: se repararon `src/components/agents/agent-detail-workspace.tsx` corrompido y `src/lib/db/conversations.ts` con restos de patch, y se rearmo el detalle del agente con tabs `setup`, `config`, `knowledge` y `qa`.
-- El detalle ahora guarda borradores de preview en sessionStorage y permite abrir sandbox preview desde la configuracion; tambien consume la propuesta QA de sesion y la precarga en configuracion sin persistir cambios hasta guardar.
-- Se modularizo el workspace en componentes chicos (`agent-detail-workspace`, `agent-detail-workspace-main`, `agent-detail-workspace-header`, `agent-detail-config-panel`, `agent-detail-workspace-utils`) para respetar el limite de 300 lineas por archivo.
-- Quedo validado el flujo base de Fase 1 en codigo: `/api/chat` soporta `sandbox/live_local` + `saved/preview`, QA persiste `qa_review` en metadata y la UI vuelve a exponer el tab QA para agentes activos locales; Fase 2 sigue parcial y hoy solo existe importacion manual de transcripts WhatsApp en JSON, no una integracion conectada.
-- Verificacion de esta sesion: `npm.cmd run typecheck` OK, `npm.cmd run lint` OK y `npm.cmd run build` OK (el build requirio ejecutarse fuera del sandbox por `spawn EPERM`).
-- Se mejoro el Paso 1 del wizard para WhatsApp con una experiencia hibrida en una sola vista: resumen de conexion, checklist con links oficiales de Meta, formulario real embebido y galeria de templates especificos del canal.
-- El formulario de `src/components/settings/whatsapp-connection-form.tsx` ahora reutiliza la misma logica en `context="settings" | "wizard"`, comparte estado/submit contra `POST /api/integrations/whatsapp/connect`, agrega ayuda contextual por credencial y deja el modo `editor` en solo lectura con callout explicito de permiso admin.
-- Se agregaron los templates `whatsapp_appointment_booking` y `whatsapp_reminder_follow_up` en `src/lib/agents/agent-templates.ts` y `src/lib/agents/agent-setup.ts`, con defaults/checklists orientados a reservas, reprogramaciones, recordatorios, cierre y limites de recontacto.
-- Verificacion de esta sesion: `npm.cmd run lint` OK, `npm.cmd run typecheck` OK y `npm.cmd run build` OK (el build requirio ejecutarse fuera del sandbox por `spawn EPERM`).
-
-- Se corrigio el hydration error del wizard de WhatsApp: `src/components/settings/whatsapp-connection-form.tsx` ya no renderiza un `<form>` dentro del `<form>` principal del wizard y en modo `wizard` usa un contenedor neutro con submit controlado por boton/tecla Enter.
-- Verificacion de esta sesion: `npm.cmd run lint` OK, `npm.cmd run typecheck` OK y `npm.cmd run build` OK (el build requirio ejecutarse fuera del sandbox por `spawn EPERM`).
-- Se amplio el catalogo hardcodeado del wizard para dejar 4 templates por ecosistema tambien en Salesforce, HubSpot, Google Workspace y Slack/Teams, sin cambios de schema ni APIs.
-- Se agregaron 8 templates nuevos en `src/lib/agents/agent-templates.ts` y sus ids en `src/lib/agents/agent-setup.ts`: `salesforce_opportunity_follow_up`, `salesforce_post_sale_handoff`, `hubspot_meeting_booking`, `hubspot_reactivation_follow_up`, `gmail_follow_up_assistant`, `calendar_reschedule_assistant`, `slack_teams_incident_triage` y `slack_teams_team_updates_assistant`.
-- Los nuevos defaults y checklists mantienen el patron actual del producto por ecosistema, reutilizando `scheduleItem`, `criteriaItem`, `manualConfirmItem` y `manualReviewItem` para que el wizard siga generando `setupState` valido sin tocar el flujo existente.
-- Verificacion de esta sesion: `npm.cmd run lint` OK, `npm.cmd run typecheck` OK y `npm.cmd run build` OK (el build requirio ejecutarse fuera del sandbox por `spawn EPERM`).
-
-## 2026-03-11
-
-- Se realizo una sesion de planificacion tecnica para la integracion de Salesforce sobre la implementacion ya existente del repo.
-- Se verifico en codigo que la base actual ya incluye OAuth org-level, persistencia cifrada de secretos, UI en `Settings > Integraciones`, configuracion de `agent_tools` por agente y un endpoint operativo `POST /api/agents/[agentId]/tools/salesforce` con acciones `lookup_records`, `create_task` y `create_lead`.
-- Gaps principales detectados para la siguiente fase: falta refresh automatico del access token usando refresh token, no existe todavia integracion del tool de Salesforce dentro del loop de ejecucion de `/api/chat`, y aun no hay capa de mapeo funcional por caso de uso (leads, oportunidades, casos, handoff) ni sincronizacion/eventos de CRM.
-- No hubo cambios funcionales en esta sesion; se relevaron dependencias, riesgos y fases sugeridas para continuar sin romper la arquitectura actual.
-
-## 2026-03-11
-
-- Se completo la base runtime de Salesforce para produccion general dentro del repo: `src/lib/integrations/salesforce.ts` ahora soporta refresh de access token con `refresh_token`, y `src/lib/db/salesforce-integrations.ts` persiste la rotacion de credenciales en `integration_secrets` + `integration_credentials_history` antes de degradar a `reauth_required`.
-- Se ampliaron las acciones CRM disponibles en `src/lib/integrations/salesforce-tools.ts` y `src/lib/integrations/salesforce-crm.ts`: ademas de `lookup_records`, `create_task` y `create_lead`, ahora existen `lookup_accounts`, `lookup_opportunities`, `lookup_cases`, `create_case`, `update_case` y `update_opportunity`.
-- Se extrajo un runtime server-side compartido para Salesforce en `src/lib/integrations/salesforce-agent-runtime.ts` y `src/lib/integrations/salesforce-agent-runtime-utils.ts`; la ruta `POST /api/agents/[agentId]/tools/salesforce` ya reutiliza esa capa en vez de duplicar auditoria, refresh y manejo de errores.
-- `/api/chat` ahora incorpora orquestacion de Salesforce antes de la respuesta final: `src/lib/chat/salesforce-tool-planner.ts` decide si responder, leer automaticamente o pedir confirmacion para escribir; `src/lib/chat/salesforce-tool-orchestrator.ts` ejecuta lecturas, guarda `pending_tool_action` en `conversations.metadata` y exige confirmacion estricta (`confirmo`) para escrituras.
-- `src/lib/chat/conversation-metadata.ts` se extendio para persistir `pending_tool_action` sin cambios de schema, y `src/lib/llm/litellm.ts` ahora separa `TOOL_OUTPUTS` del `RETRIEVED_CONTEXT` para no mezclar resultados de tools con el contexto RAG.
-- `src/components/agents/agent-tools-panel.tsx` y `README.md` quedaron alineados con la nueva cobertura Salesforce: la UI ya expone todas las acciones habilitables y la documentacion incluye checklist operativo, callback OAuth, cron de integraciones y drill de confirmacion de escrituras.
-- Verificacion completada: `npm.cmd run typecheck`, `npm.cmd run lint` y `npm.cmd run build` OK (el build requirio ejecutarse fuera del sandbox por `spawn EPERM`; ademas se normalizaron a UTF-8 los archivos reescritos desde PowerShell para que Next pudiera compilarlos).
-
-
-
-
+## Estado actual
+
+- El repo ya tiene runbook explicito para deploy/cutover de Railway en `RAILWAY_PHASE1_RUNBOOK.md`, incluyendo variables minimas, start commands, health checks, orden de despliegue, pruebas de wake-up/fallback/shutdown y secuencia de apagado de `n8n`.
+- Los workers persistentes de Railway ahora exponen `GET /health` de forma explicita en vez de responder OK a cualquier path, manteniendo tambien `/` como alias simple.
+- Ya existe el runtime minimo para salir de `n8n Cloud` en la capa de scheduling: `package.json` suma `npm run worker:queue` y `npm run worker:maintenance`, pensados para correr persistentes en Railway con health HTTP en `$PORT`, `SIGTERM`/`SIGINT` limpios y sin mover los endpoints de entrada fuera de Vercel.
+- `src/lib/db/event-queue.ts` ahora publica `event_queue:notify` en Redis inmediatamente despues del `INSERT` exitoso o de detectar duplicado por `idempotency_key`, respetando que Redis solo despierta y que el ownership real sigue en Postgres.
+- `src/lib/workers/queue-notify.ts` agrega el subscriber/publisher Redis por socket sin dependencias nuevas; `scripts/worker-queue.ts` combina subscribe + sweep cada 30s y reutiliza las route handlers reales de `events`, `rag` y `webhooks` como compatibilidad para no duplicar logica.
+- `scripts/worker-maintenance.ts` ya agenda en proceso propio los jobs periodicos vigentes del repo (`approvals`, `oauth refresh`, `deletion`, `integration health`, `conversation reengagement`, `whatsapp followup` y `whatsapp broadcast`) con intervals conservadores y el mismo contrato auth/killswitch de las routes actuales.
+- El wizard principal de creacion ya paso a flujo `workflow catalog -> workflow instance -> integrations -> rules -> model -> review`, usando `setup_state` como fuente de verdad workflow-first sin migracion SQL.
+- `agents` sigue representando la instancia operativa; ahora `setup_state` persiste `workflowTemplateId`, `workflowCategory`, `requiredIntegrations`, `optionalIntegrations`, `allowedAutomationPresets`, `automationPreset`, `instanceConfig` y `successMetrics`.
+- Se cerro la direccion de automatizacion real en `AUTOMATION_PHASE0_PLAN.md`: antes de cualquier `v1.5` de escritura o workflow multi-sistema, la base obligatoria es la migracion SQL explicita ya aprobada para `workflow_runs`, `workflow_steps`, `approval_items` y el estado del budget allocator.
+- El modo actual "desde cero" sigue vivo como `Modo avanzado / desde cero` dentro del catalogo, reutilizando el builder actual sin abrir tablas nuevas.
+- Google Calendar v1 read-only ya corre en `chat web` via `/api/chat` con planner server-side, runtime real sobre `primary`, validacion de ventana y refresh de token.
+- Gmail v1.5 ya corre en `chat web` con el mismo path real de writes validado en Calendar: `approval_items -> workflow_runs/workflow_steps -> event_queue -> worker -> runtime` para `create_draft_reply`, `apply_label` y `archive_thread`, manteniendo lectura segura metadata-only para `search_threads` y `read_thread`.
+- Gmail ahora persiste referencia estable `thread_id + message_id + rfc_message_id` en el contexto reciente y en los payloads de approval para que los jobs async no dependan de heuristicas conversacionales.
+- Gmail chat ahora puede resolver automaticamente un `thread_id` incompleto antes de una write: si el usuario pide borrador/label/archivar y solo hay `thread_id` reciente, el orquestador hace `read_thread` server-side para obtener `message_id` estable y crea la approval en el mismo turno.
+- La timezone de Google Calendar ahora se resuelve server-side con precedencia `override manual -> metadata detectada de Google -> setup/browser fallback -> UTC`, con hidratacion lazy en `integrations.metadata`.
+- `/api/agents/[agentId]/run` y `src/lib/chat/non-stream-executor.ts` siguen sin runtime real de Gmail/Calendar en esta etapa.
+- La migracion `supabase/migrations/20260313223000_add_workflow_phase0_foundation.sql` quedo validada como baseline de schema para la `Fase 0` comun.
+- La migracion `supabase/migrations/20260313223000_add_workflow_phase0_foundation.sql` ya fue aplicada tambien en Supabase, asi que la base de schema de `Fase 0` ya no esta solo modelada en repo sino activa en el entorno objetivo.
+- El aterrizaje repo-real de la `Fase 0` ya esta explicitado en `AUTOMATION_PHASE0_PLAN.md`: budgets siguen siendo post-consumo en Redis, `event_queue` aun no modela lifecycle por run/step, el badge actual del header es reutilizable para approvals, y faltan tipos Supabase + modulos DB/API para las tablas nuevas.
+- Ya existe el primer slice implementado de `Fase 0`: tipos TS para tablas nuevas, modulos `src/lib/db` para runs/steps/approvals/budget allocations, APIs de approval inbox y contador pendiente, pagina web `/approvals` y badge visible en header/sidebar.
+- HubSpot y Salesforce ya dejaron de depender solo de `confirmo` en chat para escrituras asistidas: cuando el planner detecta una write, ahora se materializan `workflow_run`, `workflow_step` y `approval_item` reales y el chat deriva a la inbox `/approvals`.
+- Aprobar un `approval_item` ya no deja el step solo en `queued`: `PATCH /api/approvals` ahora encola `workflow.step.execute` y el worker comun de `event_queue` puede ejecutar el step aprobado de punta a punta para HubSpot/Salesforce.
+- El engine async ya no esta clavado en single-step `maxAttempts: 1`: `workflow.step.execute` ahora soporta retries controlados por `workflow_steps.max_attempts`, avance al siguiente step si existe en el run y cierre mas fino entre `failed`, `blocked`, `partially_completed` y `manual_repair_required`.
+- El budget allocator ya tiene primer aterrizaje workflow-driven: las llamadas CRM ejecutadas desde `workflow.step.execute` reservan admision previa en `provider_budget_allocations` antes del provider call y luego cierran esa reserva como `consumed`, `released` o `rejected`.
+- El allocator previo ya puede diferenciar `allow`, `queue`, `throttle` y `reject` en workflows CRM: para HubSpot/Salesforce lee quota sin consumirla, solo incrementa la ventana Redis cuando la admision es `allow` y deja `retry_after` persistido cuando decide cola o desaceleracion.
+- El coordinator ya intenta compensaciones reales cuando falla un step requerido despues de side effects previos: ejecuta reversión server-side en orden inverso para steps compensables de HubSpot/Salesforce y solo deja `manual_repair_required` si existe un step no reversible o si alguna compensación falla.
+- Google Calendar ya tiene runtime workflow-driven real para writes (`create_event`, `reschedule_event`, `cancel_event`) y la primera compensación segura `create_event -> cancel_created_event` dentro del mismo coordinator.
+- El chat web de Google Calendar ya puede materializar approvals reales de write: el planner detecta `create_event`, `reschedule_event` y `cancel_event`, guarda `pending_crm_action`, y deriva la aprobacion a `/approvals` en vez de ejecutar la mutacion inline.
+- Google Calendar v1.5 quedo validado end-to-end sobre una integracion real: se creo un evento temporal, aparecio confirmado en Google Calendar, luego se reprogramo y finalmente se cancelo pasando por `approval_items -> event_queue -> worker -> runtime`, con `approval_items.status = approved`, `workflow_runs/status = completed`, `workflow_steps/status = completed` y `event_queue/status = done`.
+- El repo ahora tiene una forma reproducible de ejecutar tests TS con aliases via `npm.cmd run test:ts`, y una bateria dedicada `npm.cmd run test:google-calendar` para planner, runtime de lectura, orchestrator y runtime de escritura.
+
+## Ultimos cambios relevantes
+
+- Se agrego `RAILWAY_PHASE1_RUNBOOK.md` con el checklist concreto de deploy y cutover de la Fase 1 hacia Railway.
+- `scripts/worker-queue.ts` y `scripts/worker-maintenance.ts` ahora responden `200` en `/health` y `404` fuera de `/health` o `/`, para que Railway tenga una ruta de health explicita.
+- `.env.local.example` deja de presentar `CRON_SECRET` como variable exclusiva de Vercel Cron y la documenta como auth/scheduling general de workers.
+- Se implemento la Fase 1 minima del plan de salida de `n8n Cloud`: nuevos entrypoints Railway `worker:queue` y `worker:maintenance`, health checks HTTP livianos, shutdown limpio y contrato `event_queue insert -> Redis publish`.
+- `worker:queue` no introduce negocio nuevo: ejecuta las mismas rutas `GET /api/workers/events`, `GET /api/workers/rag` y `GET /api/workers/webhooks` desde un proceso persistente, con despertar por `event_queue:notify` y sweep de respaldo cada 30 segundos.
+- `worker:maintenance` tampoco reescribe processors: agenda internamente las rutas periodicas ya existentes (`approvals`, `oauth/refresh`, `deletion`, `integrations`, `conversations/reengagement`, `whatsapp/followup`, `whatsapp/broadcast`) para que Railway reemplace al scheduler de `n8n` por fases.
+- Se agrego `src/lib/workers/queue-notify.ts` para manejar `PUBLISH` y `SUBSCRIBE` Redis sin sumar dependencias, y `src/lib/db/event-queue.ts` centraliza el wake-up para todos los callers actuales de `enqueueEvent`.
+- Verificacion completada para esta slice: `npm.cmd run typecheck` y `npm.cmd run lint` OK.
+- Se agrego un kill switch global de workers via `WORKERS_ENABLED`: todas las rutas `/api/workers/*` ahora responden `204` sin procesar cuando la flag esta en `false`, y `src/lib/agents/n8n-activation.ts` ya no reactiva workflows de `n8n` mientras el switch siga apagado.
+- Se sumo el script `scripts/toggle-n8n-workflows.mjs` mas los comandos `npm run workers:pause` y `npm run workers:resume` para desactivar/activar por API todos los workflows JSON importados en `n8n`, pensado para cortar rapido ejecuciones del trial sin entrar manualmente a la UI.
+- En este entorno local ya se ejecuto `npm.cmd run workers:pause`: quedaron desactivados los workflows remotos de `n8n` visibles por API (`Conversation Reengagement`, `CRM Sync HubSpot/Salesforce`, `Deletion Worker`, `Event Queue Worker`, `Integration Health Worker`, `OAuth Token Refresh`, `RAG Processor`, `Webhook Delivery Worker`, `WhatsApp Broadcast` y `WhatsApp Follow Up`), y `Approval Expiration Worker` se reporto como no importado en esa instancia.
+- Se verifico el comportamiento operativo de `GET /api/workers/events`: el scheduler oficial en `n8n` lo consulta cada 15 segundos y la route devuelve `204` cuando `claimEvents(...)` no encuentra eventos pendientes, asi que ese log repetido es esperado mientras la cola este vacia.
+- Se actualizo `AUTOMATION_PHASE0_PLAN.md` con un mapa de gaps confirmados en el codigo real y una secuencia de implementacion por slices para `schema+types`, approval inbox, contratos runtime, execution engine, budget admission y primeros ecosistemas.
+- Quedo explicitado en el plan que `src/lib/integrations/provider-budgets.ts` hoy registra consumo despues del provider call y que `src/lib/workers/event-queue.ts` todavia no persiste estado de saga por `workflow_run`/`workflow_step`.
+- Tambien quedo asentado que `src/components/layout/app-header.tsx` y `src/app/(app)/layout.tsx` ya ofrecen un patron claro para el badge/counter de approvals, pero que approvals deben tener inbox y APIs propias en lugar de reutilizar `notifications`.
+- Se extendio `src/types/database.ts` con `workflow_runs`, `workflow_steps`, `approval_items` y `provider_budget_allocations`, y `src/types/app.ts` ahora exporta aliases para esas entidades.
+- Se agregaron `src/lib/db/workflow-runs.ts`, `src/lib/db/workflow-steps.ts`, `src/lib/db/approval-items.ts` y `src/lib/db/provider-budget-allocations.ts` como capa server-side inicial para la persistencia de Phase 0.
+- `src/lib/db/approval-items.ts` ya implementa expiracion automatica por timeout, conteo de pendientes, listados y resolucion `approve/reject`, actualizando tambien el `workflow_step` y `workflow_run` relacionados con estados base.
+- Se agregaron `GET/PATCH /api/approvals` y `GET /api/approvals/count`, mas la nueva pagina `src/app/(app)/approvals/page.tsx` con `src/components/approvals/approval-inbox.tsx`.
+- El shell principal ahora muestra el estado de approvals pendientes en `src/components/layout/app-header.tsx`, `src/components/layout/app-sidebar.tsx` y `src/app/(app)/layout.tsx`.
+- Verificacion completada para esta slice: `npm.cmd run typecheck` y `npm.cmd run lint` OK.
+- Se actualizo `AUTOMATION_PHASE0_PLAN.md` para consolidar la `Fase 0` comun con approval inbox web, badge/counter in-app, expiration policy, async engine, saga coordinator, provider budget allocator con admision previa e idempotencia por step.
+- El plan ahora deja cerrado el orden por ecosistema, la coordinacion cross-system via saga y los gaps/fases concretas para Gmail, Google Calendar, HubSpot, Salesforce, WhatsApp, Slack, Teams, Notion y Zapier.
+- Se tomo `supabase/migrations/20260313223000_add_workflow_phase0_foundation.sql` como baseline aprobado de schema con `workflow_runs`, `workflow_steps`, `approval_items` y `provider_budget_allocations`, mas FK cruzados, triggers `updated_at` y RLS base.
+- `SCHEMA.md` ya refleja las nuevas tablas Phase 0, sus contratos principales y las policies iniciales para runs, steps, approvals y budget allocations.
+- Se agrego `src/lib/agents/workflow-templates.ts` con el catalogo inicial de workflows, presets permitidos, integraciones requeridas/opcionales, metricas observables y recomendaciones de modelo por workflow.
+- `src/lib/agents/agent-setup.ts` y `src/lib/agents/agent-setup-state.ts` ahora aceptan y normalizan metadata workflow-first dentro de `setup_state`, ampliando `current_step` hasta 6 y preservando compatibilidad con el flujo legacy.
+- El wizard de `src/components/agents/wizard/agent-creation-wizard.tsx` fue rehecho para entrar por workflow template, crear instancia nombrada, validar integraciones requeridas conectadas, configurar preset/reglas y cerrar con review workflow-first.
+- Se agregaron `step-workflow-select.tsx`, `step-instance-config.tsx` y `step-workflow-rules.tsx`; tambien se actualizaron `step-integrations-scope.tsx`, `step-model-select.tsx`, `step-review.tsx` y `wizard-step-indicator.tsx` para la nueva UX.
+- La review final ahora expone required vs optional integrations, preset de automatizacion, acciones automaticas / con confirmacion / en sugerencia, modelo elegido y tradeoff orientativo por workflow.
+- Gmail ahora vuelve a requerir scopes ampliados en la superficie Google compartida: `gmail.metadata`, `gmail.compose` y `gmail.modify`, para soportar lectura segura mas borradores, labels y archivado reales.
+- Se agregaron `src/lib/integrations/google-gmail-agent-runtime.ts`, `src/lib/chat/google-gmail-tool-planner.ts` y `src/lib/chat/google-gmail-tool-orchestrator.ts` para ejecutar lectura real de Gmail en `chat web` con respuestas directas server-side.
+- El runtime de Gmail trabaja solo con metadata segura: busca hilos recientes por filtro local sobre subject/from/snippet, lee threads con headers + snippet + conteo de adjuntos, y nunca expone body completo ni HTML al LLM.
+- `/api/chat` ahora orquesta Gmail antes del paso al LLM, agrega un guardrail anti prompt-injection cuando Gmail runtime esta activo y mantiene `toolContext` delimitado como `CONTENIDO EXTERNO NO CONFIABLE: GMAIL` solo cuando hace falta continuar la conversacion.
+- `recent_crm_tool_context` ahora soporta TTL por proveedor; Gmail usa 5 minutos y persiste solo `thread_id` + asunto sanitizado, sin snippet ni body.
+- Los defaults de Gmail quedaron read-only para agentes nuevos: `getDefaultGmailAgentToolConfig()` y el preset de setup guardan solo `search_threads` + `read_thread`, aunque el schema todavia acepta acciones de escritura por compatibilidad.
+- Se agregaron contratos tipados de Gmail write (`create_draft_reply`, `apply_label`, `archive_thread`) con `thread_id/message_id` estables, planner conversacional conservador, approval payloads legibles y detalle operativo especifico en `/approvals`.
+- `src/lib/integrations/google-gmail-agent-runtime.ts` ahora ejecuta writes reales de Gmail: crea borradores reply usando `threadId` + headers de reply, aplica labels existentes por nombre y archiva quitando `INBOX`, todo con refresh de token, errores seguros e idempotencia efectiva por step.
+- `src/lib/chat/google-gmail-tool-planner.ts` y `src/lib/chat/google-gmail-tool-orchestrator.ts` ahora encadenan `read_thread -> write approval` cuando falta `message_id`, y una busqueda de Gmail con un solo resultado deja `thread_id` minimo en `recent_crm_tool_context` para habilitar el siguiente turno sin pedir ids manuales.
+- La idempotencia de Gmail write ahora queda cubierta asi: `archive_thread` y `apply_label` son no duplicables por contrato del provider, y `create_draft_reply` reusa drafts existentes del mismo `workflowStepId` via header `X-AgentBuilder-Workflow-Step-Id` antes de crear uno nuevo.
+- `src/lib/workflows/execution.ts` ya soporta `provider = gmail` dentro de `workflow.step.execute`, reutilizando `service_role`, runtime Google compartido y trazabilidad por `workflow_step`.
+- Se actualizaron copy/diagnosticos de Gmail en tools, Settings y prompts recomendados para dejar de presentarlo como `metadata-only` absoluto: lectura sigue sin body completo, pero las writes asistidas ya estan habilitadas en chat web.
+- Verificacion local completada para este slice Gmail: `npm.cmd run typecheck`, `npm.cmd run lint`, `npm.cmd run test:ts -- src/lib/chat/google-gmail-tool-planner.test.ts`, `npm.cmd run test:ts -- src/lib/integrations/google-gmail-agent-runtime.test.ts`, `npm.cmd run test:ts -- src/lib/chat/google-gmail-tool-orchestrator.test.ts` y `npm.cmd run test:ts -- src/lib/integrations/google-gmail-config.test.ts` OK.
+- Se agregaron tests TS para config/scopes de Gmail, runtime metadata-only y orquestador de Gmail; hoy compilan con `tsc`, pero siguen sin correr directo con `node` por el mismo problema ESM/path aliases del repo.
+- Se agrego runtime server-side para `check_availability` (`freeBusy`) y `list_events` (`events.list`) con contrato `ExecuteGoogleCalendarReadToolInput`, errores seguros y `reauth_required` si falla auth tras retry.
+- Se agregaron budgets propios de Calendar en `provider-budgets`, planner/orquestador de Calendar para chat web, uso de timezone del setup checklist y persistencia de `recent_crm_tool_context` con provider `google_calendar`.
+- `src/app/api/chat/route.ts` ahora conecta Calendar real solo en chat web y pasa `googleCalendarRuntimeAvailable: true` cuando corresponde.
+- Se ajusto el copy visible de Calendar para dejar claro: disponible en chat web, no disponible todavia en `/run`, sin escrituras en v1.
+- Se agregaron tests TS para planner, runtime y orquestador de Calendar.
+- Se agrego `src/lib/integrations/google-calendar-timezone.ts` para resolver/persistir timezone detectada desde `CalendarList/primary` y fallback `Settings/timezone`, con cache en `integrations.metadata`.
+- `GoogleOauthResult`, `GoogleIntegrationConfig` y la lectura flexible de metadata Google ahora exponen `google_calendar_primary_timezone` y `google_calendar_user_timezone`; OAuth callback y refresh preservan/actualizan esos valores.
+- El setup checklist de horarios ahora trata la timezone como override manual del admin: autocompleta la detectada si no habia override, la muestra como "Detectada desde Google Calendar" y no pisa ediciones manuales previas.
+- El orquestador de Google Calendar ahora devuelve copy accionable cuando la integracion queda en `reauth_required`, sin scopes o con tool faltante/desalineada, y Settings vuelve a mostrar CTA explicito de `Reconectar Google Calendar` para esos estados.
+- El runtime de Google Calendar ya no marca `reauth_required` ante cualquier `403`: ahora distingue credenciales invalidas (`401` o `403` auth real) de permisos/scopes insuficientes y evita volver a romper la integracion por un rechazo de permisos del proveedor.
+- Diagnostico real del loop manual en org `6b2f20e7-fed4-426c-b7b8-03c273a93217`: la integracion Google queda `connected` con `refresh_token` y scopes de Calendar, pero Google responde `403 accessNotConfigured` porque la Google Calendar API no esta habilitada en el proyecto OAuth. El runtime ahora lo reporta como infraestructura/API deshabilitada, no como reautenticacion.
+- LiteLLM ahora espera hasta 30s antes de abortar `chat/completions` (`src/lib/llm/litellm.ts`), porque el mensaje "El proveedor tardo demasiado en responder" venia del timeout local de 15s y no de Google Calendar.
+- `/api/chat` ahora emite `stageTimings` en `chat.pre_stream_ready` y `chat.stream_ready` para separar latencia de historial, RAG, persistencia, orquestacion (incluido Google Calendar), checks de runtime y readiness del LLM.
+- Esa observabilidad de `/api/chat` ahora solo se imprime cuando la request supera 5s o cuando hubo RAG/tool backend, para reducir ruido en logs normales.
+- Las consultas simples de Google Calendar (`list_events`, `check_availability`) ahora responden directo desde el orquestador con formato server-side, sin pasar por Claude, para recortar la latencia dominante del LLM en ese flujo.
+- `src/lib/auth/get-session.ts` ya no usa `react cache`; cada request relee la sesion desde cookies/Supabase para evitar `401 No autenticado` espurios en route handlers cuando la sesion rota o refresca entre requests.
+- Se agrego `src/lib/workflows/action-matrix.ts` como primer contrato runtime formal por proveedor/accion para approvals workflow-driven, con timeout y riesgo base para HubSpot, Salesforce, Gmail y Google Calendar.
+- Se agrego `src/lib/workflows/approval-request.ts` para crear `workflow_runs`, `workflow_steps` y `approval_items` server-side desde acciones asistidas disparadas en chat.
+- `src/lib/chat/crm-core.ts` ahora soporta providers que, en lugar de confirmar con `confirmo`, crean una approval real y responden con guidance hacia `/approvals`; si el usuario insiste con `confirmo`, el chat lo redirige a la inbox en vez de ejecutar la write.
+- `src/lib/chat/hubspot-tool-orchestrator.ts` y `src/lib/chat/salesforce-tool-orchestrator.ts` ya conectan esas approvals reales usando `workflowTemplateId` y `automationPreset` del `setup_state`.
+- `src/lib/chat/crm-core.test.ts` gano cobertura para el nuevo flujo de approval inbox ademas del flujo legacy de confirmacion en chat.
+- `src/app/api/approvals/route.ts` ahora encola `workflow.step.execute` al aprobar, con idempotency key por `workflow_step`.
+- `src/lib/workflows/execution.ts` agrega el primer ejecutor workflow-driven real: toma el `workflow_step` aprobado, recupera `integration_id` desde `workflow_run.metadata`, parsea el payload persistido y ejecuta HubSpot/Salesforce reusando los runtimes server-side existentes.
+- `src/app/api/workers/events/route.ts` y `src/lib/workers/event-processor.ts` ya reclaman y procesan `workflow.step.execute`, cerrando `workflow_step`/`workflow_run` como `completed` o `failed`.
+- Se agrego `src/lib/workflows/execution-engine.ts` como policy engine puro para normalizar errores, decidir retries por step, avanzar al siguiente step del run y degradar el run a `partially_completed` o `manual_repair_required` segun `is_required` y compensacion declarada.
+- `src/lib/workflows/execution.ts` ahora crea nuevos intentos de `workflow_steps` cuando el error es transitorio (`rate_limited` / `provider_error` retryable), reencola el intento siguiente con backoff y usa la metadata persistida del run para continuar workflows multi-step ya materializados.
+- `src/lib/db/approval-items.ts` ya no manda toda expiracion/rechazo directo a `manual_repair_required`: reusa la misma semantica del engine para distinguir `blocked` en primeros steps sin side effects, continuar pasos futuros cuando el step rechazado/expirado era opcional y marcar compensaciones pendientes si hubo pasos previos completados con `compensation_action`.
+- `src/lib/workflows/approval-request.ts` deja `max_attempts: 3` en los steps creados desde chat, `src/app/api/approvals/route.ts` eleva `maxAttempts` del evento a 3 para cubrir fallos transitorios del worker y `src/lib/workflows/execution-engine.test.ts` agrega cobertura unitaria del nuevo policy engine.
+- `src/lib/integrations/provider-budgets.ts` ahora puede reservar budget workflow-scoped y persistir la decision en `provider_budget_allocations`; el `window_key` distingue politica/ventana para evitar colisiones por `method_key`.
+- `src/lib/integrations/provider-gateway.ts` acepta `workflowRunId` + `workflowStepId` opcionales: si vienen presentes, reserva budget antes de la llamada, rechaza por quota con trazabilidad persistida y al cerrar la request marca las reservas como `consumed` o `released`.
+- `src/lib/integrations/hubspot-agent-runtime.ts`, `src/lib/integrations/salesforce-agent-runtime.ts` y `src/lib/workflows/execution.ts` ya propagan el contexto de `workflow_run`/`workflow_step` al gateway para que HubSpot/Salesforce usen allocator previo real dentro del engine async.
+- `src/lib/redis.ts` suma `getCounter()` para inspeccionar cuota sin consumirla, `src/lib/integrations/provider-budgets.ts` exporta la heuristica `decideProviderBudgetAdmission()` y `src/lib/integrations/provider-budgets.test.ts` cubre la nueva semantica `allow -> queue -> throttle -> reject`.
+- Se agrego `src/lib/workflows/compensation.ts` como ejecutor server-side de compensaciones y `src/lib/workflows/approval-request.ts` ahora declara `compensation_action` cuando la write tiene una reversión segura conocida.
+- HubSpot y Salesforce sumaron compensaciones iniciales reales para `create_contact` y `create_task`: HubSpot archiva el objeto creado y Salesforce lo elimina; `create_lead`, `create_case`, `create_deal` y writes equivalentes siguen cayendo en reparacion manual.
+- `src/lib/workflows/execution.ts` y `src/lib/db/approval-items.ts` ahora disparan compensación tanto en fallos de ejecución como en rechazos/expiraciones de approval cuando el run ya tenia side effects previos.
+- La trazabilidad de compensación queda persistida por step dentro de `output_payload.compensation` con `action`, `status`, `startedAt`, `finishedAt`, `providerRequestKey` y resultado/error, además de `compensation_status`.
+- `src/lib/integrations/google-agent-tools.ts` ya define contratos de write para Calendar, `src/lib/integrations/google-calendar-agent-runtime.ts` ejecuta mutaciones reales sobre `primary`, y `src/lib/workflows/execution.ts` ya soporta `provider = google_calendar` dentro de `workflow.step.execute`.
+- El contrato de compensación ahora reconoce `google_calendar:create_event` como reversible y `src/lib/workflows/compensation.ts` puede cancelar el evento creado cuando un step requerido posterior falla.
+- `src/lib/chat/google-calendar-tool-planner.ts` ya no es read-only: extrae titulo, fecha y rango horario para `create_event`, y usa el contexto reciente de `list_events` para resolver `reschedule_event` / `cancel_event`.
+- `src/lib/chat/google-calendar-tool-orchestrator.ts` ahora crea approval items reales para writes de Calendar y responde con guidance a la inbox; `confirmo` vuelve a redirigir a `/approvals` si la accion ya quedo pendiente.
+- `src/lib/integrations/google-calendar-agent-runtime.ts` ahora persiste ids/titulos/start/end de eventos en el tool context para que las siguientes acciones del chat puedan referirse al evento recien listado sin inventar ids.
+- La desambiguacion de eventos de Google Calendar en chat ya no cae ciegamente al primer evento reciente: ahora prioriza `eventId`, ordinales ("segundo evento"), titulo quoted, matching por tokens y hora/fecha local; si siguen quedando varios candidatos devuelve guidance con opciones concretas para evitar mutaciones sobre el evento equivocado.
+- Las approvals de Google Calendar para `reschedule_event` y `cancel_event` ahora arrastran contexto humano del evento resuelto (`eventTitle`, `eventStartIso`, `eventEndIso`, `eventTimezone`) dentro del `actionInput`, generan summaries legibles en inbox y persisten `payload_summary.resolved_event` para inspeccion operativa.
+- `Fase 0` gano dos cierres operativos pendientes: existe worker dedicado `GET /api/workers/approvals` para expirar approvals sin depender de abrir la inbox, y el engine ya distingue `budget_queued`, `budget_throttled` y `budget_exhausted` en vez de colapsar toda admision previa del allocator en un `429` generico.
+- Quedo cerrada la decision operativa del scheduler: `Fase 0` usa `n8n` como scheduler oficial para workers recurrentes. El repo ya tenia workflows para `/api/workers/events` y `/api/workers/integrations`, y ahora suma tambien `n8n/workflows/approval-expiration-worker.json` para `/api/workers/approvals`; `vercel.json` deja de ser la fuente de scheduling.
+- `/approvals` ya renderiza detalles amigables para Google Calendar en vez de depender solo del JSON crudo: muestra accion, evento resuelto, id, timezone y horarios actual/nuevo para `create_event`, `reschedule_event` y `cancel_event`, manteniendo el payload tecnico abajo como fallback de debugging.
+- El planner de Google Calendar ya extrae tambien `location`, `description` y `attendeeEmails` cuando el usuario los explicita en lenguaje relativamente estructurado, y esos campos ahora viajan hasta approvals y ejecucion real para `create_event` y `reschedule_event`.
+- La inbox de approvals ya muestra esos nuevos campos de Calendar (`ubicacion`, `invitados`, `descripcion`) dentro del bloque amigable, sin perder el JSON tecnico como respaldo.
+- El planner de Google Calendar ahora tambien soporta variantes mas libres para contexto de write: detecta mejor `nota/detalle/aclaracion`, acepta ubicaciones tipo `por Zoom/via Meet` y arrastra `location`, `description` y `attendeeEmails` tambien en `cancel_event` solo como contexto de approval.
+- Se extendio el contrato tipado de `cancel_event` para admitir ese contexto opcional sin afectar la ejecucion real, y se sumo cobertura en tests del planner/orchestrator para cancelaciones con contexto y frases menos estructuradas.
+- Se alineo `README.md` y `AUTOMATION_PHASE0_PLAN.md` con el cierre definitivo de `Fase 0`: el scheduler oficial ya no es Vercel Cron sino `n8n`, con frecuencia esperada por worker y autenticacion bearer usando una `Variable` `cronSecret` en `n8n`.
+- Para desarrollo local se dejo explicitado el puente correcto entre `n8n` en Docker y la app Next nativa: `compose.yaml` ahora agrega `host.docker.internal:host-gateway` al servicio `n8n` y fija `APP_BASE_URL=http://host.docker.internal:3000` dentro del contenedor.
+- Se suavizo `src/lib/utils/request-security.ts` solo para desarrollo local: la validacion same-origin ahora acepta equivalencia entre `localhost`, `127.0.0.1` y `host.docker.internal` cuando protocolo y puerto coinciden, evitando falsos `Origen no permitido` en chat/login durante el trabajo local.
+- Se encontro el bloqueo real del path `approval -> worker -> Google Calendar`: el `workflow_run` fallaba con `provider_error permission denied for function get_user_organization_id`. Se agrego la migracion `supabase/migrations/20260314035000_grant_rls_helper_functions_to_service_role.sql` para grant de `EXECUTE` sobre `get_user_organization_id()` y `get_user_role()` a `service_role`.
+- Verificacion completada para esta slice: `npm.cmd run typecheck` y `npm.cmd run lint` OK.
+- Se corrigio un bug real del path async de compensacion: Google Calendar estaba cargando runtime de compensacion con el helper user-scoped en vez de `service_role`, lo que podia romper reversiones dentro del worker.
+- Se corrigieron bugs funcionales del planner de Google Calendar detectados al habilitar la bateria ejecutable: preguntas de `eventos` ya no caen en `check_availability`, consultas sin ventana temporal responden `missing_data`, reschedules con frases tipo `evento de las 10 -> 12:30 a 13:30` usan el ultimo rango como destino y la deteccion de `eventId` ya no interpreta la preposicion `a` como id.
+- Se corrigio el detector de auth/permisos del runtime de Google Calendar para no tratar `403 insufficient scopes` como si fueran errores de refresh/reauth, preservando el mensaje correcto al operador.
+- `src/lib/agents/agent-setup.ts` ahora tolera mejor `setup_state` parciales o legacy sin asumir que siempre existen `requiredIntegrations`, `optionalIntegrations`, `allowedAutomationPresets`, `instanceConfig`, `builder_draft` o `checklist`.
+- Verificacion completada para este cierre de Calendar: `npm.cmd run typecheck`, `npm.cmd run lint` y `npm.cmd run test:google-calendar` OK, ademas de una corrida live contra la org `6b2f20e7-fed4-426c-b7b8-03c273a93217` y el agente `629ba835-c98d-4da2-85b4-94723aa4cd68` que creo/reprogramo/cancelo el evento real `h3qns5568njsia2v7539ofcaq4`.
+
+## Pendientes inmediatos
+
+- Desplegar `worker:queue` y `worker:maintenance` en Railway con las mismas credenciales server-side de Supabase/Redis que hoy usa Vercel, y verificar que el health check golpee el `$PORT` correcto de cada proceso.
+- Con `worker:queue` arriba, pausar en `n8n Cloud` al menos `rag-processor`, `event-queue-worker` y `webhook-delivery` para cortar consumo duplicado y validar que la cola siga drenando solo desde Railway.
+- Verificar en vivo el contrato `INSERT event_queue -> PUBLISH event_queue:notify`: un evento nuevo debe despertarse sin esperar el sweep, y ante falla Redis debe recuperarse en el siguiente sweep de 30s.
+- Validar shutdown limpio en Railway enviando `SIGTERM` durante un batch real y confirmar que no reclame nuevos jobs mientras termina el lote en curso.
+- Si el objetivo es bajar consumo del trial de `n8n` ya mismo, no alcanza con `WORKERS_ENABLED=false`: hace falta ejecutar `npm run workers:pause` en un entorno con acceso a `N8N_BASE_URL` + `N8N_API_KEY` validos para desactivar los workflows remotos.
+- Regenerar `src/types/database.ts` si los tipos locales todavia no fueron refrescados contra el entorno Supabase ya migrado.
+- Confirmar en el entorno `n8n` productivo que existan las variables `appBaseUrl` y `cronSecret`, y que queden importados y activos `event-queue-worker`, `approval-expiration-worker` e `integration-health`.
+- Aplicar la migracion `20260314035000_grant_rls_helper_functions_to_service_role.sql` en Supabase antes de seguir validando writes workflow-driven de Google Calendar u otros paths async que toquen tablas con policies basadas en esos helpers.
+- Extender compensaciones reales a mas acciones reversibles. Hoy la cobertura incluye HubSpot/Salesforce `create_contact` + `create_task` y Google Calendar `create_event`; faltan `reschedule_event`, Gmail writes y otros providers.
+- Materializar runs multi-step reales desde los planners/runtime slices futuros; el engine de `Fase 0` ya puede avanzarlos si las filas existen, pero varios ecosistemas siguen creando un solo step por approval.
+- Seguir endureciendo el parser conversacional de Google Calendar para lenguaje aun mas libre. Ya cubre mejor `nota/detalle/aclaracion`, `por Zoom/via Meet` y contexto opcional en `cancel_event`, pero todavia depende de emails literales y de pistas relativamente explicitas.
+- Extender esa renderizacion amigable de `/approvals` a otros providers que tambien tengan payloads operativos ricos.
+- Extender el allocator previo a Google Workspace, WhatsApp y otros callers fuera del engine CRM; hoy la persistencia en `provider_budget_allocations` ya cubre HubSpot/Salesforce workflow-driven, pero el resto sigue usando solo contador Redis.
+- Profundizar observabilidad/metricas del allocator en UI o reporting; el engine ya distingue `queue`, `throttle` y `budget_exhausted`, pero todavia falta explotar esa senal en superficies operativas.
+- Regenerar tipos de Supabase una vez que la migracion `20260313223000_add_workflow_phase0_foundation.sql` quede aplicada en el entorno real que corresponda.
+- Validar si `provider_budget_allocations` cubre todo el contrato de admision/reserva o si todavia hace falta documentar estado efimero complementario en Redis.
+- Diseñar la `approval inbox` web y el badge/counter de pendientes reutilizando el shell actual, pero con modelo propio y sin depender solo de `notifications`.
+- Formalizar la action matrix por proveedor/accion para reemplazar heuristicas actuales de `read/write/requiresConfirmation`.
+- Conectar el detalle del agente y el listado de agentes a la nueva semantica visible de "workflow instance" para que la UX no siga hablando solo de "agente" en todas las superficies.
+- Implementar la gobernanza runtime uniforme de required vs optional integrations en `/api/chat` y futuras superficies, usando la metadata nueva de `setup_state` en vez de copy fijo.
+- Definir si `tool_scope_preset` debe seguir visible tal cual o compilarse internamente desde `automationPreset` en una iteracion posterior, para evitar duplicidad conceptual.
+- Decidir si los workflows futuros no vendibles (`phase 3+`) deben seguir visibles en el catalogo principal o pasar a una vista "coming soon".
+- Validar manualmente con una integracion Google real de Gmail ya reconectada con scopes `gmail.metadata + gmail.compose + gmail.modify`, habilitar tool Gmail y probar `search_threads` + `read_thread` desde `chat web`.
+- Validar en vivo el cierre de Gmail v1.5: crear draft real y confirmar que aparece en Gmail, aplicar label real y confirmar que queda en el thread, archivar thread real y confirmar que sale de Inbox pasando por `approval inbox + worker + runtime`.
+- Confirmar en vivo los estados terminales del path Gmail: `approval_items.status`, `workflow_runs.status`, `workflow_steps.status`, `event_queue.status`, y revisar que expiracion/rechazo queden correctos tambien para approvals Gmail.
+- Validar manualmente el caso `reauth_required`: confirmar que el chat guia a `Settings > Integraciones` y que la card de Google Calendar ofrece `Reconectar Google Calendar`.
+- Validar manualmente el flujo de setup con un agente existente sin metadata nueva para confirmar la autohidratacion al primer ingreso.
+- Si la siguiente fase suma escrituras o soporte en `/run`, reutilizar este slice vertical sin abrir una abstraccion mayor antes de tiempo.
+
+## Riesgos o bloqueos
+
+- La Fase 1 nueva reutiliza route handlers Next dentro de scripts Node; paso `typecheck`/`lint`, pero todavia falta la validacion operativa en Railway para confirmar que `next/server` y las dependencias server-only del repo se comportan igual fuera del proceso web.
+- `worker:queue` hoy orquesta tres batches separados (`events`, `rag`, `webhooks`) sobre la misma `event_queue`; funcionalmente sirve para la migracion, pero mas adelante conviene consolidar ese dispatch en una libreria comun para reducir acoplamiento a route handlers legacy.
+- `worker:maintenance` migra a Railway solo los jobs periodicos que ya existen en repo; followups/broadcasts futuros basados en `due_at` o `next_run_at` todavia requeriran endurecer contratos de claim/idempotencia cuando salgan del modo actual.
+- `WORKERS_ENABLED=false` corta procesamiento server-side y evita reactivaciones automaticas, pero por si solo no impide que `n8n` siga contando ejecuciones programadas; para eso hay que desactivar los workflows remotos.
+- La base de automatizacion real ya tiene schema Phase 0 aplicado en Supabase y cierre de scheduler definido en `n8n`; lo pendiente ya no es fundacional sino operacion/QA y expansion por ecosistema.
+- El repo ya tiene `event_queue`, budgets y notificaciones, pero todavia como piezas parciales; falta unificarlas sin mezclar approvals con notificaciones genericas ni registrar consumo solo despues de pegarle al proveedor.
+- A nivel repo y decision operativa, la `Fase 0` comun queda cerrada: approvals con expiracion definida, inbox y badge, engine async, retries, compensacion inicial, allocator previo, idempotencia por step, schema aplicado y scheduler oficial en `n8n`. Lo que sigue ahora es QA operativa, instrumentacion y expansion por ecosistema sobre esa base.
+- La gobernanza workflow-first hoy queda modelada en `setup_state` y visible en wizard/review, pero todavia no compila una matriz runtime por accion; la degradacion uniforme y enforcement transaccional siguen pendientes de Fase 2.
+- La action matrix nueva ya existe como baseline para approvals workflow-driven, pero todavia no reemplaza todas las heuristicas legacy del producto ni gobierna budgets/admision/ejecucion end-to-end.
+- Las compensaciones automaticas ya existen para un subconjunto seguro de CRM, pero siguen dependiendo de `integration_id` + `created_by` presentes en `workflow_runs.metadata`; runs viejos o incompletos sin esos datos seguiran cayendo en `manual_repair_required`.
+- Google Calendar ya puede escribir y compensar dentro del engine, y el chat ahora evita fallback peligroso al primer evento reciente; de todos modos faltan validaciones/manual QA de UX para mutaciones reales y desambiguaciones mas libres fuera de los patrones cubiertos.
+- Google Calendar v1.5 de escritura ya no esta bloqueado por dudas de implementacion: el flujo real de approval inbox + worker + runtime quedo validado en vivo. Lo pendiente en este ecosistema pasa por expansion/cobertura adicional, no por cierre operativo base.
+- El parser de write de Google Calendar en chat es intencionalmente conservador: requiere horario explicito para crear/reprogramar y se apoya en contexto reciente para identificar eventos; frases mas libres todavia pueden caer en `missing_data`.
+- El allocator previo ya persiste admisiones para HubSpot/Salesforce y el engine distingue `queue/throttle/reject`, pero esa semantica todavia no cubre todos los providers/callers; fuera de ese camino aun hay consumo guiado solo por Redis.
+- La trazabilidad temporal de compensación se persiste dentro de `output_payload.compensation` porque el schema actual no tiene columnas dedicadas para timestamps de compensación; si esa data necesita consulta SQL directa, hara falta migracion futura.
+- El review clasifica acciones en automaticas vs escritura usando heuristicas por nombre de tool (`search/read/list/check/get`); alcanza para UX inicial, pero no reemplaza una matriz formal por accion.
+- El wizard ahora bloquea la creacion si una integracion requerida no figura operativa, pero no crea todavia una experiencia de "guardar como draft incompleto" diferenciada para workflows con requeridas faltantes.
+- `npm.cmd run build` falla en este entorno con `spawn EPERM`, asi que no quedo verificada la build de Next end-to-end.
+- La ejecucion directa de `node src/...test.ts` sigue fallando por resolucion ESM/path aliases del repo; usar `npm.cmd run test:ts -- <archivo>` o `npm.cmd run test:google-calendar`.
+- Gmail sigue siendo metadata-only para lectura: `search_threads` continua filtrando localmente sobre hilos recientes y `read_thread` no expone body completo ni HTML, aunque ahora la misma superficie tambien soporte writes asistidas.
+- El cierre operativo de Gmail v1.5 ya quedo implementado y verificado localmente, pero todavia falta QA vivo contra una cuenta real para confirmar scopes, labels existentes y comportamiento visual real de drafts/archivado en Gmail.
+- El planner de fechas relativas cubre v1 (`hoy`, `manana`, `pasado manana`, `esta semana`, weekdays, ISO date, `despues de eso`), pero no lenguaje temporal mas complejo.
+- La deteccion de timezone desde Google se hace best-effort: si Google devuelve valores invalidos o falla la consulta, se conserva el fallback actual sin bloquear el runtime.
+
+## Comandos de verificacion conocidos
+
+- `npm.cmd run lint`
+- `npm.cmd run typecheck`
+- `npm.cmd run test:ts -- src/lib/chat/google-gmail-tool-planner.test.ts`
+- `npm.cmd run test:ts -- src/lib/integrations/google-gmail-agent-runtime.test.ts`
+- `npm.cmd run test:ts -- src/lib/chat/google-gmail-tool-orchestrator.test.ts`
+- `npm.cmd run test:ts -- src/lib/integrations/google-gmail-config.test.ts`
+- `npm.cmd run test:ts -- src/lib/chat/google-calendar-tool-planner.test.ts`
+- `npm.cmd run test:google-calendar`
+- `npm.cmd run build`
+- `node --experimental-strip-types src\\lib\\integrations\\google-gmail-config.test.ts`  `falla hoy por resolucion ESM/extensiones locales`
+- `node --experimental-strip-types src\\lib\\integrations\\google-gmail-agent-runtime.test.ts`  `falla hoy por resolucion ESM/extensiones locales`
+- `node --experimental-strip-types src\\lib\\chat\\google-gmail-tool-orchestrator.test.ts`  `falla hoy por resolucion ESM/extensiones locales`
+- `node src\\lib\\chat\\google-calendar-tool-planner.test.ts`  `seguiria fallando directo sin el loader por aliases TS`
+- `node src\\lib\\integrations\\google-calendar-agent-runtime.test.ts`  `seguiria fallando directo sin el loader por aliases TS`
+- `node src\\lib\\chat\\google-calendar-tool-orchestrator.test.ts`  `seguiria fallando directo sin el loader por aliases TS`

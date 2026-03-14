@@ -5,57 +5,61 @@
 
 ---
 
-## Decisiones de diseño documentadas
+## Decisiones de diseno documentadas
 
 ```
-1. Un usuario pertenece a UNA sola organización (users.email UNIQUE global — decisión consciente)
-   → Si en el futuro se necesita multi-org, migrar a tabla memberships y leer email de auth.users
+1. Un usuario pertenece a UNA sola organizacion (users.email UNIQUE global - decision consciente)
+   -> Si en el futuro se necesita multi-org, migrar a tabla memberships y leer email de auth.users
 
 2. Enums como TEXT + CHECK (no CREATE TYPE ENUM de PostgreSQL)
-   → Las migraciones ALTER TYPE en Supabase son delicadas con datos vivos
-   → Migrar a ENUM nativo cuando el schema esté estable en producción
+   -> Las migraciones ALTER TYPE en Supabase son delicadas con datos vivos
+   -> Migrar a ENUM nativo cuando el schema este estable en produccion
 
 3. Particionado por mes en messages, audit_logs, user_sessions
-   → Cada tabla particionada tiene DEFAULT PARTITION para evitar fallos en inserts
-   → user_sessions particionado por expires_at (queries principales filtran sesiones activas)
-   → Crear particiones con 2 meses de anticipación via pg_cron
-   → Verificar en Supabase que partitioned indexes se materializan correctamente
+   -> Cada tabla particionada tiene DEFAULT PARTITION para evitar fallos en inserts
+   -> user_sessions particionado por expires_at (queries principales filtran sesiones activas)
+   -> Crear particiones con 2 meses de anticipacion via pg_cron
+   -> Verificar en Supabase que partitioned indexes se materializan correctamente
 
-4. agent_versions usa config JSONB con whitelist explícita de campos
-   → NO usar to_jsonb(OLD) — incluiría columnas no deseadas y datos sensibles futuros
-   → changed_by es UUID NULL con changed_by_type TEXT ('user' | 'system')
-   → NO se fuerza un "system user" global — se usa NULL + tipo explícito
-   → Trigger con SECURITY DEFINER — verificar interacción con RLS en Supabase real
+4. agent_versions usa config JSONB con whitelist explicita de campos
+   -> NO usar to_jsonb(OLD): incluiria columnas no deseadas y datos sensibles futuros
+   -> changed_by es UUID NULL con changed_by_type TEXT ('user' | 'system')
+   -> NO se fuerza un "system user" global: se usa NULL + tipo explicito
+   -> Trigger con SECURITY DEFINER: verificar interaccion con RLS en Supabase real
 
 5. integration_secrets separada de integrations
-   → integrations accesible a la UI (metadata/estado)
-   → integration_secrets con RLS habilitado y policy USING(false) — hardening explícito
-   → service_role bypasea RLS — acceso solo desde backend
-   → secret_encrypted en organization_webhooks cifrado con pgcrypto (no hasheado)
-     porque HMAC requiere el secreto original
+   -> integrations accesible a la UI (metadata/estado)
+   -> integration_secrets con RLS habilitado y policy USING(false) como hardening explicito
+   -> service_role bypasea RLS: acceso solo desde backend
+   -> secret_encrypted en organization_webhooks cifrado con pgcrypto (no hasheado) porque HMAC requiere el secreto original
 
 6. event_queue con SELECT FOR UPDATE SKIP LOCKED
-   → Garantiza que workers concurrentes no procesen el mismo evento
-   → idempotency_key UNIQUE previene duplicados en retries (NULL permitido múltiples veces)
+   -> Garantiza que workers concurrentes no procesen el mismo evento
+   -> idempotency_key UNIQUE previene duplicados en retries (NULL permitido multiples veces)
 
 7. Consistencia multi-tenant garantizada por FK cruzados en todas las tablas
-   → Tablas padre: UNIQUE (id, organization_id)
-   → Tablas hijas: FOREIGN KEY (entity_id, organization_id) REFERENCES padre(id, organization_id)
+   -> Tablas padre: UNIQUE (id, organization_id)
+   -> Tablas hijas: FOREIGN KEY (entity_id, organization_id) REFERENCES padre(id, organization_id)
 
 8. SECURITY DEFINER con SET search_path = public en todas las funciones y triggers
-   → Previene function hijacking / shadowing en Postgres/Supabase
+   -> Previene function hijacking / shadowing en Postgres/Supabase
 
-9. RLS con WITH CHECK explícito en todas las policies FOR ALL / INSERT / UPDATE
-   → Sin WITH CHECK, INSERT/UPDATE pueden crear filas que el usuario no puede ver
-   → Cada tabla tiene policies separadas por operación donde el rol difiere
+9. RLS con WITH CHECK explicito en todas las policies FOR ALL / INSERT / UPDATE
+   -> Sin WITH CHECK, INSERT/UPDATE pueden crear filas que el usuario no puede ver
+   -> Cada tabla tiene policies separadas por operacion donde el rol difiere
 
 10. Policies de RLS alineadas con la matriz de permisos
-    → integrations: SELECT para todos los roles, INSERT/UPDATE/DELETE solo admin
-    → user_agent_permissions: todas las operaciones solo admin
-    → notifications: solo SELECT desde frontend (INSERT/UPDATE/DELETE bloqueados)
-    → agent_versions: solo SELECT (admin/editor) — INSERT solo desde trigger/backend
-```
+    -> integrations: SELECT para todos los roles, INSERT/UPDATE/DELETE solo admin
+    -> user_agent_permissions: todas las operaciones solo admin
+    -> notifications: solo SELECT desde frontend (INSERT/UPDATE/DELETE bloqueados)
+    -> agent_versions: solo SELECT (admin/editor); INSERT solo desde trigger/backend
 
+11. Workflow automation Phase 0 persiste estado propio
+    -> workflow_runs modela la saga por instancia/trigger
+    -> workflow_steps persiste step_id + attempt + idempotency_key por step
+    -> approval_items no se mezcla con notifications genericas
+    -> provider_budget_allocations deja trazabilidad de admision previa al proveedor
+```
 ---
 
 ## Diagrama de relaciones
@@ -1073,6 +1077,218 @@ CREATE INDEX idx_deletion_requests_org    ON deletion_requests(organization_id);
 CREATE INDEX idx_deletion_requests_status ON deletion_requests(status) WHERE status = 'pending';
 ```
 
+---
+
+### 23. workflow_runs
+
+```sql
+CREATE TABLE workflow_runs (
+  id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id     UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  agent_id            UUID NOT NULL,
+  conversation_id     UUID,
+  created_by          UUID,
+  trigger_source      TEXT NOT NULL
+    CHECK (trigger_source IN ('chat', 'api', 'webhook', 'schedule', 'provider_event', 'manual', 'worker')),
+  trigger_event_type  TEXT,
+  workflow_template_id TEXT,
+  automation_preset   TEXT NOT NULL
+    CHECK (automation_preset IN ('copilot', 'assisted', 'autonomous')),
+  status              TEXT NOT NULL DEFAULT 'queued'
+    CHECK (status IN ('queued', 'running', 'waiting_approval', 'blocked', 'failed', 'completed', 'partially_completed', 'manual_repair_required', 'cancelled')),
+  current_step_id     TEXT,
+  started_at          TIMESTAMPTZ,
+  finished_at         TIMESTAMPTZ,
+  last_transition_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  failure_code        TEXT,
+  failure_message     TEXT,
+  metadata            JSONB NOT NULL DEFAULT '{}',
+  created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+  UNIQUE (id, organization_id),
+
+  FOREIGN KEY (agent_id, organization_id)
+    REFERENCES agents(id, organization_id) ON DELETE CASCADE,
+  FOREIGN KEY (conversation_id, organization_id)
+    REFERENCES conversations(id, organization_id) ON DELETE SET NULL,
+  FOREIGN KEY (created_by, organization_id)
+    REFERENCES users(id, organization_id) ON DELETE SET NULL
+);
+
+CREATE INDEX idx_workflow_runs_org_status
+  ON workflow_runs(organization_id, status, created_at DESC);
+CREATE INDEX idx_workflow_runs_org_agent
+  ON workflow_runs(organization_id, agent_id, created_at DESC);
+CREATE INDEX idx_workflow_runs_org_conversation
+  ON workflow_runs(organization_id, conversation_id)
+  WHERE conversation_id IS NOT NULL;
+
+CREATE TRIGGER trigger_workflow_runs_updated_at
+  BEFORE UPDATE ON workflow_runs
+  FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+```
+
+---
+
+### 24. workflow_steps
+
+```sql
+CREATE TABLE workflow_steps (
+  id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  workflow_run_id     UUID NOT NULL,
+  organization_id     UUID NOT NULL,
+  step_id             TEXT NOT NULL,
+  step_index          INT NOT NULL CHECK (step_index >= 1),
+  provider            TEXT NOT NULL,
+  action              TEXT NOT NULL,
+  status              TEXT NOT NULL DEFAULT 'queued'
+    CHECK (status IN ('queued', 'running', 'waiting_approval', 'blocked', 'failed', 'failed_due_to_expired_approval', 'completed', 'skipped', 'manual_repair_required')),
+  is_required         BOOLEAN NOT NULL DEFAULT true,
+  approval_policy     TEXT NOT NULL DEFAULT 'none'
+    CHECK (approval_policy IN ('none', 'required')),
+  approval_timeout_ms INT
+    CHECK (approval_timeout_ms IS NULL OR approval_timeout_ms > 0),
+  attempt             INT NOT NULL DEFAULT 1 CHECK (attempt >= 1),
+  max_attempts        INT NOT NULL DEFAULT 3 CHECK (max_attempts >= 1),
+  idempotency_key     TEXT NOT NULL,
+  provider_request_key TEXT,
+  compensation_action TEXT,
+  compensation_status TEXT NOT NULL DEFAULT 'not_required'
+    CHECK (compensation_status IN ('not_required', 'pending', 'completed', 'failed', 'manual_repair_required')),
+  input_payload       JSONB NOT NULL DEFAULT '{}',
+  output_payload      JSONB,
+  error_code          TEXT,
+  error_message       TEXT,
+  queued_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  started_at          TIMESTAMPTZ,
+  finished_at         TIMESTAMPTZ,
+  created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+  UNIQUE (id, organization_id),
+  UNIQUE (workflow_run_id, step_id, attempt),
+  UNIQUE (organization_id, idempotency_key),
+
+  FOREIGN KEY (workflow_run_id, organization_id)
+    REFERENCES workflow_runs(id, organization_id) ON DELETE CASCADE
+);
+
+CREATE INDEX idx_workflow_steps_org_run
+  ON workflow_steps(organization_id, workflow_run_id, step_index, attempt DESC);
+CREATE INDEX idx_workflow_steps_org_status
+  ON workflow_steps(organization_id, status, queued_at DESC);
+CREATE INDEX idx_workflow_steps_org_provider_action
+  ON workflow_steps(organization_id, provider, action);
+
+CREATE TRIGGER trigger_workflow_steps_updated_at
+  BEFORE UPDATE ON workflow_steps
+  FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+```
+
+---
+
+### 25. approval_items
+
+```sql
+CREATE TABLE approval_items (
+  id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id   UUID NOT NULL,
+  workflow_run_id   UUID NOT NULL,
+  workflow_step_id  UUID NOT NULL,
+  agent_id          UUID NOT NULL,
+  requested_by      UUID,
+  resolved_by       UUID,
+  provider          TEXT NOT NULL,
+  action            TEXT NOT NULL,
+  status            TEXT NOT NULL DEFAULT 'pending'
+    CHECK (status IN ('pending', 'approved', 'rejected', 'expired')),
+  risk_level        TEXT NOT NULL DEFAULT 'medium'
+    CHECK (risk_level IN ('low', 'medium', 'high')),
+  summary           TEXT NOT NULL,
+  payload_summary   JSONB NOT NULL DEFAULT '{}',
+  context           JSONB NOT NULL DEFAULT '{}',
+  resolution_note   TEXT,
+  expires_at        TIMESTAMPTZ NOT NULL,
+  resolved_at       TIMESTAMPTZ,
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+  UNIQUE (id, organization_id),
+  UNIQUE (workflow_step_id),
+
+  FOREIGN KEY (workflow_run_id, organization_id)
+    REFERENCES workflow_runs(id, organization_id) ON DELETE CASCADE,
+  FOREIGN KEY (workflow_step_id, organization_id)
+    REFERENCES workflow_steps(id, organization_id) ON DELETE CASCADE,
+  FOREIGN KEY (agent_id, organization_id)
+    REFERENCES agents(id, organization_id) ON DELETE CASCADE,
+  FOREIGN KEY (requested_by, organization_id)
+    REFERENCES users(id, organization_id) ON DELETE SET NULL,
+  FOREIGN KEY (resolved_by, organization_id)
+    REFERENCES users(id, organization_id) ON DELETE SET NULL
+);
+
+CREATE INDEX idx_approval_items_org_status_expires
+  ON approval_items(organization_id, status, expires_at);
+CREATE INDEX idx_approval_items_org_agent_status
+  ON approval_items(organization_id, agent_id, status, created_at DESC);
+CREATE INDEX idx_approval_items_pending
+  ON approval_items(expires_at) WHERE status = 'pending';
+
+CREATE TRIGGER trigger_approval_items_updated_at
+  BEFORE UPDATE ON approval_items
+  FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+```
+
+---
+
+### 26. provider_budget_allocations
+
+```sql
+CREATE TABLE provider_budget_allocations (
+  id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id   UUID NOT NULL,
+  workflow_run_id   UUID NOT NULL,
+  workflow_step_id  UUID NOT NULL,
+  provider          TEXT NOT NULL,
+  method_key        TEXT NOT NULL,
+  window_key        TEXT NOT NULL,
+  decision          TEXT NOT NULL
+    CHECK (decision IN ('allow', 'queue', 'throttle', 'reject')),
+  status            TEXT NOT NULL DEFAULT 'reserved'
+    CHECK (status IN ('reserved', 'consumed', 'released', 'expired', 'rejected')),
+  units             INT NOT NULL DEFAULT 1 CHECK (units >= 1),
+  reserved_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  consumed_at       TIMESTAMPTZ,
+  released_at       TIMESTAMPTZ,
+  expires_at        TIMESTAMPTZ,
+  metadata          JSONB NOT NULL DEFAULT '{}',
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+  UNIQUE (id, organization_id),
+  UNIQUE (workflow_step_id, method_key, window_key),
+
+  FOREIGN KEY (workflow_run_id, organization_id)
+    REFERENCES workflow_runs(id, organization_id) ON DELETE CASCADE,
+  FOREIGN KEY (workflow_step_id, organization_id)
+    REFERENCES workflow_steps(id, organization_id) ON DELETE CASCADE
+);
+
+CREATE INDEX idx_provider_budget_allocations_org_provider_status
+  ON provider_budget_allocations(organization_id, provider, status, reserved_at DESC);
+CREATE INDEX idx_provider_budget_allocations_org_run
+  ON provider_budget_allocations(organization_id, workflow_run_id, reserved_at DESC);
+CREATE INDEX idx_provider_budget_allocations_active_window
+  ON provider_budget_allocations(provider, method_key, window_key, status)
+  WHERE status IN ('reserved', 'consumed');
+
+CREATE TRIGGER trigger_provider_budget_allocations_updated_at
+  BEFORE UPDATE ON provider_budget_allocations
+  FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+```
+
 
 ---
 
@@ -1101,6 +1317,10 @@ ALTER TABLE notifications               ENABLE ROW LEVEL SECURITY;
 ALTER TABLE audit_logs                  ENABLE ROW LEVEL SECURITY;
 ALTER TABLE document_chunks             ENABLE ROW LEVEL SECURITY;
 ALTER TABLE deletion_requests           ENABLE ROW LEVEL SECURITY;
+ALTER TABLE workflow_runs               ENABLE ROW LEVEL SECURITY;
+ALTER TABLE workflow_steps              ENABLE ROW LEVEL SECURITY;
+ALTER TABLE approval_items              ENABLE ROW LEVEL SECURITY;
+ALTER TABLE provider_budget_allocations ENABLE ROW LEVEL SECURITY;
 
 -- ─────────────────────────────────────────────
 -- organizations
@@ -1375,6 +1595,44 @@ CREATE POLICY deletion_requests_admin ON deletion_requests
   FOR ALL
   USING     (organization_id = public.get_user_organization_id() AND public.get_user_role() = 'admin')
   WITH CHECK(organization_id = public.get_user_organization_id() AND public.get_user_role() = 'admin');
+
+-- â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+-- workflow_runs / workflow_steps (solo lectura tenant-scoped desde frontend)
+-- â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+CREATE POLICY workflow_runs_select ON workflow_runs
+  FOR SELECT USING (organization_id = public.get_user_organization_id());
+
+CREATE POLICY workflow_steps_select ON workflow_steps
+  FOR SELECT USING (organization_id = public.get_user_organization_id());
+
+-- â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+-- approval_items (lectura y resolucion para admin/editor/operador)
+-- â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+CREATE POLICY approval_items_select ON approval_items
+  FOR SELECT USING (
+    organization_id = public.get_user_organization_id()
+    AND public.get_user_role() IN ('admin', 'editor', 'operador')
+  );
+
+CREATE POLICY approval_items_update ON approval_items
+  FOR UPDATE
+  USING (
+    organization_id = public.get_user_organization_id()
+    AND public.get_user_role() IN ('admin', 'editor', 'operador')
+  )
+  WITH CHECK (
+    organization_id = public.get_user_organization_id()
+    AND public.get_user_role() IN ('admin', 'editor', 'operador')
+  );
+
+-- â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+-- provider_budget_allocations (solo admin, lectura operativa/costos)
+-- â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+CREATE POLICY provider_budget_allocations_select ON provider_budget_allocations
+  FOR SELECT USING (
+    organization_id = public.get_user_organization_id()
+    AND public.get_user_role() = 'admin'
+  );
 ```
 
 ---
@@ -1404,6 +1662,9 @@ CREATE POLICY deletion_requests_admin ON deletion_requests
 □ llm_temperature CHECK es <= 1.0 (no <= 2.0)
 □ document_chunks con índice HNSW y FK cruzados
 □ deletion_requests con status 'pending' para worker de Milestone 3
+[] workflow_steps guarda idempotency_key por step + attempt con UNIQUE tenant-scoped
+[] approval_items expone expiracion explicita y nunca depende solo de notifications
+[] provider_budget_allocations deja trazabilidad de admision/reserva antes del provider call
 ```
 
 ---
@@ -1434,3 +1695,8 @@ CREATE POLICY deletion_requests_admin ON deletion_requests
 | 20 | audit_logs | Registro inmutable | ✅ created_at + DEFAULT | 🔴 Día 1 |
 | 21 | document_chunks | Fragmentos vectorizados RAG | ❌ | 🟡 MVP |
 | 22 | deletion_requests | Derecho al olvido | ❌ | 🟢 Milestone 3 |
+| 23 | workflow_runs | Sagas async por agente/trigger | no | Phase 0 |
+| 24 | workflow_steps | Estado, intentos e idempotencia por step | no | Phase 0 |
+| 25 | approval_items | Inbox de aprobaciones con expiracion | no | Phase 0 |
+| 26 | provider_budget_allocations | Admisiones/reservas de budget por step | no | Phase 0 |
+

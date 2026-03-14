@@ -4,6 +4,7 @@ export type ProviderRequestErrorInput = {
   statusCode?: number | null;
   requestId?: string | null;
   retryAfterSeconds?: number | null;
+  errorCode?: string | null;
 };
 
 export class ProviderRequestError extends Error {
@@ -11,6 +12,7 @@ export class ProviderRequestError extends Error {
   readonly statusCode: number | null;
   readonly requestId: string | null;
   readonly retryAfterSeconds: number | null;
+  readonly errorCode: string | null;
 
   constructor(input: ProviderRequestErrorInput) {
     super(input.message);
@@ -19,6 +21,7 @@ export class ProviderRequestError extends Error {
     this.statusCode = input.statusCode ?? null;
     this.requestId = input.requestId ?? null;
     this.retryAfterSeconds = input.retryAfterSeconds ?? null;
+    this.errorCode = input.errorCode ?? null;
   }
 }
 

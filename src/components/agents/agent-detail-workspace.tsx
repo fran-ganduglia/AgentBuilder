@@ -27,7 +27,9 @@ import {
   detectPromptSyncMode,
   syncSystemPromptWithSetup,
   type PromptSyncMode,
+  type RecommendedPromptEnvironment,
 } from "@/lib/agents/agent-templates";
+import { resolveEffectiveAgentPrompt } from "@/lib/agents/effective-prompt";
 import {
   canAccessQaPanel,
   canUseSandboxForConnection,
@@ -39,6 +41,14 @@ import type { Agent, AgentConnection, Role } from "@/types/app";
 import type { Tables } from "@/types/database";
 
 type AgentDocument = Tables<"agent_documents">;
+
+type IntegrationNotice = {
+  title: string;
+  message: string;
+  tone: "emerald" | "amber" | "rose" | "slate";
+  href: string;
+  label: string;
+};
 
 type AgentDetailWorkspaceProps = {
   agent: Agent;
@@ -52,13 +62,11 @@ type AgentDetailWorkspaceProps = {
   canChat: boolean;
   initialTab: WorkspaceTab;
   whatsappIntegrationId: string | null;
-  salesforceIntegrationNotice: {
-    title: string;
-    message: string;
-    tone: "emerald" | "amber" | "rose" | "slate";
-    href: string;
-    label: string;
-  } | null;
+  salesforceIntegrationNotice: IntegrationNotice | null;
+  hubspotIntegrationNotice: IntegrationNotice | null;
+  gmailIntegrationNotice: IntegrationNotice | null;
+  googleCalendarIntegrationNotice: IntegrationNotice | null;
+  promptEnvironment: RecommendedPromptEnvironment;
 };
 
 function replaceProposalUrl(tab: WorkspaceTab): void {
@@ -88,6 +96,10 @@ export function AgentDetailWorkspace({
   initialTab,
   whatsappIntegrationId,
   salesforceIntegrationNotice,
+  hubspotIntegrationNotice,
+  gmailIntegrationNotice,
+  googleCalendarIntegrationNotice,
+  promptEnvironment,
 }: AgentDetailWorkspaceProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -95,8 +107,20 @@ export function AgentDetailWorkspace({
   const [activeTab, setActiveTab] = useState<WorkspaceTab>(() =>
     resolveInitialWorkspaceTab(initialTab, agent.status)
   );
-  const [fields, setFields] = useState<AgentFormFields>(() => createInitialFields(agent));
-  const [savedFields, setSavedFields] = useState<AgentFormFields>(() => createInitialFields(agent));
+  const initialPromptResolution = resolveEffectiveAgentPrompt({
+    savedPrompt: agent.system_prompt,
+    setupState,
+    promptEnvironment,
+    allowConflictCleanupForCustom: false,
+  });
+  const [fields, setFields] = useState<AgentFormFields>(() => ({
+    ...createInitialFields(agent),
+    systemPrompt: initialPromptResolution.effectivePrompt,
+  }));
+  const [savedFields, setSavedFields] = useState<AgentFormFields>(() => ({
+    ...createInitialFields(agent),
+    systemPrompt: initialPromptResolution.effectivePrompt,
+  }));
   const [draftSetupState, setDraftSetupState] = useState<AgentSetupState | null>(() => cloneSetupState(setupState));
   const [savedSetupState, setSavedSetupState] = useState<AgentSetupState | null>(() => cloneSetupState(setupState));
   const [errors, setErrors] = useState<AgentFormErrors>({});
@@ -107,12 +131,15 @@ export function AgentDetailWorkspace({
   const [qaProposalSummary, setQaProposalSummary] = useState<string | null>(null);
   const [qaRecommendations, setQaRecommendations] = useState<string[]>([]);
   const [promptSyncMode, setPromptSyncMode] = useState<PromptSyncMode>(() =>
-    setupState ? detectPromptSyncMode(agent.system_prompt, setupState) : "custom"
+    initialPromptResolution.syncMode
   );
 
   const recommendedPrompt = useMemo(
-    () => (draftSetupState ? buildRecommendedSystemPrompt(draftSetupState) : fields.systemPrompt),
-    [draftSetupState, fields.systemPrompt]
+    () =>
+      draftSetupState
+        ? buildRecommendedSystemPrompt(draftSetupState, promptEnvironment)
+        : fields.systemPrompt,
+    [draftSetupState, fields.systemPrompt, promptEnvironment]
   );
   const hasConfigChanges = hasFieldChanges(fields, savedFields);
   const hasSetupChanges = JSON.stringify(draftSetupState) !== JSON.stringify(savedSetupState);
@@ -159,7 +186,8 @@ export function AgentDetailWorkspace({
     setQaProposalSummary(proposal.summary);
     setQaRecommendations(proposal.recommendations);
     setPromptSyncMode(
-      draftSetupState && detectPromptSyncMode(proposal.suggestedSystemPrompt, draftSetupState) === "recommended"
+      draftSetupState &&
+        detectPromptSyncMode(proposal.suggestedSystemPrompt, draftSetupState, promptEnvironment) === "recommended"
         ? "recommended"
         : "custom"
     );
@@ -170,7 +198,7 @@ export function AgentDetailWorkspace({
     if (typeof window !== "undefined") {
       replaceProposalUrl("config");
     }
-  }, [agent.id, draftSetupState, searchParams]);
+  }, [agent.id, draftSetupState, promptEnvironment, searchParams]);
 
   function clearFeedback() {
     setSubmitError(null);
@@ -188,7 +216,7 @@ export function AgentDetailWorkspace({
 
     if (field === "systemPrompt") {
       setPromptSyncMode(
-        draftSetupState && detectPromptSyncMode(String(value), draftSetupState) === "recommended"
+        draftSetupState && detectPromptSyncMode(String(value), draftSetupState, promptEnvironment) === "recommended"
           ? "recommended"
           : "custom"
       );
@@ -215,9 +243,11 @@ export function AgentDetailWorkspace({
         const nextPrompt = syncSystemPromptWithSetup(
           currentFields.systemPrompt,
           currentSetupState,
-          nextSetupState
+          nextSetupState,
+          promptEnvironment,
+          promptEnvironment
         );
-        setPromptSyncMode(detectPromptSyncMode(nextPrompt, nextSetupState));
+        setPromptSyncMode(detectPromptSyncMode(nextPrompt, nextSetupState, promptEnvironment));
         return { ...currentFields, systemPrompt: nextPrompt };
       });
 
@@ -267,8 +297,17 @@ export function AgentDetailWorkspace({
         return;
       }
 
-      const nextSavedFields = createInitialFields(result.data);
       const nextSavedSetupState = cloneSetupState(draftSetupState);
+      const savedPromptResolution = resolveEffectiveAgentPrompt({
+        savedPrompt: result.data.system_prompt,
+        setupState: nextSavedSetupState,
+        promptEnvironment,
+        allowConflictCleanupForCustom: false,
+      });
+      const nextSavedFields = {
+        ...createInitialFields(result.data),
+        systemPrompt: savedPromptResolution.effectivePrompt,
+      };
       setFields(nextSavedFields);
       setSavedFields(nextSavedFields);
       setDraftSetupState(cloneSetupState(nextSavedSetupState));
@@ -276,7 +315,9 @@ export function AgentDetailWorkspace({
       setErrors({});
       setSuccessMessage(statusOverride === "active" ? "Agente activado y cambios guardados." : "Cambios guardados.");
       setPromptSyncMode(
-        nextSavedSetupState ? detectPromptSyncMode(nextSavedFields.systemPrompt, nextSavedSetupState) : "custom"
+        nextSavedSetupState
+          ? detectPromptSyncMode(nextSavedFields.systemPrompt, nextSavedSetupState, promptEnvironment)
+          : "custom"
       );
 
       if (qaProposalSummary && typeof window !== "undefined") {
@@ -304,7 +345,9 @@ export function AgentDetailWorkspace({
     setQaProposalSummary(null);
     setQaRecommendations([]);
     setPromptSyncMode(
-      savedSetupState ? detectPromptSyncMode(savedFields.systemPrompt, savedSetupState) : "custom"
+      savedSetupState
+        ? detectPromptSyncMode(savedFields.systemPrompt, savedSetupState, promptEnvironment)
+        : "custom"
     );
   }
 
@@ -366,6 +409,9 @@ export function AgentDetailWorkspace({
                 qaProposalSummary={qaProposalSummary}
                 qaRecommendations={qaRecommendations}
                 salesforceIntegrationNotice={salesforceIntegrationNotice}
+                hubspotIntegrationNotice={hubspotIntegrationNotice}
+                gmailIntegrationNotice={gmailIntegrationNotice}
+                googleCalendarIntegrationNotice={googleCalendarIntegrationNotice}
                 onChange={handleFieldChange}
               />
             }
@@ -446,6 +492,3 @@ export function AgentDetailWorkspace({
     </div>
   );
 }
-
-
-

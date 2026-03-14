@@ -1,5 +1,36 @@
-﻿import { NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { z } from "zod";
+
+function isLoopbackHostname(hostname: string): boolean {
+  return (
+    hostname === "localhost" ||
+    hostname === "127.0.0.1" ||
+    hostname === "host.docker.internal"
+  );
+}
+
+function isAllowedLocalDevOrigin(origin: string, requestOrigin: string): boolean {
+  if (process.env.NODE_ENV === "production") {
+    return false;
+  }
+
+  let parsedOrigin: URL;
+  let parsedRequestOrigin: URL;
+
+  try {
+    parsedOrigin = new URL(origin);
+    parsedRequestOrigin = new URL(requestOrigin);
+  } catch {
+    return false;
+  }
+
+  return (
+    parsedOrigin.protocol === parsedRequestOrigin.protocol &&
+    parsedOrigin.port === parsedRequestOrigin.port &&
+    isLoopbackHostname(parsedOrigin.hostname) &&
+    isLoopbackHostname(parsedRequestOrigin.hostname)
+  );
+}
 
 export function hasValidOrigin(request: Request): boolean {
   const origin = request.headers.get("origin");
@@ -8,7 +39,8 @@ export function hasValidOrigin(request: Request): boolean {
     return false;
   }
 
-  return origin === new URL(request.url).origin;
+  const requestOrigin = new URL(request.url).origin;
+  return origin === requestOrigin || isAllowedLocalDevOrigin(origin, requestOrigin);
 }
 
 export function hasValidFetchSite(request: Request): boolean {

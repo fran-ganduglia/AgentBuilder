@@ -1,11 +1,15 @@
-import { redirect } from "next/navigation";
+﻿import { redirect } from "next/navigation";
 import { AgentCreationWizard } from "@/components/agents/wizard/agent-creation-wizard";
+import { createWhatsAppConnectionView } from "@/lib/agents/whatsapp-connection";
 import { canEditAgents } from "@/lib/auth/agent-access";
 import { getSession } from "@/lib/auth/get-session";
+import { getPrimaryGoogleIntegration } from "@/lib/db/google-integrations";
+import { getPrimaryHubSpotIntegration } from "@/lib/db/hubspot-integrations";
+import { getOrganizationPlanName } from "@/lib/db/organization-plans";
 import { getPrimarySalesforceIntegration } from "@/lib/db/salesforce-integrations";
 import { getPrimaryWhatsAppIntegration } from "@/lib/db/whatsapp-integrations";
+import { getGoogleSurfaceOperationalView } from "@/lib/integrations/google-workspace";
 import { getIntegrationOperationalView } from "@/lib/integrations/metadata";
-import { createWhatsAppConnectionView } from "@/lib/agents/whatsapp-connection";
 
 export default async function NewAgentPage() {
   const session = await getSession();
@@ -18,10 +22,17 @@ export default async function NewAgentPage() {
     redirect("/unauthorized");
   }
 
-  const [whatsappIntegrationResult, salesforceIntegrationResult] = await Promise.all([
+  const [whatsappIntegrationResult, salesforceIntegrationResult, hubspotIntegrationResult, googleIntegrationResult, planResult] = await Promise.all([
     getPrimaryWhatsAppIntegration(session.organizationId),
     getPrimarySalesforceIntegration(session.organizationId),
+    getPrimaryHubSpotIntegration(session.organizationId),
+    getPrimaryGoogleIntegration(session.organizationId),
+    getOrganizationPlanName(session.organizationId),
   ]);
+  const googleIntegration = googleIntegrationResult.data;
+  const gmailView = getGoogleSurfaceOperationalView(googleIntegration, "gmail");
+
+  const planName = planResult.data ?? "trial";
 
   return (
     <div className="mx-auto max-w-6xl space-y-8 pb-10">
@@ -30,14 +41,20 @@ export default async function NewAgentPage() {
           Crear agente con wizard guiado
         </h1>
         <p className="mt-2 max-w-3xl text-sm text-slate-500">
-          Empieza por el ecosistema que quieres preparar, revisa un tutorial corto y elige un template listo para dejar guardado el onboarding del agente en borrador.
+          Define el proposito del agente, combina areas de negocio e integraciones y crea un borrador con alcance claro desde el inicio, sin sobreprometer ejecucion que todavia no exista.
         </p>
       </div>
 
       <AgentCreationWizard
-        role={session.role}
         whatsappConnection={createWhatsAppConnectionView(whatsappIntegrationResult.data)}
         salesforceOperationalView={getIntegrationOperationalView(salesforceIntegrationResult.data)}
+        hubspotOperationalView={getIntegrationOperationalView(hubspotIntegrationResult.data)}
+        gmailOperationalView={gmailView}
+        googleCalendarOperationalView={getGoogleSurfaceOperationalView(
+          googleIntegration,
+          "google_calendar"
+        )}
+        planName={planName}
       />
     </div>
   );

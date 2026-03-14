@@ -8,7 +8,7 @@ import {
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { createServiceSupabaseClient } from "@/lib/supabase/service";
 import type { Channel, Conversation, ConversationStatus } from "@/types/app";
-import type { TablesInsert } from "@/types/database";
+import type { Json, TablesInsert } from "@/types/database";
 
 type DbResult<T> = { data: T | null; error: string | null; created?: boolean };
 type ConversationInsert = TablesInsert<"conversations">;
@@ -61,7 +61,7 @@ export async function createConversation(
     initiated_by: initiatedBy,
     channel: options.channel ?? "web",
     status: options.status ?? "active",
-    metadata: options.metadata ?? null,
+    metadata: (options.metadata ?? null) as Json,
     external_id: options.externalId ?? null,
     ...(options.startedAt ? { started_at: options.startedAt } : {}),
     ...(options.endedAt ? { ended_at: options.endedAt } : {}),
@@ -274,6 +274,17 @@ export async function updateConversationMetadata(
   return { data, error: null };
 }
 
+export async function incrementConversationMessageCount(
+  conversationId: string,
+  organizationId: string
+): Promise<void> {
+  const supabase = createServiceSupabaseClient();
+  await supabase.rpc("increment_conversation_message_count", {
+    p_id: conversationId,
+    p_org_id: organizationId,
+  });
+}
+
 export async function listConversations(
   agentId: string,
   organizationId: string,
@@ -296,3 +307,4 @@ export async function listConversations(
 
   return { data, error: null, created: false };
 }
+

@@ -54,6 +54,25 @@ export async function getAgentToolById(
   return { data, error: null };
 }
 
+export async function listAgentToolsWithServiceRole(
+  agentId: string,
+  organizationId: string
+): Promise<DbResult<AgentTool[]>> {
+  const supabase = createServiceSupabaseClient();
+  const { data, error } = await supabase
+    .from("agent_tools")
+    .select("*")
+    .eq("agent_id", agentId)
+    .eq("organization_id", organizationId)
+    .order("created_at", { ascending: true });
+
+  if (error) {
+    return { data: null, error: error.message };
+  }
+
+  return { data: data ?? [], error: null };
+}
+
 export async function upsertAgentTool(
   input: UpsertAgentToolInput
 ): Promise<DbResult<AgentTool>> {

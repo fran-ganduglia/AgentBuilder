@@ -2537,6 +2537,183 @@ export type Database = {
           },
         ]
       }
+      approval_items: {
+        Row: {
+          action: string
+          agent_id: string
+          context: Json
+          created_at: string
+          expires_at: string
+          id: string
+          organization_id: string
+          payload_summary: Json
+          provider: string
+          requested_by: string | null
+          resolution_note: string | null
+          resolved_at: string | null
+          resolved_by: string | null
+          risk_level: string
+          status: string
+          summary: string
+          updated_at: string
+          workflow_run_id: string
+          workflow_step_id: string
+        }
+        Insert: {
+          action: string
+          agent_id: string
+          context?: Json
+          created_at?: string
+          expires_at: string
+          id?: string
+          organization_id: string
+          payload_summary?: Json
+          provider: string
+          requested_by?: string | null
+          resolution_note?: string | null
+          resolved_at?: string | null
+          resolved_by?: string | null
+          risk_level?: string
+          status?: string
+          summary: string
+          updated_at?: string
+          workflow_run_id: string
+          workflow_step_id: string
+        }
+        Update: {
+          action?: string
+          agent_id?: string
+          context?: Json
+          created_at?: string
+          expires_at?: string
+          id?: string
+          organization_id?: string
+          payload_summary?: Json
+          provider?: string
+          requested_by?: string | null
+          resolution_note?: string | null
+          resolved_at?: string | null
+          resolved_by?: string | null
+          risk_level?: string
+          status?: string
+          summary?: string
+          updated_at?: string
+          workflow_run_id?: string
+          workflow_step_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "approval_items_agent_id_organization_id_fkey"
+            columns: ["agent_id", "organization_id"]
+            isOneToOne: false
+            referencedRelation: "agents"
+            referencedColumns: ["id", "organization_id"]
+          },
+          {
+            foreignKeyName: "approval_items_requested_by_organization_id_fkey"
+            columns: ["requested_by", "organization_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id", "organization_id"]
+          },
+          {
+            foreignKeyName: "approval_items_resolved_by_organization_id_fkey"
+            columns: ["resolved_by", "organization_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id", "organization_id"]
+          },
+          {
+            foreignKeyName: "approval_items_workflow_run_id_organization_id_fkey"
+            columns: ["workflow_run_id", "organization_id"]
+            isOneToOne: false
+            referencedRelation: "workflow_runs"
+            referencedColumns: ["id", "organization_id"]
+          },
+          {
+            foreignKeyName: "approval_items_workflow_step_id_organization_id_fkey"
+            columns: ["workflow_step_id", "organization_id"]
+            isOneToOne: false
+            referencedRelation: "workflow_steps"
+            referencedColumns: ["id", "organization_id"]
+          },
+        ]
+      }
+      provider_budget_allocations: {
+        Row: {
+          consumed_at: string | null
+          created_at: string
+          decision: string
+          expires_at: string | null
+          id: string
+          metadata: Json
+          method_key: string
+          organization_id: string
+          provider: string
+          released_at: string | null
+          reserved_at: string
+          status: string
+          units: number
+          updated_at: string
+          window_key: string
+          workflow_run_id: string
+          workflow_step_id: string
+        }
+        Insert: {
+          consumed_at?: string | null
+          created_at?: string
+          decision: string
+          expires_at?: string | null
+          id?: string
+          metadata?: Json
+          method_key: string
+          organization_id: string
+          provider: string
+          released_at?: string | null
+          reserved_at?: string
+          status?: string
+          units?: number
+          updated_at?: string
+          window_key: string
+          workflow_run_id: string
+          workflow_step_id: string
+        }
+        Update: {
+          consumed_at?: string | null
+          created_at?: string
+          decision?: string
+          expires_at?: string | null
+          id?: string
+          metadata?: Json
+          method_key?: string
+          organization_id?: string
+          provider?: string
+          released_at?: string | null
+          reserved_at?: string
+          status?: string
+          units?: number
+          updated_at?: string
+          window_key?: string
+          workflow_run_id?: string
+          workflow_step_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "provider_budget_allocations_workflow_run_id_organization_id_fkey"
+            columns: ["workflow_run_id", "organization_id"]
+            isOneToOne: false
+            referencedRelation: "workflow_runs"
+            referencedColumns: ["id", "organization_id"]
+          },
+          {
+            foreignKeyName: "provider_budget_allocations_workflow_step_id_organization_id_fkey"
+            columns: ["workflow_step_id", "organization_id"]
+            isOneToOne: false
+            referencedRelation: "workflow_steps"
+            referencedColumns: ["id", "organization_id"]
+          },
+        ]
+      }
       webhook_deliveries: {
         Row: {
           attempts: number | null
@@ -2593,6 +2770,196 @@ export type Database = {
           },
         ]
       }
+      workflow_runs: {
+        Row: {
+          agent_id: string
+          automation_preset: string
+          conversation_id: string | null
+          created_at: string
+          created_by: string | null
+          current_step_id: string | null
+          failure_code: string | null
+          failure_message: string | null
+          finished_at: string | null
+          id: string
+          last_transition_at: string
+          metadata: Json
+          organization_id: string
+          started_at: string | null
+          status: string
+          trigger_event_type: string | null
+          trigger_source: string
+          updated_at: string
+          workflow_template_id: string | null
+        }
+        Insert: {
+          agent_id: string
+          automation_preset: string
+          conversation_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          current_step_id?: string | null
+          failure_code?: string | null
+          failure_message?: string | null
+          finished_at?: string | null
+          id?: string
+          last_transition_at?: string
+          metadata?: Json
+          organization_id: string
+          started_at?: string | null
+          status?: string
+          trigger_event_type?: string | null
+          trigger_source: string
+          updated_at?: string
+          workflow_template_id?: string | null
+        }
+        Update: {
+          agent_id?: string
+          automation_preset?: string
+          conversation_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          current_step_id?: string | null
+          failure_code?: string | null
+          failure_message?: string | null
+          finished_at?: string | null
+          id?: string
+          last_transition_at?: string
+          metadata?: Json
+          organization_id?: string
+          started_at?: string | null
+          status?: string
+          trigger_event_type?: string | null
+          trigger_source?: string
+          updated_at?: string
+          workflow_template_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "workflow_runs_agent_id_organization_id_fkey"
+            columns: ["agent_id", "organization_id"]
+            isOneToOne: false
+            referencedRelation: "agents"
+            referencedColumns: ["id", "organization_id"]
+          },
+          {
+            foreignKeyName: "workflow_runs_conversation_id_organization_id_fkey"
+            columns: ["conversation_id", "organization_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id", "organization_id"]
+          },
+          {
+            foreignKeyName: "workflow_runs_created_by_organization_id_fkey"
+            columns: ["created_by", "organization_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id", "organization_id"]
+          },
+          {
+            foreignKeyName: "workflow_runs_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      workflow_steps: {
+        Row: {
+          action: string
+          approval_policy: string
+          approval_timeout_ms: number | null
+          attempt: number
+          compensation_action: string | null
+          compensation_status: string
+          created_at: string
+          error_code: string | null
+          error_message: string | null
+          finished_at: string | null
+          id: string
+          idempotency_key: string
+          input_payload: Json
+          is_required: boolean
+          max_attempts: number
+          organization_id: string
+          output_payload: Json | null
+          provider: string
+          provider_request_key: string | null
+          queued_at: string
+          started_at: string | null
+          status: string
+          step_id: string
+          step_index: number
+          updated_at: string
+          workflow_run_id: string
+        }
+        Insert: {
+          action: string
+          approval_policy?: string
+          approval_timeout_ms?: number | null
+          attempt?: number
+          compensation_action?: string | null
+          compensation_status?: string
+          created_at?: string
+          error_code?: string | null
+          error_message?: string | null
+          finished_at?: string | null
+          id?: string
+          idempotency_key: string
+          input_payload?: Json
+          is_required?: boolean
+          max_attempts?: number
+          organization_id: string
+          output_payload?: Json | null
+          provider: string
+          provider_request_key?: string | null
+          queued_at?: string
+          started_at?: string | null
+          status?: string
+          step_id: string
+          step_index: number
+          updated_at?: string
+          workflow_run_id: string
+        }
+        Update: {
+          action?: string
+          approval_policy?: string
+          approval_timeout_ms?: number | null
+          attempt?: number
+          compensation_action?: string | null
+          compensation_status?: string
+          created_at?: string
+          error_code?: string | null
+          error_message?: string | null
+          finished_at?: string | null
+          id?: string
+          idempotency_key?: string
+          input_payload?: Json
+          is_required?: boolean
+          max_attempts?: number
+          organization_id?: string
+          output_payload?: Json | null
+          provider?: string
+          provider_request_key?: string | null
+          queued_at?: string
+          started_at?: string | null
+          status?: string
+          step_id?: string
+          step_index?: number
+          updated_at?: string
+          workflow_run_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "workflow_steps_workflow_run_id_organization_id_fkey"
+            columns: ["workflow_run_id", "organization_id"]
+            isOneToOne: false
+            referencedRelation: "workflow_runs"
+            referencedColumns: ["id", "organization_id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
@@ -2627,6 +2994,20 @@ export type Database = {
       }
       get_user_organization_id: { Args: never; Returns: string }
       get_user_role: { Args: never; Returns: string }
+      increment_usage_messages: {
+        Args: {
+          p_organization_id: string
+          p_agent_id: string
+          p_period_start: string
+          p_period_end: string
+          p_llm_provider: string
+        }
+        Returns: number
+      }
+      increment_conversation_message_count: {
+        Args: { p_id: string; p_org_id: string }
+        Returns: undefined
+      }
       search_document_chunks: {
         Args: {
           p_agent_id: string

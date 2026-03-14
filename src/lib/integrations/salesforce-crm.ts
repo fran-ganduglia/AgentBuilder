@@ -26,9 +26,27 @@ type LookupApiRecord = {
   Priority?: string;
   StageName?: string;
   CloseDate?: string;
-  Amount?: number;
+  CreatedDate?: string;
+  Amount?: number | string | null;
   Account?: { Name?: string };
   Contact?: { Name?: string; Email?: string };
+};
+
+type AccountQueryRecord = {
+  Id?: string;
+  Name?: string;
+};
+
+type AggregateQueryRecord = {
+  StageName?: string | null;
+  expr0?: number | string | null;
+  expr1?: number | string | null;
+};
+
+type QueryResponse<TRecord> = {
+  records?: TRecord[];
+  totalSize?: number;
+  done?: boolean;
 };
 
 type CreateResponse = {
@@ -58,6 +76,37 @@ export type SalesforceLookupResult = {
   requestId: string | null;
 };
 
+export type SalesforceLeadListItem = {
+  id: string;
+  name: string;
+  company: string | null;
+  email: string | null;
+  phone: string | null;
+  status: string | null;
+  createdDate: string | null;
+  url: string;
+};
+
+export type SalesforceLeadListResult = {
+  leads: SalesforceLeadListItem[];
+  requestId: string | null;
+};
+
+export type SalesforcePipelineStageSummary = {
+  stageName: string;
+  count: number;
+  amountTotal: number;
+};
+
+export type SalesforcePipelineSummaryResult = {
+  stages: SalesforcePipelineStageSummary[];
+  total: {
+    count: number;
+    amountTotal: number;
+  };
+  requestId: string | null;
+};
+
 export type SalesforceMutationResult = {
   id: string;
   url: string;
@@ -84,6 +133,23 @@ function sanitizeSearchTerm(rawQuery: string): string {
 
 function buildSearchQuery(rawQuery: string, objectClause: string): string {
   return `FIND {${sanitizeSearchTerm(rawQuery)}} IN ALL FIELDS RETURNING ${objectClause}`;
+}
+
+function escapeSoqlString(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+}
+
+function normalizeAmount(value: number | string | null | undefined): number {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  return 0;
 }
 
 function mapLookupRecord(record: LookupApiRecord, instanceUrl: string): SalesforceLookupRecord | null {
@@ -118,6 +184,25 @@ function mapLookupRecord(record: LookupApiRecord, instanceUrl: string): Salesfor
   };
 }
 
+export function mapSalesforceLeadListRecord(record: LookupApiRecord, instanceUrl: string): SalesforceLeadListItem | null {
+  if (!record.Id) {
+    return null;
+  }
+
+  const fallbackName = [record.FirstName, record.LastName].filter(Boolean).join(" ") || record.Name || record.Id;
+
+  return {
+    id: record.Id,
+    name: record.Name ?? fallbackName,
+    company: record.Company ?? null,
+    email: record.Email ?? null,
+    phone: record.Phone ?? null,
+    status: record.Status ?? null,
+    createdDate: record.CreatedDate ?? null,
+    url: buildRecordUrl(instanceUrl, "Lead", record.Id),
+  };
+}
+
 function assertCreatedObject(response: CreateResponse, objectType: string): string {
   if (response.success && response.id) {
     return response.id;
@@ -130,24 +215,60 @@ function assertCreatedObject(response: CreateResponse, objectType: string): stri
   });
 }
 
+type SoslSearchResponse = {
+  searchRecords?: LookupApiRecord[];
+};
+
+function extractSearchRecords(data: SoslSearchResponse | LookupApiRecord[]): LookupApiRecord[] {
+  if (Array.isArray(data)) {
+    return data;
+  }
+
+  if (data && Array.isArray(data.searchRecords)) {
+    return data.searchRecords;
+  }
+
+  return [];
+}
+
+async function executeSoqlQuery<TRecord>(
+  credentials: SalesforceCredentials,
+  soql: string,
+  context: SalesforceProviderContext
+): Promise<{ records: TRecord[]; requestId: string | null }> {
+  const response = await requestSalesforce<QueryResponse<TRecord>>(
+    credentials,
+    `/query/?q=${encodeURIComponent(soql)}`,
+    { method: "GET" },
+    context
+  );
+
+  return {
+    records: Array.isArray(response.data.records) ? response.data.records : [],
+    requestId: response.requestId,
+  };
+}
+
 async function executeLookup(
   credentials: SalesforceCredentials,
   input: { query: string; limit?: number },
   objectClauseTemplate: string,
   context: SalesforceProviderContext
 ): Promise<SalesforceLookupResult> {
-  const limit = Math.min(Math.max(input.limit ?? 3, 1), 5);
+  const limit = Math.min(Math.max(input.limit ?? 3, 1), 10);
   const objectClause = objectClauseTemplate.replaceAll("{limit}", String(limit));
   const search = buildSearchQuery(input.query, objectClause);
-  const response = await requestSalesforce<LookupApiRecord[]>(
+  const response = await requestSalesforce<SoslSearchResponse | LookupApiRecord[]>(
     credentials,
     `/search/?q=${encodeURIComponent(search)}`,
     { method: "GET" },
     context
   );
 
+  const records = extractSearchRecords(response.data);
+
   return {
-    records: response.data
+    records: records
       .map((record) => mapLookupRecord(record, credentials.instanceUrl))
       .filter((record): record is SalesforceLookupRecord => record !== null),
     requestId: response.requestId,
@@ -202,6 +323,104 @@ async function executeUpdate(
   };
 }
 
+async function executeDelete(
+  credentials: SalesforceCredentials,
+  objectType: string,
+  recordId: string,
+  context: SalesforceProviderContext
+): Promise<SalesforceMutationResult> {
+  const response = await requestSalesforce<Record<string, never>>(
+    credentials,
+    `/sobjects/${objectType}/${recordId}`,
+    {
+      method: "DELETE",
+    },
+    context
+  );
+
+  return {
+    id: recordId,
+    url: buildRecordUrl(credentials.instanceUrl, objectType, recordId),
+    requestId: response.requestId,
+  };
+}
+
+export function buildSalesforceLeadRecentSoql(input: { limit?: number; createdAfter?: string }): string {
+  const limit = Math.min(Math.max(input.limit ?? 10, 1), 25);
+  const filters = input.createdAfter ? [`CreatedDate >= ${input.createdAfter}T00:00:00Z`] : [];
+  const whereClause = filters.length > 0 ? ` WHERE ${filters.join(" AND ")}` : "";
+
+  return [
+    "SELECT Id, Name, FirstName, LastName, Company, Email, Phone, Status, CreatedDate",
+    `FROM Lead${whereClause}`,
+    "ORDER BY CreatedDate DESC",
+    `LIMIT ${limit}`,
+  ].join(" ");
+}
+
+export function buildSalesforceLeadByStatusSoql(input: { status: string; limit?: number }): string {
+  const limit = Math.min(Math.max(input.limit ?? 10, 1), 25);
+  return [
+    "SELECT Id, Name, FirstName, LastName, Company, Email, Phone, Status, CreatedDate",
+    `FROM Lead WHERE Status = '${escapeSoqlString(input.status)}'`,
+    "ORDER BY CreatedDate DESC",
+    `LIMIT ${limit}`,
+  ].join(" ");
+}
+
+export function buildSalesforceOpenPipelineStageSoql(): string {
+  return [
+    "SELECT StageName, COUNT(Id), SUM(Amount)",
+    "FROM Opportunity",
+    "WHERE IsClosed = false",
+    "GROUP BY StageName",
+    "ORDER BY StageName ASC",
+  ].join(" ");
+}
+
+export function buildSalesforceOpenPipelineTotalSoql(): string {
+  return [
+    "SELECT COUNT(Id), SUM(Amount)",
+    "FROM Opportunity",
+    "WHERE IsClosed = false",
+  ].join(" ");
+}
+
+export function resolveSalesforceAccountMatch(records: AccountQueryRecord[], accountName: string): { accountId: string } {
+  if (records.length === 1 && records[0]?.Id) {
+    return { accountId: records[0].Id };
+  }
+
+  if (records.length === 0) {
+    throw new ProviderRequestError({
+      provider: "salesforce",
+      message: `No encontre una cuenta llamada \"${accountName}\". Indica el accountId o un nombre exacto.`,
+      statusCode: 400,
+    });
+  }
+
+  throw new ProviderRequestError({
+    provider: "salesforce",
+    message: `Hay varias cuentas llamadas \"${accountName}\". Indica el accountId o un nombre mas especifico.`,
+    statusCode: 400,
+  });
+}
+
+async function resolveSalesforceAccountId(
+  credentials: SalesforceCredentials,
+  accountName: string,
+  context: SalesforceProviderContext
+): Promise<string> {
+  const soql = [
+    "SELECT Id, Name",
+    `FROM Account WHERE Name = '${escapeSoqlString(accountName)}'`,
+    "ORDER BY Name ASC",
+    "LIMIT 3",
+  ].join(" ");
+  const response = await executeSoqlQuery<AccountQueryRecord>(credentials, soql, context);
+  return resolveSalesforceAccountMatch(response.records, accountName).accountId;
+}
+
 export async function lookupSalesforceLeadOrContact(
   credentials: SalesforceCredentials,
   input: { query: string; limit?: number },
@@ -213,6 +432,38 @@ export async function lookupSalesforceLeadOrContact(
     "Lead(Id,Name,Company,Email,Phone LIMIT {limit}), Contact(Id,Name,Email,Phone,Account.Name LIMIT {limit})",
     context
   );
+}
+
+export async function listSalesforceLeadsRecent(
+  credentials: SalesforceCredentials,
+  input: { limit?: number; createdAfter?: string },
+  context: SalesforceProviderContext
+): Promise<SalesforceLeadListResult> {
+  const soql = buildSalesforceLeadRecentSoql(input);
+  const response = await executeSoqlQuery<LookupApiRecord>(credentials, soql, context);
+
+  return {
+    leads: response.records
+      .map((record) => mapSalesforceLeadListRecord(record, credentials.instanceUrl))
+      .filter((record): record is SalesforceLeadListItem => record !== null),
+    requestId: response.requestId,
+  };
+}
+
+export async function listSalesforceLeadsByStatus(
+  credentials: SalesforceCredentials,
+  input: { status: string; limit?: number },
+  context: SalesforceProviderContext
+): Promise<SalesforceLeadListResult> {
+  const soql = buildSalesforceLeadByStatusSoql(input);
+  const response = await executeSoqlQuery<LookupApiRecord>(credentials, soql, context);
+
+  return {
+    leads: response.records
+      .map((record) => mapSalesforceLeadListRecord(record, credentials.instanceUrl))
+      .filter((record): record is SalesforceLeadListItem => record !== null),
+    requestId: response.requestId,
+  };
 }
 
 export async function lookupSalesforceAccounts(
@@ -237,6 +488,32 @@ export async function lookupSalesforceCases(
   context: SalesforceProviderContext
 ): Promise<SalesforceLookupResult> {
   return executeLookup(credentials, input, "Case(Id,CaseNumber,Subject,Status,Priority,Account.Name,Contact.Email LIMIT {limit})", context);
+}
+
+export async function summarizeSalesforcePipeline(
+  credentials: SalesforceCredentials,
+  context: SalesforceProviderContext
+): Promise<SalesforcePipelineSummaryResult> {
+  const [stageResponse, totalResponse] = await Promise.all([
+    executeSoqlQuery<AggregateQueryRecord>(credentials, buildSalesforceOpenPipelineStageSoql(), context),
+    executeSoqlQuery<AggregateQueryRecord>(credentials, buildSalesforceOpenPipelineTotalSoql(), context),
+  ]);
+
+  const stages = stageResponse.records.map((record) => ({
+    stageName: record.StageName ?? "Sin etapa",
+    count: normalizeAmount(record.expr0),
+    amountTotal: normalizeAmount(record.expr1),
+  }));
+  const totalRecord = totalResponse.records[0] ?? null;
+
+  return {
+    stages,
+    total: {
+      count: totalRecord ? normalizeAmount(totalRecord.expr0) : 0,
+      amountTotal: totalRecord ? normalizeAmount(totalRecord.expr1) : 0,
+    },
+    requestId: stageResponse.requestId ?? totalResponse.requestId,
+  };
 }
 
 export async function createSalesforceTask(
@@ -267,6 +544,35 @@ export async function createSalesforceLead(
     Email: input.email ?? undefined,
     Phone: input.phone ?? undefined,
     Description: input.description ?? undefined,
+  }, context);
+}
+
+export async function updateSalesforceLead(
+  credentials: SalesforceCredentials,
+  input: { leadId: string; status?: string; rating?: string; description?: string },
+  context: SalesforceProviderContext
+): Promise<SalesforceMutationResult> {
+  return executeUpdate(credentials, "Lead", input.leadId, {
+    Status: input.status ?? undefined,
+    Rating: input.rating ?? undefined,
+    Description: input.description ?? undefined,
+  }, context);
+}
+
+export async function createSalesforceContact(
+  credentials: SalesforceCredentials,
+  input: { lastName: string; firstName?: string; email?: string; phone?: string; title?: string; accountId?: string; accountName?: string },
+  context: SalesforceProviderContext
+): Promise<SalesforceMutationResult> {
+  const accountId = input.accountId ?? (input.accountName ? await resolveSalesforceAccountId(credentials, input.accountName, context) : undefined);
+
+  return executeCreate(credentials, "Contact", {
+    FirstName: input.firstName ?? undefined,
+    LastName: input.lastName,
+    Email: input.email ?? undefined,
+    Phone: input.phone ?? undefined,
+    Title: input.title ?? undefined,
+    AccountId: accountId ?? undefined,
   }, context);
 }
 
@@ -312,4 +618,15 @@ export async function updateSalesforceOpportunity(
     NextStep: input.nextStep ?? undefined,
     Description: input.description ?? undefined,
   }, context);
+}
+
+export async function deleteSalesforceObject(
+  credentials: SalesforceCredentials,
+  input: {
+    objectType: "Contact" | "Task";
+    recordId: string;
+  },
+  context: SalesforceProviderContext
+): Promise<SalesforceMutationResult> {
+  return executeDelete(credentials, input.objectType, input.recordId, context);
 }
