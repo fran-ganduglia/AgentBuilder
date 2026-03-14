@@ -80,10 +80,57 @@ async function runTimeoutTest(): Promise<void> {
   assert.equal(result.state.tokenGeneration, 3);
 }
 
+async function runLockErrorFallbackTest(): Promise<void> {
+  let refreshCalls = 0;
+
+  const result = await coordinateIntegrationRefresh({
+    provider: "google",
+    integrationId: "integration-4",
+    loadState: async () => ({ tokenGeneration: 4, authStatus: "ok" }),
+    refresh: async () => {
+      refreshCalls += 1;
+    },
+    lockStore: {
+      acquire: async () => {
+        throw new Error("Tiempo de espera agotado en Redis");
+      },
+      release: async () => true,
+    },
+    onLockError: "refresh_without_lock",
+  });
+
+  assert.deepEqual(result, { kind: "winner" });
+  assert.equal(refreshCalls, 1);
+}
+
+async function runReleaseErrorIgnoredTest(): Promise<void> {
+  let refreshCalls = 0;
+
+  const result = await coordinateIntegrationRefresh({
+    provider: "hubspot",
+    integrationId: "integration-5",
+    loadState: async () => ({ tokenGeneration: 5, authStatus: "ok" }),
+    refresh: async () => {
+      refreshCalls += 1;
+    },
+    lockStore: {
+      acquire: async () => true,
+      release: async () => {
+        throw new Error("Tiempo de espera agotado en Redis");
+      },
+    },
+  });
+
+  assert.deepEqual(result, { kind: "winner" });
+  assert.equal(refreshCalls, 1);
+}
+
 async function main(): Promise<void> {
   await runWinnerTest();
   await runFollowerTest();
   await runTimeoutTest();
+  await runLockErrorFallbackTest();
+  await runReleaseErrorIgnoredTest();
   console.log("refresh-coordination checks passed");
 }
 

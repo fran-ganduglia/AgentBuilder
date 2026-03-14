@@ -349,7 +349,7 @@ export async function dismissPendingChatForm(input: {
     input.conversation.id,
     input.agentId,
     input.organizationId,
-    { pending_chat_form: null },
+    { pending_chat_form: null, pending_crm_action: null, pending_tool_action: null },
     { useServiceRole: true }
   );
 

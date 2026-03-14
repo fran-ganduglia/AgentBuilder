@@ -67,6 +67,7 @@ Contrato operativo minimo:
 - `worker` escucha `event_queue:notify` y ademas ejecuta un sweep completo cada 30 segundos
 - el proceso expone `GET /health` en `$PORT` y soporta `SIGTERM`/`SIGINT`
 - las rutas `/api/workers/*` quedan como compatibilidad/legado; Railway pasa a ser el scheduler principal
+- las respuestas de `/api/workers/*` exponen `x-agentbuilder-worker-mode=compatibility` y `x-agentbuilder-worker-scheduler=railway-primary` para hacer visible el estado de cutover
 
 Runbook concreto de despliegue y cutover: `RAILWAY_PHASE1_RUNBOOK.md`
 

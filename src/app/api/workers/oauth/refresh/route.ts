@@ -10,7 +10,13 @@ import { refreshGoogleAccessToken } from "@/lib/integrations/google";
 import { refreshHubSpotAccessToken } from "@/lib/integrations/hubspot";
 import { coordinateIntegrationRefresh } from "@/lib/integrations/refresh-coordination";
 import { createServiceSupabaseClient } from "@/lib/supabase/service";
-import { areWorkersEnabled, getWorkersDisabledResponse, validateCronRequest } from "@/lib/workers/auth";
+import {
+  areWorkersEnabled,
+  getWorkerUnauthorizedResponse,
+  getWorkersDisabledResponse,
+  validateCronRequest,
+  withWorkerCompatibilityHeaders,
+} from "@/lib/workers/auth";
 
 const REFRESH_BEFORE_EXPIRY_MS = 30 * 60 * 1000;
 const BATCH_LIMIT = 10;
@@ -82,6 +88,7 @@ async function refreshHubSpotRow(row: ExpiringIntegrationRow): Promise<boolean> 
   const coordination = await coordinateIntegrationRefresh({
     provider: "hubspot",
     integrationId: row.id,
+    onLockError: "refresh_without_lock",
     loadState: async () => {
       const stateResult = await getHubSpotRefreshState(row.id, row.organization_id);
       return stateResult.data ?? { tokenGeneration: 0, authStatus: null };
@@ -130,6 +137,7 @@ async function refreshGoogleRow(row: ExpiringIntegrationRow): Promise<boolean> {
   const coordination = await coordinateIntegrationRefresh({
     provider: "google",
     integrationId: row.id,
+    onLockError: "refresh_without_lock",
     loadState: async () => {
       const stateResult = await getGoogleRefreshState(row.id, row.organization_id);
       return stateResult.data ?? { tokenGeneration: 0, authStatus: null };
@@ -213,7 +221,7 @@ async function processBatch(
 
 export async function GET(request: Request) {
   if (!validateCronRequest(request)) {
-    return NextResponse.json({ error: "No autorizado" }, { status: 401 });
+    return getWorkerUnauthorizedResponse();
   }
 
   if (!areWorkersEnabled()) {
@@ -226,7 +234,7 @@ export async function GET(request: Request) {
   ]);
 
   if (expiringHubSpot.length === 0 && expiringGoogle.length === 0) {
-    return new NextResponse(null, { status: 204 });
+    return withWorkerCompatibilityHeaders(new NextResponse(null, { status: 204 }));
   }
 
   const [hubspotStats, googleStats] = await Promise.all([
@@ -234,10 +242,10 @@ export async function GET(request: Request) {
     processBatch("google", expiringGoogle),
   ]);
 
-  return NextResponse.json({
+  return withWorkerCompatibilityHeaders(NextResponse.json({
     data: {
       hubspot: hubspotStats,
       google: googleStats,
     },
-  });
+  }));
 }

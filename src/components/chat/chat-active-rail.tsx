@@ -59,6 +59,7 @@ export function ChatActiveRail({
         summary={state.summary}
         disabled={disabled}
         onConfirm={() => onConfirm?.()}
+        onDismiss={onDismiss}
         surfaceLabel="Rail persistente"
       />
     );

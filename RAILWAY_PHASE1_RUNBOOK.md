@@ -81,6 +81,7 @@ Validar en logs de `worker`:
 - arranque de health server
 - suscripcion Redis a `event_queue:notify`
 - procesamiento de batches `events`, `rag` o `webhooks`
+- las invocaciones HTTP de compatibilidad a `/api/workers/*` deben responder headers `x-agentbuilder-worker-mode=compatibility` y `x-agentbuilder-worker-scheduler=railway-primary`
 
 Casos a probar:
 

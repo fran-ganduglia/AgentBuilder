@@ -1,5 +1,11 @@
 import { NextResponse } from "next/server";
-import { areWorkersEnabled, getWorkersDisabledResponse, validateCronRequest } from "@/lib/workers/auth";
+import {
+  areWorkersEnabled,
+  getWorkerUnauthorizedResponse,
+  getWorkersDisabledResponse,
+  validateCronRequest,
+  withWorkerCompatibilityHeaders,
+} from "@/lib/workers/auth";
 import { createServiceSupabaseClient } from "@/lib/supabase/service";
 import { readConversationMetadata } from "@/lib/chat/conversation-metadata";
 import { updateConversationMetadata } from "@/lib/db/conversations";
@@ -119,7 +125,7 @@ async function sendBroadcast(conversation: IdleWhatsAppConversation): Promise<vo
 
 export async function GET(request: Request) {
   if (!validateCronRequest(request)) {
-    return NextResponse.json({ error: "No autorizado" }, { status: 401 });
+    return getWorkerUnauthorizedResponse();
   }
 
   if (!areWorkersEnabled()) {
@@ -129,7 +135,7 @@ export async function GET(request: Request) {
   const idle = await listIdleWhatsAppConversations();
 
   if (idle.length === 0) {
-    return new NextResponse(null, { status: 204 });
+    return withWorkerCompatibilityHeaders(new NextResponse(null, { status: 204 }));
   }
 
   let processed = 0;
@@ -153,5 +159,5 @@ export async function GET(request: Request) {
     }
   }
 
-  return NextResponse.json({ data: { processed, failed } });
+  return withWorkerCompatibilityHeaders(NextResponse.json({ data: { processed, failed } }));
 }

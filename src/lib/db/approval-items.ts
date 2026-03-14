@@ -425,5 +425,32 @@ export async function resolveApprovalItem(
     });
   }
 
+  // Clear pending_crm_action from conversation metadata so the chat rail
+  // does not re-show the confirmation panel after resolve/reject.
+  const context = current.context as Record<string, unknown> | null;
+  const conversationId = typeof context?.["conversation_id"] === "string"
+    ? context["conversation_id"]
+    : null;
+
+  if (conversationId) {
+    const { data: conv } = await supabase
+      .from("conversations")
+      .select("metadata")
+      .eq("id", conversationId)
+      .eq("organization_id", input.organizationId)
+      .maybeSingle();
+
+    if (conv) {
+      const currentMeta = (conv.metadata as Record<string, unknown>) ?? {};
+      await supabase
+        .from("conversations")
+        .update({
+          metadata: { ...currentMeta, pending_crm_action: null, pending_tool_action: null },
+        })
+        .eq("id", conversationId)
+        .eq("organization_id", input.organizationId);
+    }
+  }
+
   return { data: data ?? null, error: null };
 }

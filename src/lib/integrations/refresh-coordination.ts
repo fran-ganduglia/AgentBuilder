@@ -10,6 +10,8 @@ export type RefreshCoordinationResult =
   | { kind: "follower"; state: RefreshObservedState }
   | { kind: "timeout"; state: RefreshObservedState };
 
+export type RefreshLockErrorStrategy = "throw" | "refresh_without_lock" | "timeout";
+
 export type RefreshLockStore = {
   acquire: (key: string, token: string, ttlSeconds: number) => Promise<boolean>;
   release: (key: string, token: string) => Promise<boolean>;
@@ -48,25 +50,43 @@ export async function coordinateIntegrationRefresh(input: {
   lockTtlSeconds?: number;
   pollIntervalMs?: number;
   maxWaitMs?: number;
+  onLockError?: RefreshLockErrorStrategy;
 }): Promise<RefreshCoordinationResult> {
   const lockStore = input.lockStore ?? await getDefaultRedisLockStore();
   const lockTtlSeconds = input.lockTtlSeconds ?? DEFAULT_LOCK_TTL_SECONDS;
   const pollIntervalMs = input.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
   const maxWaitMs = input.maxWaitMs ?? DEFAULT_MAX_WAIT_MS;
+  const onLockError = input.onLockError ?? "throw";
   const initialState = await input.loadState();
   const lockKey = buildIntegrationRefreshLockKey(
     input.provider,
     input.integrationId
   );
   const lockToken = randomUUID();
-  const acquired = await lockStore.acquire(lockKey, lockToken, lockTtlSeconds);
+  let acquired = false;
+
+  try {
+    acquired = await lockStore.acquire(lockKey, lockToken, lockTtlSeconds);
+  } catch (error) {
+    if (onLockError === "refresh_without_lock") {
+      await input.refresh();
+      return { kind: "winner" };
+    }
+
+    if (onLockError === "timeout") {
+      const latestState = await input.loadState();
+      return { kind: "timeout", state: latestState };
+    }
+
+    throw error;
+  }
 
   if (acquired) {
     try {
       await input.refresh();
       return { kind: "winner" };
     } finally {
-      await lockStore.release(lockKey, lockToken);
+      await lockStore.release(lockKey, lockToken).catch(() => false);
     }
   }
 

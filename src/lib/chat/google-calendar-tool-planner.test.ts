@@ -26,7 +26,7 @@ const calendarWriteConfig: GoogleCalendarAgentToolConfig = {
 };
 
 async function runValidWindowTests(): Promise<void> {
-  const tomorrowDecision = planGoogleCalendarToolAction({
+  const tomorrowDecision = await planGoogleCalendarToolAction({
     config: calendarConfig,
     latestUserMessage: "Que eventos tengo manana?",
     recentMessages: [{ role: "user", content: "Que eventos tengo manana?" }],
@@ -46,7 +46,7 @@ async function runValidWindowTests(): Promise<void> {
       new Date(tomorrowDecision.input.startIso).getTime()
   );
 
-  const weekDecision = planGoogleCalendarToolAction({
+  const weekDecision = await planGoogleCalendarToolAction({
     config: calendarConfig,
     latestUserMessage: "Mostrame mi disponibilidad esta semana",
     recentMessages: [{ role: "user", content: "Mostrame mi disponibilidad esta semana" }],
@@ -63,7 +63,7 @@ async function runValidWindowTests(): Promise<void> {
 }
 
 async function runProximosDiasTest(): Promise<void> {
-  const decision = planGoogleCalendarToolAction({
+  const decision = await planGoogleCalendarToolAction({
     config: calendarConfig,
     latestUserMessage: "Mostrame mis eventos de los proximos 3 dias",
     recentMessages: [{ role: "user", content: "Mostrame mis eventos de los proximos 3 dias" }],
@@ -84,7 +84,7 @@ async function runProximosDiasTest(): Promise<void> {
   assert.ok(spanDays >= 2 && spanDays <= 3, `Expected ~3 day span, got ${spanDays} days`);
 
   // also test with accent
-  const accentDecision = planGoogleCalendarToolAction({
+  const accentDecision = await planGoogleCalendarToolAction({
     config: calendarConfig,
     latestUserMessage: "Tengo algo en los próximos 5 días?",
     recentMessages: [{ role: "user", content: "Tengo algo en los próximos 5 días?" }],
@@ -96,7 +96,7 @@ async function runProximosDiasTest(): Promise<void> {
 }
 
 async function runMissingWindowTest(): Promise<void> {
-  const decision = planGoogleCalendarToolAction({
+  const decision = await planGoogleCalendarToolAction({
     config: calendarConfig,
     latestUserMessage: "Que tengo en el calendario?",
     recentMessages: [{ role: "user", content: "Que tengo en el calendario?" }],
@@ -108,7 +108,7 @@ async function runMissingWindowTest(): Promise<void> {
 }
 
 async function runActionNotAllowedTest(): Promise<void> {
-  const decision = planGoogleCalendarToolAction({
+  const decision = await planGoogleCalendarToolAction({
     config: {
       ...calendarConfig,
       allowed_actions: ["list_events"],
@@ -123,7 +123,7 @@ async function runActionNotAllowedTest(): Promise<void> {
 }
 
 async function runMissingTimezoneTest(): Promise<void> {
-  const decision = planGoogleCalendarToolAction({
+  const decision = await planGoogleCalendarToolAction({
     config: calendarConfig,
     latestUserMessage: "Que eventos tengo manana?",
     recentMessages: [{ role: "user", content: "Que eventos tengo manana?" }],
@@ -272,7 +272,7 @@ async function runSetupAutofillTests(): Promise<void> {
 }
 
 async function runAmbiguousEventDisambiguationTest(): Promise<void> {
-  const decision = planGoogleCalendarToolAction({
+  const decision = await planGoogleCalendarToolAction({
     config: calendarWriteConfig,
     latestUserMessage: "Cancela la reunion de hoy",
     recentMessages: [{ role: "user", content: "Cancela la reunion de hoy" }],
@@ -302,7 +302,7 @@ async function runAmbiguousEventDisambiguationTest(): Promise<void> {
 }
 
 async function runTimeBasedEventDisambiguationTest(): Promise<void> {
-  const decision = planGoogleCalendarToolAction({
+  const decision = await planGoogleCalendarToolAction({
     config: calendarWriteConfig,
     latestUserMessage: "Reprograma la reunion de las 10 a 12:30 a 13:30",
     recentMessages: [
@@ -332,7 +332,7 @@ async function runTimeBasedEventDisambiguationTest(): Promise<void> {
 }
 
 async function runOrdinalEventDisambiguationTest(): Promise<void> {
-  const decision = planGoogleCalendarToolAction({
+  const decision = await planGoogleCalendarToolAction({
     config: calendarWriteConfig,
     latestUserMessage: "Cancela el segundo evento",
     recentMessages: [{ role: "user", content: "Cancela el segundo evento" }],
@@ -360,7 +360,7 @@ async function runOrdinalEventDisambiguationTest(): Promise<void> {
 }
 
 async function runCreateEventStructuredFieldsTest(): Promise<void> {
-  const decision = planGoogleCalendarToolAction({
+  const decision = await planGoogleCalendarToolAction({
     config: calendarWriteConfig,
     latestUserMessage:
       'Crea una reunion "Kickoff ACME" manana de 15 a 16 en sala Norte con juan@example.com y ana@example.com descripcion: revisar alcance y proximos pasos',
@@ -390,7 +390,7 @@ async function runCreateEventStructuredFieldsTest(): Promise<void> {
 }
 
 async function runRescheduleStructuredFieldsTest(): Promise<void> {
-  const decision = planGoogleCalendarToolAction({
+  const decision = await planGoogleCalendarToolAction({
     config: calendarWriteConfig,
     latestUserMessage:
       "Reprograma el segundo evento a 12:30 a 13:30 en Zoom con ops@example.com nota: mover por conflicto de agenda",
@@ -428,7 +428,7 @@ async function runRescheduleStructuredFieldsTest(): Promise<void> {
 }
 
 async function runRescheduleFlexibleFieldsTest(): Promise<void> {
-  const decision = planGoogleCalendarToolAction({
+  const decision = await planGoogleCalendarToolAction({
     config: calendarWriteConfig,
     latestUserMessage:
       "Reprograma el segundo evento a 12:30 a 13:30 por Zoom suma una nota que diga mover por conflicto con ops@example.com",
@@ -465,7 +465,7 @@ async function runRescheduleFlexibleFieldsTest(): Promise<void> {
 }
 
 async function runCancelEventContextFieldsTest(): Promise<void> {
-  const decision = planGoogleCalendarToolAction({
+  const decision = await planGoogleCalendarToolAction({
     config: calendarWriteConfig,
     latestUserMessage:
       "Cancela el segundo evento por Zoom suma una nota que diga avisar al equipo con ops@example.com",

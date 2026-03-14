@@ -1,6 +1,12 @@
 import { NextResponse } from "next/server";
 import { isAgentDeletionDeadlineReached } from "@/lib/agents/agent-deletion";
-import { areWorkersEnabled, getWorkersDisabledResponse, validateCronRequest } from "@/lib/workers/auth";
+import {
+  areWorkersEnabled,
+  getWorkerUnauthorizedResponse,
+  getWorkersDisabledResponse,
+  validateCronRequest,
+  withWorkerCompatibilityHeaders,
+} from "@/lib/workers/auth";
 import { createServiceSupabaseClient } from "@/lib/supabase/service";
 import { processDeletionRequest } from "@/lib/workers/deletion-processor";
 
@@ -64,7 +70,7 @@ async function claimDeletionRequests(limit: number): Promise<DeletionRow[]> {
 
 export async function GET(request: Request) {
   if (!validateCronRequest(request)) {
-    return NextResponse.json({ error: "No autorizado" }, { status: 401 });
+    return getWorkerUnauthorizedResponse();
   }
 
   if (!areWorkersEnabled()) {
@@ -73,7 +79,7 @@ export async function GET(request: Request) {
 
   const rows = await claimDeletionRequests(CLAIM_BATCH_LIMIT);
   if (rows.length === 0) {
-    return NextResponse.json({ data: { processed: 0 } });
+    return withWorkerCompatibilityHeaders(NextResponse.json({ data: { processed: 0 } }));
   }
 
   console.info("worker.deletion.claimed", { count: rows.length });
@@ -108,5 +114,5 @@ export async function GET(request: Request) {
 
   console.info("worker.deletion.finished", { processed, failed });
 
-  return NextResponse.json({ data: { processed, failed } });
+  return withWorkerCompatibilityHeaders(NextResponse.json({ data: { processed, failed } }));
 }

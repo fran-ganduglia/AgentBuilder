@@ -6,6 +6,7 @@ import type {
   GoogleCalendarAgentToolConfig,
   GoogleCalendarReadToolAction,
 } from "@/lib/integrations/google-agent-tools";
+import { extractCalendarIntent } from "./calendar-intent-extractor";
 
 type PlannerMessage = {
   role: "user" | "assistant";
@@ -296,30 +297,37 @@ function resolveReadAction(
   return listAllowed ? "list_events" : null;
 }
 
+function normalizeForWriteMatch(text: string): string {
+  return text
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+}
+
 function resolveWriteAction(
   latestUserMessage: string,
   config: GoogleCalendarAgentToolConfig
 ): ExecuteGoogleCalendarWriteToolInput["action"] | null {
+  const normalized = normalizeForWriteMatch(latestUserMessage);
+
   if (
     config.allowed_actions.includes("reschedule_event") &&
-    /\breprogram|mover|pasar .* otra hora|cambiar .* horario|cambiar .* fecha/i.test(
-      latestUserMessage
-    )
+    /\b(reprogram|mover|pasar|cambiar).*(hora|horario|fecha)/i.test(normalized)
   ) {
     return "reschedule_event";
   }
 
   if (
     config.allowed_actions.includes("cancel_event") &&
-    /\bcancel|anula|suspende|borra .* evento/i.test(latestUserMessage)
+    /\b(cancel|anula|suspende|borra)\b/i.test(normalized)
   ) {
     return "cancel_event";
   }
 
   if (
     config.allowed_actions.includes("create_event") &&
-    /\bcrear|agenda|agendar|programa|programar|organiza|organizar\b/i.test(
-      latestUserMessage
+    /\b(crear|crear|agenda|agendar|programa|programar|organiza|organizar|agregar|agrega|agregame|agregame|anadir|anade|anadi|pon\s|poner|crear)\b/i.test(
+      normalized
     )
   ) {
     return "create_event";
@@ -434,6 +442,20 @@ function buildMissingTitleMessage(): string {
   return 'Para crear el evento necesito un titulo claro, por ejemplo: "crea una reunion \"Demo ACME\" manana de 15 a 16".';
 }
 
+const EVENT_TYPE_DEFAULTS: Array<{ pattern: RegExp; title: string }> = [
+  { pattern: /reuni[oó]n/i, title: "Reunión" },
+  { pattern: /llamada/i, title: "Llamada" },
+  { pattern: /meeting/i, title: "Meeting" },
+  { pattern: /cita/i, title: "Cita" },
+  { pattern: /evento/i, title: "Evento" },
+];
+
+const TITLE_NOISE_WORDS = new Set([
+  "a", "al", "con", "de", "del", "el", "en", "es", "la", "las", "le",
+  "lo", "los", "me", "mi", "mis", "no", "nos", "para", "por", "que",
+  "se", "si", "su", "te", "un", "una", "unas", "unos", "y",
+]);
+
 function extractTitle(latestUserMessage: string): string | null {
   const quoted =
     latestUserMessage.match(/"([^"]{3,200})"/)?.[1]?.trim() ??
@@ -444,15 +466,40 @@ function extractTitle(latestUserMessage: string): string | null {
     return quoted;
   }
 
-  const normalized = latestUserMessage
-    .replace(/\b(crea|crear|agenda|agendar|programa|programar|organiza|organizar)\b/gi, "")
-    .replace(/\b(reunion|reunión|evento|llamada|meeting)\b/gi, "")
-    .replace(/\b(hoy|manana|mañana|pasado manana|pasado mañana|esta semana)\b/gi, "")
+  // Normalize accents so accent variants of verbs are also removed
+  const accentStripped = latestUserMessage
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+
+  const cleaned = accentStripped
+    // Remove action verbs (accents already stripped)
+    .replace(/\b(agrega(?:me|r)?|ana(?:de|di|dir)|crea(?:r)?|agenda(?:r)?|programa(?:r)?|organiza(?:r)?|pon(?:er)?|agrega)\b/gi, "")
+    // Remove event type nouns
+    .replace(/\b(reunion|reuniones|evento|eventos|llamada|llamadas|meeting|meetings|cita|citas)\b/gi, "")
+    // Remove temporal references
+    .replace(/\b(hoy|manana|pasado\s+manana|esta\s+semana|lunes|martes|miercoles|jueves|viernes|sabado|domingo)\b/gi, "")
+    // Remove time expressions: "a las 9", "de 15 a 16", "a las 9 de la manana"
+    .replace(/\b(?:a\s+las?\s+)?\d{1,2}(?::\d{2})?\s*(?:am|pm)?\s*(?:de\s+la\s+(?:manana|tarde|noche))?\b/gi, "")
     .replace(/\bde\s+\d{1,2}(?::\d{2})?\s*(?:a|hasta)\s+\d{1,2}(?::\d{2})?\b/gi, "")
-    .replace(/\s+/g, " ")
+    // Remove leftover noise tokens
+    .split(/\s+/)
+    .map((token) => token.trim())
+    .filter((token) => token.length > 0 && !TITLE_NOISE_WORDS.has(token.toLowerCase()))
+    .join(" ")
     .trim();
 
-  return normalized.length >= 3 ? normalized.slice(0, 200) : null;
+  if (cleaned.length >= 3) {
+    return cleaned.slice(0, 200);
+  }
+
+  // Infer a sensible default from the event type word in the original message
+  for (const { pattern, title } of EVENT_TYPE_DEFAULTS) {
+    if (pattern.test(latestUserMessage)) {
+      return title;
+    }
+  }
+
+  return null;
 }
 
 function extractTimeRange(
@@ -527,8 +574,26 @@ function extractTimeRange(
     ...latestUserMessage.matchAll(/\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/gi),
   ];
 
-  if (timeMatches.length < 2) {
+  if (timeMatches.length === 0) {
     return null;
+  }
+
+  if (timeMatches.length === 1) {
+    const startMatch = timeMatches[0];
+    const startHour = normalizeHour(
+      Number(startMatch[1]),
+      startMatch[3]?.toLowerCase() ?? null
+    );
+    const startMinute = Number(startMatch[2] ?? "0");
+    const startMs = zonedDateTimeToUtcMs(
+      { ...baseDate, hour: startHour, minute: startMinute, second: 0, millisecond: 0 },
+      timezone
+    );
+    const endMs = zonedDateTimeToUtcMs(
+      { ...baseDate, hour: startHour + 1, minute: startMinute, second: 0, millisecond: 0 },
+      timezone
+    );
+    return { startIso: new Date(startMs).toISOString(), endIso: new Date(endMs).toISOString() };
   }
 
   const startMatch = timeMatches[timeMatches.length - 2];
@@ -1026,18 +1091,29 @@ export function parseRecentGoogleCalendarToolContext(
   };
 }
 
-export function planGoogleCalendarToolAction(input: {
+export async function planGoogleCalendarToolAction(input: {
   config: GoogleCalendarAgentToolConfig;
   latestUserMessage: string;
   recentMessages: PlannerMessage[];
   recentToolContext?: string;
   timezone: string | null;
   now?: Date;
-}): GoogleCalendarPlannerDecision {
-  const writeAction = resolveWriteAction(
-    input.latestUserMessage,
-    input.config
-  );
+}): Promise<GoogleCalendarPlannerDecision> {
+  const intent = await extractCalendarIntent(input.latestUserMessage);
+
+  const isLlmWriteAction =
+    intent.action === "create_event" ||
+    intent.action === "reschedule_event" ||
+    intent.action === "cancel_event";
+
+  const writeAction: ExecuteGoogleCalendarWriteToolInput["action"] | null =
+    isLlmWriteAction
+      ? (input.config.allowed_actions.includes(
+            intent.action as ExecuteGoogleCalendarWriteToolInput["action"]
+          )
+          ? (intent.action as ExecuteGoogleCalendarWriteToolInput["action"])
+          : null)
+      : resolveWriteAction(input.latestUserMessage, input.config);
 
   if (writeAction) {
     if (!input.timezone || !isValidTimezone(input.timezone)) {
@@ -1231,11 +1307,14 @@ export function planGoogleCalendarToolAction(input: {
     };
   }
 
-  const action = resolveReadAction(
-    input.latestUserMessage,
-    input.config,
-    input.recentToolContext
-  );
+  const isLlmReadAction =
+    intent.action === "list_events" || intent.action === "check_availability";
+
+  const action: GoogleCalendarReadToolAction | null = isLlmReadAction
+    ? (input.config.allowed_actions.includes(intent.action as GoogleCalendarReadToolAction)
+        ? (intent.action as GoogleCalendarReadToolAction)
+        : null)
+    : resolveReadAction(input.latestUserMessage, input.config, input.recentToolContext);
 
   if (!action) {
     return { kind: "respond" };

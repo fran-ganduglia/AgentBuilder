@@ -1,5 +1,11 @@
 ﻿import { NextResponse } from "next/server";
-import { areWorkersEnabled, getWorkersDisabledResponse, validateCronRequest } from "@/lib/workers/auth";
+import {
+  areWorkersEnabled,
+  getWorkerUnauthorizedResponse,
+  getWorkersDisabledResponse,
+  validateCronRequest,
+  withWorkerCompatibilityHeaders,
+} from "@/lib/workers/auth";
 import { claimEvents, markDone, markFailed } from "@/lib/workers/event-queue";
 import {
   processAgentUpdated,
@@ -11,7 +17,7 @@ import {
 
 export async function GET(request: Request) {
   if (!validateCronRequest(request)) {
-    return NextResponse.json({ error: "No autorizado" }, { status: 401 });
+    return getWorkerUnauthorizedResponse();
   }
 
   if (!areWorkersEnabled()) {
@@ -24,7 +30,7 @@ export async function GET(request: Request) {
   );
 
   if (events.length === 0) {
-    return new NextResponse(null, { status: 204 });
+    return withWorkerCompatibilityHeaders(new NextResponse(null, { status: 204 }));
   }
 
   let processed = 0;
@@ -58,5 +64,5 @@ export async function GET(request: Request) {
     }
   }
 
-  return NextResponse.json({ data: { processed, failed } });
+  return withWorkerCompatibilityHeaders(NextResponse.json({ data: { processed, failed } }));
 }
