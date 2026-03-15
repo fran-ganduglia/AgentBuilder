@@ -1,4 +1,11 @@
-export type ChatQuickActionProvider = "salesforce" | "hubspot";
+import type { AgentScope } from "@/lib/agents/agent-scope";
+
+export type ChatQuickActionProvider =
+  | "salesforce"
+  | "gmail"
+  | "google_calendar"
+  | "whatsapp";
+
 export type ChatQuickActionSection =
   | "assistant"
   | "crm_shortcuts"
@@ -15,8 +22,9 @@ export type ChatQuickAction = {
 };
 
 export type ResolvedChatQuickActions = {
-  isCrmChat: boolean;
-  provider: ChatQuickActionProvider | null;
+  hasConnectedIntegrations: boolean;
+  agentScope: AgentScope | null;
+  providers: ChatQuickActionProvider[];
   isRuntimeUsable: boolean;
   assistance: ChatQuickAction[];
   crmShortcuts: ChatQuickAction[];
@@ -46,8 +54,9 @@ function dedupeByPrompt(actions: readonly ChatQuickAction[]): ChatQuickAction[] 
 
 export function createEmptyQuickActions(): ResolvedChatQuickActions {
   return {
-    isCrmChat: false,
-    provider: null,
+    hasConnectedIntegrations: false,
+    agentScope: null,
+    providers: [],
     isRuntimeUsable: false,
     assistance: [],
     crmShortcuts: [],
@@ -58,7 +67,7 @@ export function createEmptyQuickActions(): ResolvedChatQuickActions {
 export function getChatEmptyStateQuickActions(
   quickActions: ResolvedChatQuickActions
 ): ChatQuickAction[] {
-  if (!quickActions.isCrmChat) {
+  if (!quickActions.hasConnectedIntegrations) {
     return [];
   }
 
@@ -70,13 +79,15 @@ export function getChatEmptyStateQuickActions(
 export function resolveInlineFallbackQuickActions(
   quickActions: ResolvedChatQuickActions
 ): ChatQuickAction[] {
-  if (!quickActions.isCrmChat) {
+  if (!quickActions.hasConnectedIntegrations) {
     return [];
   }
 
   const prioritized = [
-    quickActions.assistance.find((action) =>
-      action.id.endsWith(":assistant:next-step")
+    quickActions.assistance.find(
+      (action) =>
+        action.id.includes(":assistant:next-step") ||
+        action.label.toLowerCase().includes("siguiente paso")
     ),
     quickActions.templatePlaybook[0],
     quickActions.crmShortcuts[0],

@@ -2,7 +2,12 @@ import { after, NextResponse } from "next/server";
 import { z } from "zod";
 import { setupStateExpectsGmailIntegration } from "@/lib/agents/gmail-agent-integration";
 import { setupStateExpectsGoogleCalendarIntegration } from "@/lib/agents/google-calendar-agent-integration";
-import { isHubSpotTemplateId, isSalesforceTemplateId } from "@/lib/agents/agent-templates";
+import { isSalesforceTemplateId } from "@/lib/agents/agent-templates";
+import {
+  buildAmbiguousScopeResponse,
+  buildOutOfScopeResponse,
+  classifyScopeIntent,
+} from "@/lib/agents/agent-scope";
 import { resolveEffectiveAgentPrompt } from "@/lib/agents/effective-prompt";
 import { readAgentSetupState } from "@/lib/agents/agent-setup-state";
 import { assertAgentAccess } from "@/lib/auth/agent-access";
@@ -10,33 +15,29 @@ import { getSession } from "@/lib/auth/get-session";
 import { resolveConversationChatMode } from "@/lib/chat/conversation-metadata";
 import {
   buildChatFormGuidance,
-  type ChatFormAction,
 } from "@/lib/chat/inline-forms";
-import { maybeActivateChatForm } from "@/lib/chat/chat-form-server";
 import {
   buildGmailPromptInjectionGuardrail,
   orchestrateGoogleGmailForChat,
 } from "@/lib/chat/google-gmail-tool-orchestrator";
 import { orchestrateGoogleCalendarForChat } from "@/lib/chat/google-calendar-tool-orchestrator";
-import { orchestrateHubSpotForChat } from "@/lib/chat/hubspot-tool-orchestrator";
 import { orchestrateSalesforceForChat } from "@/lib/chat/salesforce-tool-orchestrator";
 import { hasReadyDocuments } from "@/lib/db/agent-documents";
 import { getConversationById, getOrCreateConversation } from "@/lib/db/conversations";
 import { insertMessage, insertMessageWithServiceRole, listMessages } from "@/lib/db/messages";
 import { insertPlanLimitNotification } from "@/lib/db/notifications-writer";
 import { formatChunksAsContext, searchChunks } from "@/lib/db/rag";
+import { checkSessionLimitForConversation } from "@/lib/db/session-usage";
 import { recordUsage } from "@/lib/db/usage-writer";
 import { generateEmbedding } from "@/lib/llm/embeddings";
 import { LiteLLMError, sendStreamingChatCompletion } from "@/lib/llm/litellm";
 import { incrementRateLimit } from "@/lib/redis";
 import { getGoogleAgentToolRuntime } from "@/lib/integrations/google-agent-runtime";
-import { createServiceSupabaseClient } from "@/lib/supabase/service";
 import {
   parseJsonRequestBody,
   validateJsonMutationRequest,
 } from "@/lib/utils/request-security";
-import type { Conversation, Organization, Role } from "@/types/app";
-import type { Tables } from "@/types/database";
+import type { Conversation, Role } from "@/types/app";
 
 const CHAT_RATE_LIMIT_MAX_REQUESTS = 30;
 const CHAT_RATE_LIMIT_WINDOW_SECONDS = 60;
@@ -54,9 +55,6 @@ const chatSchema = z.object({
     .max(4000, "El mensaje no puede superar 4000 caracteres"),
 });
 
-type PlanLimits = Pick<Tables<"plans">, "max_messages_month">;
-type UsageRow = Pick<Tables<"usage_records">, "total_messages">;
-type OrganizationPlan = Pick<Organization, "plan_id">;
 type ChatMessage = {
   role: "user" | "assistant";
   content: string;
@@ -82,7 +80,6 @@ type ChatStageTimings = {
   ragMs: number | null;
   persistUserMessageMs: number | null;
   salesforceOrchestrationMs: number | null;
-  hubspotOrchestrationMs: number | null;
   gmailOrchestrationMs: number | null;
   googleCalendarOrchestrationMs: number | null;
   googleRuntimeChecksMs: number | null;
@@ -248,65 +245,6 @@ async function buildRagContext(
   }
 }
 
-async function checkPlanLimits(
-  organizationId: string
-): Promise<{ allowed: boolean; message?: string }> {
-  const serviceClient = createServiceSupabaseClient();
-  const { data: organizationData } = await serviceClient
-    .from("organizations")
-    .select("plan_id")
-    .eq("id", organizationId)
-    .single();
-
-  const organization = organizationData as OrganizationPlan | null;
-
-  if (!organization) {
-    return { allowed: false, message: "No se pudo verificar el plan" };
-  }
-
-  const { data: planData } = await serviceClient
-    .from("plans")
-    .select("max_messages_month")
-    .eq("id", organization.plan_id)
-    .single();
-
-  const plan = planData as PlanLimits | null;
-
-  if (!plan) {
-    return { allowed: false, message: "No se pudo verificar el plan" };
-  }
-
-  if (plan.max_messages_month <= 0) {
-    return { allowed: true };
-  }
-
-  const now = new Date();
-  const periodStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
-  const periodEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString();
-
-  const { data: usageData } = await serviceClient
-    .from("usage_records")
-    .select("total_messages")
-    .eq("organization_id", organizationId)
-    .eq("period_start", periodStart)
-    .eq("period_end", periodEnd);
-
-  const usageRows = (usageData ?? []) as UsageRow[];
-  const totalMessages = usageRows.reduce(
-    (sum, row) => sum + (row.total_messages ?? 0),
-    0
-  );
-
-  if (totalMessages >= plan.max_messages_month) {
-    return {
-      allowed: false,
-      message: `Limite de mensajes alcanzado (${plan.max_messages_month}/mes). Actualiza tu plan para continuar.`,
-    };
-  }
-
-  return { allowed: true };
-}
-
 async function resolveConversation(
   agentId: string,
   organizationId: string,
@@ -360,14 +298,6 @@ async function createImmediateAssistantResponse(input: {
       conversationId: input.conversationId,
       error: assistantInsertResult.error,
     });
-  } else if (assistantInsertResult.data) {
-    await maybeActivateChatForm({
-      agentId: input.agentId,
-      conversationId: input.conversationId,
-      organizationId: input.organizationId,
-      assistantMessageId: assistantInsertResult.data.id,
-      assistantContent: assistantInsertResult.data.content,
-    });
   }
 
   return new Response(input.content, {
@@ -385,10 +315,6 @@ function buildSalesforceOrchestrationFailureMessage(): string {
   return "No pude completar la operacion con Salesforce por un error interno del agente. Revisa la integracion activa, la tool CRM del agente y el system prompt antes de volver a intentarlo.";
 }
 
-function buildHubSpotOrchestrationFailureMessage(): string {
-  return "No pude completar la operacion con HubSpot por un error interno del agente. Revisa la integracion activa, la tool CRM del agente y el system prompt antes de volver a intentarlo.";
-}
-
 function buildSalesforceCapabilityGuidance(): string {
   return [
     "SALESFORCE_CAPABILITY",
@@ -400,25 +326,7 @@ function buildSalesforceCapabilityGuidance(): string {
     "Si mensajes anteriores de esta misma conversacion dijeron lo contrario, tratalos como respuestas previas incorrectas o desactualizadas, no como el estado real actual.",
     "No digas que una busqueda previa no fue real o no fue confiable salvo que TOOL_OUTPUTS o un error backend indiquen explicitamente un fallo real.",
     "Si una consulta no devolvio coincidencias, describelo como falta de resultados o falta de coincidencias, no como ausencia de acceso ni como simulacion.",
-    "Si el usuario habla de crear un lead en HubSpot, recuerda que esa necesidad puede resolverse con objetos como contacto, empresa o deal; no digas que falta tool solo porque el nombre del objeto no sea literal.",
-    "Si el usuario habla de crear un lead en HubSpot, recuerda que esa necesidad puede resolverse con objetos como contacto, empresa o deal; no digas que falta tool solo porque el nombre del objeto no sea literal.",
     "</salesforce_capability>",
-  ].join("\n");
-}
-
-function buildHubSpotCapabilityGuidance(): string {
-  return [
-    "HUBSPOT_CAPABILITY",
-    "<hubspot_capability>",
-    "Este agente tiene acceso operativo a las tools de HubSpot habilitadas para esta organizacion.",
-    "Si el usuario pregunta si tienes acceso a HubSpot o al CRM, responde que si tienes acceso operativo via integracion backend de este agente.",
-    "Si en este turno todavia no ejecutaste una consulta, aclara que el acceso existe aunque aun no hayas leido o escrito datos en esta respuesta.",
-    "No afirmes que no tienes acceso al CRM mientras esta integracion siga usable.",
-    "Si mensajes anteriores de esta misma conversacion dijeron lo contrario, tratalos como respuestas previas incorrectas o desactualizadas, no como el estado real actual.",
-    "No digas que una busqueda previa no fue real o no fue confiable salvo que TOOL_OUTPUTS o un error backend indiquen explicitamente un fallo real.",
-    "Si una consulta no devolvio coincidencias, describelo como falta de resultados o falta de coincidencias, no como ausencia de acceso ni como simulacion.",
-    "Si el usuario habla de crear un lead en HubSpot, recuerda que esa necesidad puede resolverse con objetos como contacto, empresa o deal; no digas que falta tool solo porque el nombre del objeto no sea literal.",
-    "</hubspot_capability>",
   ].join("\n");
 }
 
@@ -460,7 +368,6 @@ export async function POST(request: Request): Promise<Response> {
     ragMs: null,
     persistUserMessageMs: null,
     salesforceOrchestrationMs: null,
-    hubspotOrchestrationMs: null,
     gmailOrchestrationMs: null,
     googleCalendarOrchestrationMs: null,
     googleRuntimeChecksMs: null,
@@ -522,14 +429,6 @@ export async function POST(request: Request): Promise<Response> {
 
   const agentSetupState = readAgentSetupState(agent);
   const executionConfig = resolveExecutionConfig(agent);
-  const planCheck = await checkPlanLimits(session.organizationId);
-
-  if (!planCheck.allowed) {
-    return NextResponse.json(
-      { error: planCheck.message ?? "Limite del plan alcanzado" },
-      { status: 429 }
-    );
-  }
 
   const conversationResult = await resolveConversation(
     agentId,
@@ -551,6 +450,18 @@ export async function POST(request: Request): Promise<Response> {
 
   if (!conversation) {
     return NextResponse.json({ error: "Conversacion no encontrada" }, { status: 404 });
+  }
+
+  const planCheck = await checkSessionLimitForConversation({
+    organizationId: session.organizationId,
+    conversationId: conversation.id,
+  });
+
+  if (!planCheck.allowed) {
+    return NextResponse.json(
+      { error: planCheck.message ?? "Limite del plan alcanzado" },
+      { status: 429 }
+    );
   }
 
   const historyPromise = measureAsync(() =>
@@ -593,21 +504,47 @@ export async function POST(request: Request): Promise<Response> {
   }));
 
   const nextMemory = trimChatMemory([...previousMessages, { role: "user", content }]);
+  const scopeDecision = agentSetupState
+    ? classifyScopeIntent({
+        content,
+        agentScope: agentSetupState.agentScope,
+      })
+    : { decision: "in_scope" as const };
+
+  if (scopeDecision.decision === "ambiguous") {
+    return createImmediateAssistantResponse({
+      agentId,
+      conversationId: conversation.id,
+      organizationId: session.organizationId,
+      chatMode,
+      content: buildAmbiguousScopeResponse(agentSetupState?.agentScope ?? "operations"),
+      nextMemory,
+    });
+  }
+
+  if (scopeDecision.decision === "out_of_scope") {
+    return createImmediateAssistantResponse({
+      agentId,
+      conversationId: conversation.id,
+      organizationId: session.organizationId,
+      chatMode,
+      content: buildOutOfScopeResponse({
+        agentScope: agentSetupState?.agentScope ?? "operations",
+        targetScope: scopeDecision.targetScope,
+      }),
+      nextMemory,
+    });
+  }
 
   let toolContext: string | undefined;
   let hasUsableSalesforceRuntime = false;
-  let hasUsableHubSpotRuntime = false;
   let hasUsableGmailRuntime = false;
   let hasUsableGoogleCalendarRuntime = false;
   let hasConfiguredGmail = false;
   let hasConfiguredGoogleCalendar = false;
-  let salesforceAllowedFormActions: ChatFormAction[] = [];
-  let hubspotAllowedFormActions: ChatFormAction[] = [];
+  let salesforceAllowedFormActions: string[] = [];
   const shouldOrchestrateSalesforce = Boolean(
     agentSetupState && (isSalesforceTemplateId(agentSetupState.template_id) || agentSetupState.integrations.includes("salesforce"))
-  );
-  const shouldOrchestrateHubSpot = Boolean(
-    agentSetupState && (isHubSpotTemplateId(agentSetupState.template_id) || agentSetupState.integrations.includes("hubspot"))
   );
   const shouldOrchestrateGoogleCalendar = Boolean(
     agentSetupState &&
@@ -646,35 +583,6 @@ export async function POST(request: Request): Promise<Response> {
       toolContext = appendToolContext(toolContext, orchestration.toolContext);
       hasUsableSalesforceRuntime = orchestration.hasUsableSalesforceRuntime;
       salesforceAllowedFormActions = orchestration.allowedActions;
-    }
-
-    if (shouldOrchestrateHubSpot) {
-      const { value: orchestration, durationMs } = await measureAsync(() =>
-        orchestrateHubSpotForChat({
-          agent,
-          conversation,
-          organizationId: session.organizationId,
-          userId: session.user.id,
-          latestUserMessage: content,
-          recentMessages: nextMemory,
-        })
-      );
-      stageTimings.hubspotOrchestrationMs = durationMs;
-
-      if (orchestration.kind === "respond_now") {
-        return createImmediateAssistantResponse({
-          agentId,
-          conversationId: conversation.id,
-          organizationId: session.organizationId,
-          chatMode,
-          content: orchestration.content,
-          nextMemory,
-        });
-      }
-
-      toolContext = appendToolContext(toolContext, orchestration.toolContext);
-      hasUsableHubSpotRuntime = orchestration.hasUsableHubSpotRuntime;
-      hubspotAllowedFormActions = orchestration.allowedActions;
     }
 
     if (shouldOrchestrateGmail) {
@@ -769,7 +677,6 @@ export async function POST(request: Request): Promise<Response> {
       setupState: agentSetupState,
       promptEnvironment: {
         salesforceUsable: hasUsableSalesforceRuntime,
-        hubspotUsable: hasUsableHubSpotRuntime,
         gmailConfigured: hasConfiguredGmail,
         gmailRuntimeAvailable: hasUsableGmailRuntime,
         googleCalendarConfigured: hasConfiguredGoogleCalendar,
@@ -786,12 +693,6 @@ export async function POST(request: Request): Promise<Response> {
         ? buildChatFormGuidance({
             provider: "salesforce",
             allowedActions: salesforceAllowedFormActions,
-          })
-        : null,
-      hasUsableHubSpotRuntime
-        ? buildChatFormGuidance({
-            provider: "hubspot",
-            allowedActions: hubspotAllowedFormActions,
           })
         : null,
     ].filter((guidance): guidance is string => Boolean(guidance));
@@ -817,22 +718,13 @@ export async function POST(request: Request): Promise<Response> {
           buildSalesforceCapabilityGuidance(),
         ].join("\n\n");
       }
-
-      if (hasUsableHubSpotRuntime) {
-        executionConfig.systemPrompt = [
-          executionConfig.systemPrompt,
-          buildHubSpotCapabilityGuidance(),
-        ].join("\n\n");
-      }
     }
   } catch (error) {
     const provider = shouldOrchestrateGmail
       ? "gmail"
       : shouldOrchestrateGoogleCalendar
       ? "google_calendar"
-      : shouldOrchestrateHubSpot
-        ? "hubspot"
-        : "salesforce";
+      : "salesforce";
 
     console.error(`chat.${provider}_orchestration_error`, {
       conversationId: conversation.id,
@@ -849,8 +741,6 @@ export async function POST(request: Request): Promise<Response> {
         ? "No pude completar la consulta de Gmail por un error interno del agente. Revisa la integracion Google activa, la tool Gmail del agente y los scopes de metadata antes de volver a intentarlo."
         : shouldOrchestrateGoogleCalendar
         ? "No pude completar la consulta de Google Calendar por un error interno del agente. Revisa la integracion Google activa, la tool Google Calendar del agente y la timezone configurada antes de volver a intentarlo."
-        : shouldOrchestrateHubSpot
-        ? buildHubSpotOrchestrationFailureMessage()
         : buildSalesforceOrchestrationFailureMessage(),
       nextMemory,
     });
@@ -958,14 +848,6 @@ export async function POST(request: Request): Promise<Response> {
           conversationId: convId,
           error: assistantInsertResult.error,
         });
-      } else if (assistantInsertResult.data) {
-        await maybeActivateChatForm({
-          agentId: currentAgentId,
-          conversationId: convId,
-          organizationId: orgId,
-          assistantMessageId: assistantInsertResult.data.id,
-          assistantContent: assistantInsertResult.data.content,
-        });
       }
 
       const usageResult = await recordUsage({
@@ -976,10 +858,10 @@ export async function POST(request: Request): Promise<Response> {
         llmProvider: currentLlmProvider,
       });
 
-      if (usageResult && usageResult.planLimit > 0) {
+      if (usageResult && usageResult.planLimit && usageResult.planLimit > 0) {
         await insertPlanLimitNotification({
           organizationId: orgId,
-          currentUsage: usageResult.totalMessages,
+          currentUsage: usageResult.currentUsage,
           planLimit: usageResult.planLimit,
         });
       }
@@ -1002,10 +884,6 @@ export async function POST(request: Request): Promise<Response> {
     },
   });
 }
-
-
-
-
 
 
 

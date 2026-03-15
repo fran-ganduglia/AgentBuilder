@@ -7,13 +7,14 @@ import {
 import type { Agent } from "@/types/app";
 import type { AgentSetupState } from "@/lib/agents/agent-setup";
 
-export type WorkspaceTab = "setup" | "config" | "knowledge" | "qa";
+export type WorkspaceTab = "setup" | "config" | "knowledge" | "qa" | "automations";
 
 export const TAB_LABELS: Record<WorkspaceTab, string> = {
   setup: "Setup",
   config: "Configuracion",
   knowledge: "Base de conocimiento",
   qa: "QA",
+  automations: "Automatizaciones",
 };
 
 export function cloneSetupState(setupState: AgentSetupState | null): AgentSetupState | null {

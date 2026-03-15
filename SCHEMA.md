@@ -212,12 +212,19 @@ CREATE TABLE plans (
   --   "api_access": false,
   --   "priority_support": false,
   --   "audit_logs_retention_days": 30,
-  --   "allowed_llm_providers": ["openai"],
-  --   "allowed_channels": ["web"],
-  --   "webhooks_enabled": false,
-  --   "agent_versioning": false,
-  --   "max_webhook_endpoints": 0
-  -- }
+--   "allowed_llm_providers": ["openai"],
+--   "allowed_channels": ["web"],
+--   "webhooks_enabled": false,
+--   "agent_versioning": false,
+--   "max_webhook_endpoints": 0,
+--   "public_label": "Starter",
+--   "max_scopes_active": 1,
+--   "max_sessions_month": 300,
+--   "max_integrations_per_agent": null,
+--   "max_active_agents_per_scope": 1,
+--   "workflows_unlimited": true,
+--   "integrations_unlimited": true
+-- }
   is_active             BOOLEAN DEFAULT true,
   created_at            TIMESTAMPTZ DEFAULT NOW(),
   updated_at            TIMESTAMPTZ DEFAULT NOW()
@@ -228,10 +235,11 @@ CREATE TRIGGER trigger_plans_updated_at
   FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
 INSERT INTO plans (name, max_agents, max_users, max_messages_month, price_monthly_usd, features) VALUES
-('trial',      3,   5,     1000,  0.00,  '{"audit_logs_retention_days":7,   "allowed_channels":["web"],                      "allowed_llm_providers":["openai"],                        "webhooks_enabled":false,"agent_versioning":false,"max_webhook_endpoints":0}'),
-('starter',    5,   10,    5000,  29.00, '{"audit_logs_retention_days":30,  "allowed_channels":["web","email"],               "allowed_llm_providers":["openai"],                        "webhooks_enabled":false,"agent_versioning":true, "max_webhook_endpoints":0}'),
-('pro',        20,  50,    50000, 99.00, '{"audit_logs_retention_days":90,  "allowed_channels":["web","email","whatsapp"],     "allowed_llm_providers":["openai","anthropic","gemini"],   "api_access":true,"webhooks_enabled":true,"agent_versioning":true,"max_webhook_endpoints":5}'),
-('enterprise', -1,  -1,   -1,    null,  '{"audit_logs_retention_days":365, "allowed_channels":["web","email","whatsapp"],     "allowed_llm_providers":["openai","anthropic","gemini"],   "api_access":true,"custom_branding":true,"priority_support":true,"webhooks_enabled":true,"agent_versioning":true,"max_webhook_endpoints":-1}');
+('trial',      3,   1,     1000,   0.00, '{"audit_logs_retention_days":7,   "allowed_channels":["web"],                      "allowed_llm_providers":["openai"],                        "webhooks_enabled":false,"agent_versioning":false,"max_webhook_endpoints":0,"public_label":"Trial","max_scopes_active":1,"max_sessions_month":100,"max_integrations_per_agent":1,"max_active_agents_per_scope":1,"workflows_unlimited":false,"integrations_unlimited":false}'),
+('starter',    6,   2,     5000,  39.00, '{"audit_logs_retention_days":30,  "allowed_channels":["web","email"],               "allowed_llm_providers":["openai"],                        "webhooks_enabled":false,"agent_versioning":true, "max_webhook_endpoints":0,"public_label":"Starter","max_scopes_active":1,"max_sessions_month":300,"max_integrations_per_agent":null,"max_active_agents_per_scope":1,"workflows_unlimited":true,"integrations_unlimited":true}'),
+('growth',    12,   5,    50000,  99.00, '{"audit_logs_retention_days":90,  "allowed_channels":["web","email","whatsapp"],     "allowed_llm_providers":["openai","anthropic","gemini"],   "api_access":true,"webhooks_enabled":true,"agent_versioning":true,"max_webhook_endpoints":5,"public_label":"Growth","max_scopes_active":3,"max_sessions_month":1500,"max_integrations_per_agent":null,"max_active_agents_per_scope":1,"workflows_unlimited":true,"integrations_unlimited":true}'),
+('scale',     24,  10,   100000, 249.00, '{"audit_logs_retention_days":180, "allowed_channels":["web","email","whatsapp"],     "allowed_llm_providers":["openai","anthropic","gemini"],   "api_access":true,"webhooks_enabled":true,"agent_versioning":true,"max_webhook_endpoints":10,"public_label":"Scale","max_scopes_active":6,"max_sessions_month":5000,"max_integrations_per_agent":null,"max_active_agents_per_scope":1,"workflows_unlimited":true,"integrations_unlimited":true}'),
+('enterprise', -1,  -1,      -1,   null, '{"audit_logs_retention_days":365, "allowed_channels":["web","email","whatsapp"],     "allowed_llm_providers":["openai","anthropic","gemini"],   "api_access":true,"custom_branding":true,"priority_support":true,"webhooks_enabled":true,"agent_versioning":true,"max_webhook_endpoints":-1,"public_label":"Enterprise","max_scopes_active":null,"max_sessions_month":null,"max_integrations_per_agent":null,"max_active_agents_per_scope":null,"workflows_unlimited":true,"integrations_unlimited":true}');
 ```
 
 ---
@@ -581,7 +589,7 @@ CREATE TABLE agent_tools (
   -- webhook:         { "url": "", "method": "POST", "headers": {} }
   -- web_search:      { "max_results": 3, "safe_search": true }
   -- file_reader:     { "allowed_types": ["pdf","docx"], "max_size_mb": 10 }
-  -- crm:             { "provider": "hubspot" }
+  -- crm:             { "provider": "salesforce" }
   created_at        TIMESTAMPTZ DEFAULT NOW(),
 
   FOREIGN KEY (agent_id, organization_id)

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { AGENT_SCOPE_LABELS } from "@/lib/agents/agent-scope";
 import {
   CHANNEL_LABELS,
   getSetupProgress,
@@ -70,6 +71,9 @@ export function AgentSetupPanel({
                   {isActive ? "Activo" : "Borrador guiado"}
                 </span>
                 <span className="rounded-full bg-sky-50 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.2em] text-sky-700">
+                  Tipo: {AGENT_SCOPE_LABELS[setupState.agentScope]}
+                </span>
+                <span className="rounded-full bg-sky-50 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.2em] text-sky-700">
                   {CHANNEL_LABELS[setupState.channel]}
                 </span>
                 <span className="rounded-full bg-white px-3 py-1 text-[11px] font-bold uppercase tracking-[0.2em] text-slate-600 ring-1 ring-inset ring-slate-200">
@@ -79,7 +83,7 @@ export function AgentSetupPanel({
 
               <h2 className="mt-5 text-2xl font-bold tracking-tight text-slate-950">Onboarding guiado del agente</h2>
               <p className="mt-3 text-sm leading-relaxed text-slate-600">
-                Este checklist queda como borrador local hasta que guardes cambios. Los items obligatorios controlan la activacion y los opcionales pueden quedar para despues.
+                Este checklist queda como borrador local hasta que guardes cambios. El agente opera como {AGENT_SCOPE_LABELS[setupState.agentScope].toLowerCase()} y debe rechazar o derivar pedidos fuera de ese alcance.
               </p>
 
               <div className="mt-5 flex flex-wrap gap-3">

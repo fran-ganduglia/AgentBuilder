@@ -7,8 +7,9 @@ import type { AgentFormErrors, AgentFormFields } from "@/components/agents/agent
 import { AgentToolsPanel } from "@/components/agents/agent-tools-panel";
 import { GmailAgentToolsPanel } from "@/components/agents/gmail-agent-tools-panel";
 import { GoogleCalendarAgentToolsPanel } from "@/components/agents/google-calendar-agent-tools-panel";
-import { HubSpotAgentToolsPanel } from "@/components/agents/hubspot-agent-tools-panel";
 import type { AgentConnectionSummary } from "@/lib/agents/connection-policy";
+import type { AgentSetupState } from "@/lib/agents/agent-setup";
+import type { PromptSyncMode } from "@/lib/agents/agent-templates";
 import type { AgentConnection, Role } from "@/types/app";
 
 type IntegrationNotice = {
@@ -25,11 +26,13 @@ type AgentDetailConfigPanelProps = {
   connectionSummary: AgentConnectionSummary;
   fields: AgentFormFields;
   errors: AgentFormErrors;
+  setupState: AgentSetupState | null;
+  recommendedPrompt: string;
+  promptSyncMode: PromptSyncMode;
   userRole: Role;
   qaProposalSummary: string | null;
   qaRecommendations: string[];
   salesforceIntegrationNotice: IntegrationNotice | null;
-  hubspotIntegrationNotice: IntegrationNotice | null;
   gmailIntegrationNotice: IntegrationNotice | null;
   googleCalendarIntegrationNotice: IntegrationNotice | null;
   onChange: <K extends keyof AgentFormFields>(field: K, value: AgentFormFields[K]) => void;
@@ -78,11 +81,13 @@ export function AgentDetailConfigPanel({
   connectionSummary,
   fields,
   errors,
+  setupState,
+  recommendedPrompt,
+  promptSyncMode,
   userRole,
   qaProposalSummary,
   qaRecommendations,
   salesforceIntegrationNotice,
-  hubspotIntegrationNotice,
   gmailIntegrationNotice,
   googleCalendarIntegrationNotice,
   onChange,
@@ -95,13 +100,6 @@ export function AgentDetailConfigPanel({
         <IntegrationNoticeCard
           eyebrow="Integracion Salesforce pendiente"
           notice={salesforceIntegrationNotice}
-        />
-      ) : null}
-
-      {hubspotIntegrationNotice ? (
-        <IntegrationNoticeCard
-          eyebrow="Integracion HubSpot pendiente"
-          notice={hubspotIntegrationNotice}
         />
       ) : null}
 
@@ -130,7 +128,6 @@ export function AgentDetailConfigPanel({
       ) : null}
 
       <AgentToolsPanel agentId={agentId} canEdit={canEditTools} />
-      <HubSpotAgentToolsPanel agentId={agentId} canEdit={canEditTools} />
       <GmailAgentToolsPanel agentId={agentId} canEdit={canEditTools} />
       <GoogleCalendarAgentToolsPanel agentId={agentId} canEdit={canEditTools} />
 
@@ -158,6 +155,9 @@ export function AgentDetailConfigPanel({
         errors={errors}
         connection={connection}
         connectionSummary={connectionSummary}
+        setupState={setupState}
+        recommendedPrompt={recommendedPrompt}
+        promptSyncMode={promptSyncMode}
         userRole={userRole}
         onChange={onChange}
       />

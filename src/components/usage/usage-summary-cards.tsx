@@ -17,15 +17,15 @@ export function UsageSummaryCards({ usage }: UsageSummaryCardsProps) {
     <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
       <div className="flex flex-col justify-between rounded-xl border border-slate-200 bg-white p-6 shadow-sm transition-all hover:shadow-md">
         <div>
-          <p className="text-[11px] font-bold tracking-widest text-slate-500 uppercase">Mensajes procesados</p>
+          <p className="text-[11px] font-bold tracking-widest text-slate-500 uppercase">Sesiones atendidas</p>
           <p className="mt-3 text-3xl font-black tracking-tight text-slate-900">
-            {formatNumber(usage.totalMessages)}
+            {formatNumber(usage.totalConversations)}
           </p>
         </div>
         <div className="mt-5">
-          <div className="flex items-center justify-between text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">
+          <div className="mb-1.5 flex items-center justify-between text-[11px] font-bold uppercase tracking-wider text-slate-500">
             <span>{usage.usagePercent}% de cuota</span>
-            <span>{formatNumber(usage.planLimit)} MSJs</span>
+            <span>{formatNumber(usage.planLimit)} SES</span>
           </div>
           <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-100 ring-1 ring-inset ring-slate-900/5">
             <div
@@ -78,13 +78,13 @@ export function UsageSummaryCards({ usage }: UsageSummaryCardsProps) {
 
       <div className="flex flex-col justify-between rounded-xl border border-slate-200 bg-white p-6 shadow-sm transition-all hover:shadow-md">
         <div>
-          <p className="text-[11px] font-bold tracking-widest text-slate-500 uppercase">Conversaciones</p>
+          <p className="text-[11px] font-bold tracking-widest text-slate-500 uppercase">Mensajes procesados</p>
           <p className="mt-3 text-3xl font-black tracking-tight text-slate-900">
-            {formatNumber(usage.totalConversations)}
+            {formatNumber(usage.totalMessages)}
           </p>
         </div>
         <div className="mt-5 border-t border-slate-100 pt-3">
-          <p className="text-[11px] font-bold uppercase tracking-widest text-slate-400">Total histórico consolidado</p>
+          <p className="text-[11px] font-bold uppercase tracking-widest text-slate-400">Detalle operativo interno</p>
         </div>
       </div>
     </div>

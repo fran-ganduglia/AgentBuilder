@@ -20,11 +20,11 @@ export async function insertPlanLimitNotification(
 
     const type = percentage >= 100 ? "plan.limit_reached" : "plan.limit_warning";
     const title = percentage >= 100
-      ? "Limite de mensajes alcanzado"
-      : "Uso de mensajes al 80%";
+      ? "Limite de sesiones alcanzado"
+      : "Uso de sesiones al 80%";
     const body = percentage >= 100
-      ? `Has alcanzado el limite de ${input.planLimit} mensajes/mes. Actualiza tu plan para continuar.`
-      : `Has usado ${input.currentUsage} de ${input.planLimit} mensajes disponibles este mes.`;
+      ? `Has alcanzado el limite de ${input.planLimit} sesiones/mes. Actualiza tu plan para seguir atendiendo nuevas conversaciones.`
+      : `Has usado ${input.currentUsage} de ${input.planLimit} sesiones disponibles este mes.`;
 
     const serviceClient = createServiceSupabaseClient();
 

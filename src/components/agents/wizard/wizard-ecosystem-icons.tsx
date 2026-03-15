@@ -26,21 +26,6 @@ export function WizardEcosystemIcon({ ecosystemId, className = "h-7 w-7" }: Wiza
     );
   }
 
-  if (ecosystemId === "hubspot") {
-    return (
-      <svg className={className} viewBox="0 0 32 32" fill="none" aria-hidden="true">
-        <circle cx="16" cy="16" r="3.8" fill="currentColor" />
-        <circle cx="24.2" cy="9" r="2.8" fill="currentColor" opacity="0.7" />
-        <circle cx="24.8" cy="23.2" r="2.8" fill="currentColor" opacity="0.45" />
-        <path d="M19.4 14l3.1-3.1" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
-        <path d="M19.7 18.2 22.8 21" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
-        <path d="M12.8 10.3v-2.8" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
-        <path d="M10.2 7.5h5.2" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
-        <circle cx="12.8" cy="7.5" r="3.2" stroke="currentColor" strokeWidth="2" />
-      </svg>
-    );
-  }
-
   if (ecosystemId === "google_workspace") {
     return (
       <svg className={className} viewBox="0 0 32 32" fill="none" aria-hidden="true">

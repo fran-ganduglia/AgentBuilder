@@ -1,7 +1,6 @@
 import "server-only";
 
 import { enqueueEvent } from "@/lib/db/event-queue";
-import { executeHubSpotToolAction } from "@/lib/integrations/hubspot-agent-runtime";
 import {
   assertGoogleGmailRuntimeUsable,
   executeGoogleGmailWriteToolAction,
@@ -13,7 +12,6 @@ import {
 import { getGoogleAgentToolRuntimeWithServiceRole } from "@/lib/integrations/google-agent-runtime";
 import { executeGoogleGmailWriteToolSchema } from "@/lib/integrations/google-agent-tools";
 import { executeGoogleCalendarWriteToolSchema } from "@/lib/integrations/google-agent-tools";
-import { executeHubSpotCrmToolSchema } from "@/lib/integrations/hubspot-tools";
 import { executeSalesforceToolAction } from "@/lib/integrations/salesforce-agent-runtime";
 import { executeSalesforceCrmToolSchema } from "@/lib/integrations/salesforce-tools";
 import { createServiceSupabaseClient } from "@/lib/supabase/service";
@@ -346,64 +344,6 @@ export async function processWorkflowStepExecution(
   ]);
 
   try {
-    if (step.provider === "hubspot") {
-      const actionInput = executeHubSpotCrmToolSchema.parse(
-        getActionInput(step.input_payload)
-      );
-      const execution = await executeHubSpotToolAction({
-        organizationId: event.organization_id,
-        userId: requestedBy,
-        agentId: run.agent_id,
-        integrationId,
-        actionInput,
-        workflow: {
-          workflowRunId: run.id,
-          workflowStepId: step.id,
-        },
-      });
-
-      if (execution.error || !execution.data) {
-        throw new Error(execution.error ?? "No se pudo ejecutar la accion de HubSpot.");
-      }
-
-      const finishedAt = new Date().toISOString();
-      await supabase
-        .from("workflow_steps")
-        .update({
-          status: "completed",
-          provider_request_key: execution.data.requestId,
-          output_payload: execution.data as unknown as Json,
-          finished_at: finishedAt,
-          error_code: null,
-          error_message: null,
-        })
-        .eq("id", step.id)
-        .eq("organization_id", event.organization_id);
-
-      const decision = decideRunAfterStepCompletion({
-        steps: buildUpdatedEngineSteps(runSteps, step.id, "completed"),
-        currentStepId: step.id,
-      });
-
-      await updateRunAfterDecision({
-        organizationId: event.organization_id,
-        workflowRunId: run.id,
-        fallbackCurrentStepId: step.step_id,
-        decision,
-      });
-
-      if (decision.nextStepToEnqueueId) {
-        await queueWorkflowStepExecution({
-          organizationId: event.organization_id,
-          workflowRunId: run.id,
-          workflowStepId: decision.nextStepToEnqueueId,
-          traceId: step.id,
-        });
-      }
-
-      return;
-    }
-
     if (step.provider === "salesforce") {
       const actionInput = executeSalesforceCrmToolSchema.parse(
         getActionInput(step.input_payload)

@@ -1,7 +1,6 @@
 ﻿import "server-only";
 
 import type { ConversationMetadata } from "@/lib/chat/conversation-metadata";
-import { maybeActivateChatForm } from "@/lib/chat/chat-form-server";
 import { updateConversationMetadata } from "@/lib/db/conversations";
 import { insertMessageWithServiceRole } from "@/lib/db/messages";
 import { insertPlanLimitNotification } from "@/lib/db/notifications-writer";
@@ -40,14 +39,6 @@ export async function persistAssistantReply(
       conversationId: input.conversationId,
       error: assistantInsertResult.error,
     });
-  } else if (assistantInsertResult.data) {
-    await maybeActivateChatForm({
-      agentId: input.agentId,
-      conversationId: input.conversationId,
-      organizationId: input.organizationId,
-      assistantMessageId: assistantInsertResult.data.id,
-      assistantContent: assistantInsertResult.data.content,
-    });
   }
 
   if (input.conversationMetadataPatch) {
@@ -79,10 +70,10 @@ export async function persistAssistantReply(
     llmProvider: input.llmProvider,
   });
 
-  if (usageResult && usageResult.planLimit > 0) {
+  if (usageResult && usageResult.planLimit && usageResult.planLimit > 0) {
     await insertPlanLimitNotification({
       organizationId: input.organizationId,
-      currentUsage: usageResult.totalMessages,
+      currentUsage: usageResult.currentUsage,
       planLimit: usageResult.planLimit,
     });
   }

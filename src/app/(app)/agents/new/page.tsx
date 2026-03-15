@@ -1,10 +1,9 @@
-﻿import { redirect } from "next/navigation";
+import { redirect } from "next/navigation";
 import { AgentCreationWizard } from "@/components/agents/wizard/agent-creation-wizard";
 import { createWhatsAppConnectionView } from "@/lib/agents/whatsapp-connection";
 import { canEditAgents } from "@/lib/auth/agent-access";
 import { getSession } from "@/lib/auth/get-session";
 import { getPrimaryGoogleIntegration } from "@/lib/db/google-integrations";
-import { getPrimaryHubSpotIntegration } from "@/lib/db/hubspot-integrations";
 import { getOrganizationPlanName } from "@/lib/db/organization-plans";
 import { getPrimarySalesforceIntegration } from "@/lib/db/salesforce-integrations";
 import { getPrimaryWhatsAppIntegration } from "@/lib/db/whatsapp-integrations";
@@ -22,10 +21,9 @@ export default async function NewAgentPage() {
     redirect("/unauthorized");
   }
 
-  const [whatsappIntegrationResult, salesforceIntegrationResult, hubspotIntegrationResult, googleIntegrationResult, planResult] = await Promise.all([
+  const [whatsappIntegrationResult, salesforceIntegrationResult, googleIntegrationResult, planResult] = await Promise.all([
     getPrimaryWhatsAppIntegration(session.organizationId),
     getPrimarySalesforceIntegration(session.organizationId),
-    getPrimaryHubSpotIntegration(session.organizationId),
     getPrimaryGoogleIntegration(session.organizationId),
     getOrganizationPlanName(session.organizationId),
   ]);
@@ -48,7 +46,6 @@ export default async function NewAgentPage() {
       <AgentCreationWizard
         whatsappConnection={createWhatsAppConnectionView(whatsappIntegrationResult.data)}
         salesforceOperationalView={getIntegrationOperationalView(salesforceIntegrationResult.data)}
-        hubspotOperationalView={getIntegrationOperationalView(hubspotIntegrationResult.data)}
         gmailOperationalView={gmailView}
         googleCalendarOperationalView={getGoogleSurfaceOperationalView(
           googleIntegration,

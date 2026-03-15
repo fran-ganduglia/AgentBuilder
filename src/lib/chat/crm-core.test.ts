@@ -21,8 +21,8 @@ async function runConfirmationFlowTest(): Promise<void> {
   let executedAction: TestAction | null = null;
 
   const adapter = {
-    provider: "hubspot",
-    toolName: "hubspot_crm",
+    provider: "salesforce",
+    toolName: "salesforce_crm",
     loadRuntime: async () => ({ data: { integration: { id: "integration-1" } }, error: null }),
     isRuntimeUsable: (runtime: TestRuntime) => ({ data: runtime, error: null }),
     planNextAction: async () => ({
@@ -110,8 +110,8 @@ async function runReadOnlyFlowTest(): Promise<void> {
   let executed = 0;
 
   const adapter = {
-    provider: "hubspot",
-    toolName: "hubspot_crm",
+    provider: "salesforce",
+    toolName: "salesforce_crm",
     loadRuntime: async () => ({ data: { integration: { id: "integration-1" } }, error: null }),
     isRuntimeUsable: (runtime: TestRuntime) => ({ data: runtime, error: null }),
     planNextAction: async () => ({

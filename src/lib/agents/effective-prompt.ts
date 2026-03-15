@@ -7,9 +7,7 @@ import {
 } from "@/lib/agents/agent-templates";
 import type { AgentSetupState } from "@/lib/agents/agent-setup";
 import {
-  detectHubSpotPromptConflict,
   detectSalesforcePromptConflict,
-  stripHubSpotPromptConflicts,
   stripSalesforcePromptConflicts,
 } from "@/lib/integrations/salesforce-selection";
 
@@ -40,15 +38,6 @@ function resolveCustomPromptConflict(input: {
       hasConflict: true,
       snippet: salesforceConflict.snippet,
       cleanedPrompt: stripSalesforcePromptConflicts(input.savedPrompt),
-    };
-  }
-
-  const hubspotConflict = detectHubSpotPromptConflict(input.savedPrompt);
-  if (hubspotConflict.hasConflict) {
-    return {
-      hasConflict: true,
-      snippet: hubspotConflict.snippet,
-      cleanedPrompt: stripHubSpotPromptConflicts(input.savedPrompt),
     };
   }
 

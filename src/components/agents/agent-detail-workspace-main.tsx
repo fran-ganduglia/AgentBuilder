@@ -3,6 +3,7 @@
 import { AgentDocumentsPanel } from "@/components/agents/agent-documents-panel";
 import { AgentSetupPanel } from "@/components/agents/agent-setup-panel";
 import { AgentQaPanel } from "@/components/agents/qa/agent-qa-panel";
+import { AutomationList } from "@/components/agents/automations/automation-list";
 import type { WorkspaceTab } from "@/components/agents/agent-detail-workspace-utils";
 import type { AgentSetupChecklistItemStatus, AgentSetupState, PromptBuilderTextField } from "@/lib/agents/agent-setup";
 import type { Agent, AgentConnection } from "@/types/app";
@@ -103,6 +104,16 @@ export function AgentDetailWorkspaceMain({
 
   if (activeTab === "knowledge") {
     return <AgentDocumentsPanel agentId={agentId} initialDocuments={documents} canUpload={canUploadDocuments} />;
+  }
+
+  if (activeTab === "automations") {
+    return (
+      <AutomationList
+        agentId={agentId}
+        agentScope={draftSetupState?.agentScope ?? null}
+        canEdit={canEditAgent}
+      />
+    );
   }
 
   if (connectionSummary.classification === "remote_managed") {

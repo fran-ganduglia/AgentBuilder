@@ -1,7 +1,5 @@
 import "server-only";
 
-import type { HubSpotCompensationAction } from "@/lib/integrations/hubspot-agent-runtime";
-import { executeHubSpotCompensationAction } from "@/lib/integrations/hubspot-agent-runtime";
 import {
   assertGoogleCalendarRuntimeUsable,
   executeGoogleCalendarCompensationAction,
@@ -131,14 +129,6 @@ function buildTrace(
   };
 }
 
-function isHubSpotCompensationAction(
-  value: string | null
-): value is HubSpotCompensationAction {
-  return (
-    value === "archive_created_contact" || value === "archive_created_task"
-  );
-}
-
 function isSalesforceCompensationAction(
   value: string | null
 ): value is SalesforceCompensationAction {
@@ -216,46 +206,6 @@ export async function executeWorkflowCompensations(input: {
 
       if (!providerObjectId) {
         throw new Error("Falta providerObjectId para compensar el step.");
-      }
-
-      if (step.provider === "hubspot") {
-        if (!isHubSpotCompensationAction(step.compensation_action)) {
-          throw new Error("Compensacion de HubSpot no soportada para este step.");
-        }
-
-        const compensation = await executeHubSpotCompensationAction({
-          organizationId: input.organizationId,
-          userId: requestedBy,
-          agentId: input.workflowRun.agent_id,
-          integrationId,
-          compensationAction: step.compensation_action,
-          providerObjectId,
-          workflow: {
-            workflowRunId: input.workflowRun.id,
-            workflowStepId: step.id,
-          },
-        });
-
-        if (compensation.error || !compensation.data) {
-          throw new Error(compensation.error ?? "No se pudo compensar el step de HubSpot.");
-        }
-
-        await persistCompensationTrace({
-          organizationId: input.organizationId,
-          stepId: step.id,
-          status: "completed",
-          previousOutputPayload: step.output_payload,
-          trace: buildTrace({
-            action: step.compensation_action,
-            status: "completed",
-            startedAt,
-            finishedAt: new Date().toISOString(),
-            providerRequestKey: compensation.data.requestId,
-            result: compensation.data as unknown as Record<string, Json>,
-          }),
-        });
-
-        continue;
       }
 
       if (step.provider === "salesforce") {

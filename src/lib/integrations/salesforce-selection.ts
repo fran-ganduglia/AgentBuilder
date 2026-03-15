@@ -30,8 +30,6 @@ export type SalesforcePromptConflict = {
   snippet: string | null;
 };
 
-export type HubSpotPromptConflict = SalesforcePromptConflict;
-
 const CRM_ACCESS_CONFLICT_PATTERNS = [
   /no tengo acceso[\s\S]{0,120}(salesforce|crm|base de datos externa)/i,
   /no estoy conectado[\s\S]{0,120}(salesforce|crm|base de datos externa)/i,
@@ -39,16 +37,6 @@ const CRM_ACCESS_CONFLICT_PATTERNS = [
   /no prometas lecturas ni escrituras reales en Salesforce[^\n]*/i,
   /Si el usuario pide una accion sobre Salesforce[^\n]*explica ese limite[^\n]*/i,
   /No inventes datos del CRM[^\n]*Salesforce[^\n]*/i,
-] as const;
-
-const HUBSPOT_ACCESS_CONFLICT_PATTERNS = [
-  /no tengo acceso[\s\S]{0,120}(hubspot|crm|base de datos externa)/i,
-  /no estoy conectado[\s\S]{0,120}(hubspot|crm|base de datos externa)/i,
-  /no puedo[\s\S]{0,160}(crear|buscar|leer|consultar|actualizar)[\s\S]{0,120}(hubspot|crm|base de datos externa)/i,
-  /no tengo habilitada[\s\S]{0,140}(tool|herramienta)[\s\S]{0,140}(hubspot|crm|contact)/i,
-  /no prometas lecturas ni escrituras reales en HubSpot[^\n]*/i,
-  /Si el usuario pide una accion sobre HubSpot[^\n]*explica ese limite[^\n]*/i,
-  /No inventes datos del CRM[^\n]*HubSpot[^\n]*/i,
 ] as const;
 
 function getCreatedAtTimestamp(value: string | null | undefined): number {
@@ -206,10 +194,3 @@ export function detectSalesforcePromptConflict(prompt: string): SalesforcePrompt
   return detectPromptConflict(prompt, CRM_ACCESS_CONFLICT_PATTERNS);
 }
 
-export function stripHubSpotPromptConflicts(prompt: string): string {
-  return stripPromptConflicts(prompt, HUBSPOT_ACCESS_CONFLICT_PATTERNS);
-}
-
-export function detectHubSpotPromptConflict(prompt: string): HubSpotPromptConflict {
-  return detectPromptConflict(prompt, HUBSPOT_ACCESS_CONFLICT_PATTERNS);
-}

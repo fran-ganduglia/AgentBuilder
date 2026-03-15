@@ -54,13 +54,6 @@ const PROVIDER_BUDGET_POLICIES: Record<string, ProviderBudgetPolicy[]> = {
       windowSeconds: 60 * 60 * 24,
     },
   ],
-  hubspot: [
-    {
-      methodKey: "hubspot.oauth_public_api",
-      limit: 110,
-      windowSeconds: 10,
-    },
-  ],
   google_workspace: [
     {
       methodKey: "google_workspace.gmail.user_quota",
@@ -86,14 +79,6 @@ const PROVIDER_BUDGET_POLICIES: Record<string, ProviderBudgetPolicy[]> = {
   slack: [
     {
       methodKey: "slack.chat.postMessage",
-      limit: 1,
-      windowSeconds: 1,
-      thresholds: [100],
-    },
-  ],
-  microsoft_teams: [
-    {
-      methodKey: "microsoft_teams.graph.channel_messages",
       limit: 1,
       windowSeconds: 1,
       thresholds: [100],

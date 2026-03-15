@@ -41,12 +41,10 @@ function parseConfig(config: unknown): SalesforceToolConfigLike | null {
 
 async function run(): Promise<void> {
   const {
-    detectHubSpotPromptConflict,
     detectSalesforcePromptConflict,
     getSalesforceAgentToolSelectionDiagnostics,
     selectMostRecentByCreatedAt,
     selectPreferredSalesforceAgentToolCore,
-    stripHubSpotPromptConflicts,
   } = await import(new URL("./salesforce-selection.ts", import.meta.url).href);
 
   const records: TestRecord[] = [
@@ -122,18 +120,6 @@ async function run(): Promise<void> {
 
   assert.equal(result.hasConflict, true);
   assert.match(result.snippet ?? "", /no tengo acceso/i);
-
-  const hubspotPrompt = [
-    "Siendo completamente transparente:",
-    "No tengo habilitada la tool de creacion de contactos en HubSpot.",
-    "No puedo crear ni actualizar contactos en tu CRM desde aqui.",
-  ].join("\n");
-
-  const hubspotResult = detectHubSpotPromptConflict(hubspotPrompt);
-
-  assert.equal(hubspotResult.hasConflict, true);
-  assert.match(hubspotResult.snippet ?? "", /tool de creacion de contactos/i);
-  assert.doesNotMatch(stripHubSpotPromptConflicts(hubspotPrompt), /hubspot/i);
 }
 
 run()

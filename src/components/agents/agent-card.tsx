@@ -1,5 +1,7 @@
 "use client";
 
+import { AGENT_SCOPE_LABELS } from "@/lib/agents/agent-scope";
+import { readAgentSetupState } from "@/lib/agents/agent-setup-state";
 import { getAgentDeletionDeadline } from "@/lib/agents/agent-deletion";
 import type { Agent } from "@/types/app";
 
@@ -64,6 +66,7 @@ export function AgentCard({
   onToggleSelection,
 }: AgentCardProps) {
   const status = statusConfig[agent.status] ?? statusConfig.draft;
+  const setupState = readAgentSetupState(agent);
   const purgeAt = getAgentDeletionDeadline(agent.deleted_at);
   const isSelectionInteractive = isDeleted && showSelection && Boolean(onToggleSelection);
   const isOpenInteractive = Boolean(onOpen) && !isDeleted;
@@ -112,6 +115,11 @@ export function AgentCard({
             {isDeleted ? (
               <span className="shrink-0 rounded-full bg-rose-100 px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wider text-rose-700 ring-1 ring-inset ring-rose-600/20">
                 Eliminado
+              </span>
+            ) : null}
+            {setupState ? (
+              <span className="shrink-0 rounded-full bg-sky-50 px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wider text-sky-700 ring-1 ring-inset ring-sky-600/20">
+                {AGENT_SCOPE_LABELS[setupState.agentScope]}
               </span>
             ) : null}
             <span
@@ -167,7 +175,9 @@ export function AgentCard({
             <svg className="h-3.5 w-3.5 shrink-0 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
             </svg>
-            <span className="truncate">{agent.llm_model}</span>
+            <span className="truncate">
+              {setupState ? `${AGENT_SCOPE_LABELS[setupState.agentScope]} · ${agent.llm_model}` : agent.llm_model}
+            </span>
           </div>
 
           {isDeleted ? (

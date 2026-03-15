@@ -1,11 +1,16 @@
 import { NextResponse } from "next/server";
+import { z } from "zod";
 import { getSession } from "@/lib/auth/get-session";
 import {
   buildActiveChatUiState,
   cleanupExpiredChatUiState,
   resolveChatFormContext,
 } from "@/lib/chat/chat-form-server";
-import { chatFormActiveQuerySchema } from "@/lib/chat/chat-form-state";
+
+const activeQuerySchema = z.object({
+  agentId: z.string().uuid("agentId invalido"),
+  conversationId: z.string().uuid("conversationId invalido"),
+});
 
 export async function GET(request: Request): Promise<Response> {
   const session = await getSession();
@@ -13,7 +18,7 @@ export async function GET(request: Request): Promise<Response> {
     return NextResponse.json({ error: "No autenticado" }, { status: 401 });
   }
 
-  const parsed = chatFormActiveQuerySchema.safeParse(
+  const parsed = activeQuerySchema.safeParse(
     Object.fromEntries(new URL(request.url).searchParams.entries())
   );
   if (!parsed.success) {

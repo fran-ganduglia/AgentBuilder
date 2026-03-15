@@ -1,16 +1,28 @@
-﻿import "server-only";
+import "server-only";
 
-import { normalizeOrganizationPlanName, type OrganizationPlanName } from "@/lib/agents/agent-integration-limits";
+import {
+  getOrganizationPlanConfig,
+  normalizeOrganizationPlanName,
+  type OrganizationPlanConfig,
+  type OrganizationPlanName,
+} from "@/lib/agents/agent-integration-limits";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import type { Tables } from "@/types/database";
 
 type DbResult<T> = { data: T | null; error: string | null };
 type OrganizationPlanRow = Pick<Tables<"organizations">, "plan_id">;
-type PlanRow = Pick<Tables<"plans">, "name">;
+type PlanRow = Pick<Tables<"plans">, "id" | "name" | "features">;
 
-export async function getOrganizationPlanName(
+export type OrganizationPlanDetails = {
+  id: string;
+  name: OrganizationPlanName;
+  config: OrganizationPlanConfig;
+  features: Tables<"plans">["features"];
+};
+
+export async function getOrganizationPlan(
   organizationId: string
-): Promise<DbResult<OrganizationPlanName>> {
+): Promise<DbResult<OrganizationPlanDetails>> {
   const supabase = await createServerSupabaseClient();
 
   const { data: organizationData, error: organizationError } = await supabase
@@ -27,7 +39,7 @@ export async function getOrganizationPlanName(
 
   const { data: planData, error: planError } = await supabase
     .from("plans")
-    .select("name")
+    .select("id, name, features")
     .eq("id", organization.plan_id)
     .single();
 
@@ -43,5 +55,25 @@ export async function getOrganizationPlanName(
     return { data: null, error: "El plan de la organizacion no es compatible con los limites actuales" };
   }
 
-  return { data: normalizedPlanName, error: null };
+  return {
+    data: {
+      id: plan.id,
+      name: normalizedPlanName,
+      config: getOrganizationPlanConfig(normalizedPlanName, plan.features),
+      features: plan.features,
+    },
+    error: null,
+  };
+}
+
+export async function getOrganizationPlanName(
+  organizationId: string
+): Promise<DbResult<OrganizationPlanName>> {
+  const planResult = await getOrganizationPlan(organizationId);
+
+  if (planResult.error || !planResult.data) {
+    return { data: null, error: planResult.error ?? "No se pudo obtener el plan de la organizacion" };
+  }
+
+  return { data: planResult.data.name, error: null };
 }

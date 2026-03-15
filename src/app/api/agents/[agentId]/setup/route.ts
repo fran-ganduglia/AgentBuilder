@@ -15,10 +15,6 @@ import {
 } from "@/lib/agents/agent-setup";
 import { readAgentSetupState } from "@/lib/agents/agent-setup-state";
 import {
-  buildHubSpotSetupResolutionContext,
-  getHubSpotAgentIntegrationState,
-} from "@/lib/agents/hubspot-agent-integration";
-import {
   buildSalesforceSetupResolutionContext,
   getSalesforceAgentIntegrationState,
 } from "@/lib/agents/salesforce-agent-integration";
@@ -69,13 +65,8 @@ export async function PATCH(
   let googleCalendarDetectedTimezone: string | null = null;
 
   if (baseSetupState) {
-    const [salesforceIntegrationStateResult, hubspotIntegrationStateResult, gmailIntegrationStateResult, googleCalendarIntegrationStateResult] = await Promise.all([
+    const [salesforceIntegrationStateResult, gmailIntegrationStateResult, googleCalendarIntegrationStateResult] = await Promise.all([
       getSalesforceAgentIntegrationState({
-        agentId,
-        organizationId: session.organizationId,
-        setupState: baseSetupState,
-      }),
-      getHubSpotAgentIntegrationState({
         agentId,
         organizationId: session.organizationId,
         setupState: baseSetupState,
@@ -99,13 +90,6 @@ export async function PATCH(
       );
     }
 
-    if (hubspotIntegrationStateResult.error) {
-      return NextResponse.json(
-        { error: "No se pudo validar la vinculacion HubSpot del agente" },
-        { status: 500 }
-      );
-    }
-
     if (gmailIntegrationStateResult.error) {
       return NextResponse.json(
         { error: "No se pudo validar la vinculacion Gmail del agente" },
@@ -122,7 +106,6 @@ export async function PATCH(
 
     providerIntegrations = {
       ...buildSalesforceSetupResolutionContext(salesforceIntegrationStateResult.data),
-      ...buildHubSpotSetupResolutionContext(hubspotIntegrationStateResult.data),
       ...buildGmailSetupResolutionContext(gmailIntegrationStateResult.data),
       ...buildGoogleCalendarSetupResolutionContext(googleCalendarIntegrationStateResult.data),
     };

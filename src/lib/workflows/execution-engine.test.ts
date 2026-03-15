@@ -27,7 +27,7 @@ function buildStep(input: Partial<WorkflowEngineStep> & Pick<WorkflowEngineStep,
 function runRetryPolicyTests(): void {
   const normalized = normalizeWorkflowExecutionError(
     new ProviderRequestError({
-      provider: "hubspot",
+      provider: "salesforce",
       message: "Too many requests",
       statusCode: 429,
       retryAfterSeconds: 12,
@@ -49,13 +49,13 @@ function runRetryPolicyTests(): void {
     12_000
   );
 
-  const validation = normalizeWorkflowExecutionError("Payload invalido");
+  const validation = normalizeWorkflowExecutionError(new Error("Entrada no valida"));
   assert.equal(validation.code, "validation_error");
   assert.equal(validation.retryable, false);
 
   const queuedBudget = normalizeWorkflowExecutionError(
     new ProviderRequestError({
-      provider: "hubspot",
+      provider: "salesforce",
       message: "Queued by allocator",
       statusCode: 429,
       retryAfterSeconds: 20,
@@ -68,7 +68,7 @@ function runRetryPolicyTests(): void {
 
   const throttledBudget = normalizeWorkflowExecutionError(
     new ProviderRequestError({
-      provider: "hubspot",
+      provider: "salesforce",
       message: "Throttled by allocator",
       statusCode: 429,
       retryAfterSeconds: 45,
@@ -81,7 +81,7 @@ function runRetryPolicyTests(): void {
 
   const exhaustedBudget = normalizeWorkflowExecutionError(
     new ProviderRequestError({
-      provider: "hubspot",
+      provider: "salesforce",
       message: "Rejected by allocator",
       statusCode: 429,
       retryAfterSeconds: 60,

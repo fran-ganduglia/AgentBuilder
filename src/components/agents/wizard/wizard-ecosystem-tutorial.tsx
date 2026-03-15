@@ -53,22 +53,18 @@ type WizardEcosystemTutorialProps = {
   ecosystem: WizardEcosystem;
   role: Role;
   salesforceOperationalView?: IntegrationOperationalView;
-  hubspotOperationalView?: IntegrationOperationalView;
 };
 
 export function WizardEcosystemTutorial({
   ecosystem,
   role,
   salesforceOperationalView,
-  hubspotOperationalView,
 }: WizardEcosystemTutorialProps) {
   const styles = THEME_STYLES[ecosystem.theme];
   const hidePrimaryAction = ecosystem.id === "whatsapp" && role !== "admin";
   const providerOperationalView = ecosystem.id === "salesforce"
     ? salesforceOperationalView
-    : ecosystem.id === "hubspot"
-      ? hubspotOperationalView
-      : undefined;
+    : undefined;
 
   return (
     <article className={`rounded-[2rem] border p-6 shadow-sm sm:p-7 ${styles.shell}`}>
@@ -101,12 +97,8 @@ export function WizardEcosystemTutorial({
               <p className="mt-2 text-sm text-slate-600">
                 {providerOperationalView.status === "connected" ||
                 providerOperationalView.status === "expiring_soon"
-                  ? ecosystem.id === "salesforce"
-                    ? "Si eliges un template Salesforce, el agente se guardara con la tool CRM ya vinculada."
-                    : "Si eliges un template HubSpot, el agente se guardara con la tool CRM ya vinculada."
-                  : ecosystem.id === "salesforce"
-                    ? "Si eliges un template Salesforce, el agente se guardara en borrador pero quedara bloqueado hasta completar la conexion y la tool CRM."
-                    : "Si eliges un template HubSpot, el agente se guardara en borrador pero quedara bloqueado hasta completar la conexion y la tool CRM."}
+                  ? "Si eliges un template Salesforce, el agente se guardara con la tool CRM ya vinculada."
+                  : "Si eliges un template Salesforce, el agente se guardara en borrador pero quedara bloqueado hasta completar la conexion y la tool CRM."}
               </p>
             </div>
             <IntegrationStatusBadge view={providerOperationalView} />

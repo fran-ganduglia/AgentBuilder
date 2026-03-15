@@ -2,7 +2,6 @@ import type { AgentSetupState } from "@/lib/agents/agent-setup";
 
 export const N8N_BUSINESS_WORKFLOW_IDS = [
   "wCrmSyncSalesforce",
-  "wCrmSyncHubSpot",
   "wWhatsAppFollowUp",
   "wWhatsAppBroadcast",
   "wOAuthTokenRefresh",
@@ -19,7 +18,6 @@ export function selectWorkflowsForAgent(setupState: AgentSetupState): N8nBusines
   const needed = new Set<N8nBusinessWorkflowId>();
 
   const hasSalesforce = setupState.integrations.includes("salesforce");
-  const hasHubSpot = setupState.integrations.includes("hubspot");
   const isWhatsApp = setupState.channel === "whatsapp";
   const areas = setupState.areas;
 
@@ -28,15 +26,15 @@ export function selectWorkflowsForAgent(setupState: AgentSetupState): N8nBusines
     needed.add("wOAuthTokenRefresh");
   }
 
-  if (hasHubSpot) {
-    needed.add("wCrmSyncHubSpot");
+  const hasGmail = setupState.integrations.includes("gmail");
+  const hasGoogleCalendar = setupState.integrations.includes("google_calendar");
+
+  if (hasGmail || hasGoogleCalendar) {
     needed.add("wOAuthTokenRefresh");
   }
 
   if (isWhatsApp) {
-    const needsFollowUp =
-      areas.includes("support") ||
-      setupState.template_id === "whatsapp_reminder_follow_up";
+    const needsFollowUp = areas.includes("support");
 
     if (needsFollowUp) {
       needed.add("wWhatsAppFollowUp");

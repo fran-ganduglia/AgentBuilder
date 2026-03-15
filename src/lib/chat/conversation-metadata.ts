@@ -1,9 +1,4 @@
 import { z } from "zod";
-import {
-  pendingChatFormSessionSchema,
-  type PendingChatFormSession,
-} from "@/lib/chat/chat-form-state";
-import { CHAT_FORM_IDS } from "@/lib/chat/inline-forms";
 import { executeSalesforceCrmToolSchema } from "@/lib/integrations/salesforce-tools";
 import { WHATSAPP_INTENT_SOURCES, WHATSAPP_KNOWN_INTENTS, type WhatsAppIntentSource, type WhatsAppKnownIntent } from "@/lib/chat/whatsapp-intents";
 import type { Json, Tables } from "@/types/database";
@@ -48,7 +43,7 @@ export const pendingCrmActionSchema = z.object({
   expiresAt: z.string().datetime(),
   sourceMessageId: z.string().uuid("sourceMessageId invalido").optional(),
   sourceContentHash: z.string().length(64, "sourceContentHash invalido").optional(),
-  formId: z.enum(CHAT_FORM_IDS).optional(),
+  formId: z.string().optional(),
 });
 
 export const pendingSalesforceToolActionSchema = z.object({
@@ -101,11 +96,17 @@ export type PendingSalesforceToolAction = z.infer<typeof pendingSalesforceToolAc
 export type RecentCrmToolContext = z.infer<typeof recentCrmToolContextSchema>;
 export type RecentSalesforceToolContext = z.infer<typeof recentSalesforceToolContextSchema>;
 
+export type ActionExecutionStatus = {
+  status: "pending" | "success" | "error";
+  message?: string;
+  updatedAt: string;
+};
+
 export type ConversationMetadata = {
   chat_mode?: ChatMode;
   qa_review?: ConversationQaReview | null;
   source_context?: SourceContext;
-  pending_chat_form?: PendingChatFormSession | null;
+  pending_chat_form?: Record<string, unknown> | null;
   pending_crm_action?: PendingCrmAction | null;
   recent_crm_tool_context?: RecentCrmToolContext | null;
   pending_tool_action?: PendingSalesforceToolAction | null;
@@ -116,6 +117,7 @@ export type ConversationMetadata = {
   intent_updated_at?: string | null;
   needs_clarification?: boolean;
   last_auto_reply_at?: string | null;
+  action_execution_status?: ActionExecutionStatus | null;
 };
 
 const sourceContextSchema = z.object({
@@ -139,7 +141,7 @@ const conversationMetadataSchema = z.object({
   chat_mode: z.enum(CHAT_MODES).optional(),
   qa_review: conversationQaReviewSchema.optional(),
   source_context: sourceContextSchema.optional(),
-  pending_chat_form: pendingChatFormSessionSchema.optional(),
+  pending_chat_form: z.record(z.string(), z.unknown()).optional(),
   pending_crm_action: pendingCrmActionSchema.optional(),
   recent_crm_tool_context: recentCrmToolContextSchema.optional(),
   pending_tool_action: pendingSalesforceToolActionSchema.optional(),
@@ -150,6 +152,11 @@ const conversationMetadataSchema = z.object({
   intent_updated_at: conversationIntentMetadataSchema.shape.intent_updated_at,
   needs_clarification: conversationIntentMetadataSchema.shape.needs_clarification,
   last_auto_reply_at: conversationIntentMetadataSchema.shape.last_auto_reply_at,
+  action_execution_status: z.object({
+    status: z.enum(["pending", "success", "error"]),
+    message: z.string().max(500).optional(),
+    updatedAt: z.string().datetime(),
+  }).optional(),
 });
 
 function toRecord(value: Json | null | undefined): Record<string, Json | undefined> {
@@ -236,14 +243,13 @@ function buildPendingCrmAction(
 }
 
 function buildPendingChatForm(
-  session?: PendingChatFormSession | null
-): PendingChatFormSession | undefined {
-  if (!session) {
+  session?: Record<string, unknown> | null
+): Record<string, unknown> | undefined {
+  if (!session || typeof session !== "object") {
     return undefined;
   }
 
-  const parsed = pendingChatFormSessionSchema.safeParse(session);
-  return parsed.success ? parsed.data : undefined;
+  return session;
 }
 
 function buildPendingToolAction(action?: PendingSalesforceToolAction | null): PendingSalesforceToolAction | undefined {
@@ -333,7 +339,7 @@ export function readPendingCrmAction<TActionInput = Record<string, unknown>>(
 
 export function readPendingChatForm(
   value: Json | null | undefined
-): PendingChatFormSession | null {
+): Record<string, unknown> | null {
   const metadata = readConversationMetadata(value);
   return metadata.pending_chat_form ?? null;
 }
@@ -566,6 +572,17 @@ export function mergeConversationMetadata(
     next.intent_updated_at = nextIntentMetadata.intent_updated_at;
     next.needs_clarification = nextIntentMetadata.needs_clarification;
     next.last_auto_reply_at = nextIntentMetadata.last_auto_reply_at;
+  }
+
+  const nextActionExecutionStatus =
+    patch.action_execution_status === null
+      ? undefined
+      : patch.action_execution_status === undefined
+        ? current.action_execution_status
+        : patch.action_execution_status;
+
+  if (nextActionExecutionStatus) {
+    next.action_execution_status = nextActionExecutionStatus;
   }
 
   return next as Json;

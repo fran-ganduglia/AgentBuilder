@@ -10,7 +10,7 @@ import {
   readRecentCrmToolContext,
 } from "@/lib/chat/conversation-metadata";
 import { createPendingCrmAction } from "@/lib/chat/crm-pending-action";
-import { planGoogleGmailToolAction } from "@/lib/chat/google-gmail-tool-planner";
+import { planGoogleGmailToolAction, type PlanGoogleGmailToolActionResult } from "@/lib/chat/google-gmail-tool-planner";
 import { updateConversationMetadata } from "@/lib/db/conversations";
 import {
   assertGoogleGmailActionEnabled,
@@ -113,7 +113,7 @@ function buildGmailApprovalPayloadSummary(input: ExecuteGoogleGmailToolInput): R
 
 function buildWriteInputFromReadResult(input: {
   writeAction: Extract<
-    ReturnType<typeof planGoogleGmailToolAction>,
+    PlanGoogleGmailToolActionResult,
     { kind: "resolve_thread_for_write" }
   >["writeAction"];
   readResult: Extract<GoogleGmailReadToolExecutionResult, { action: "read_thread" }>;
@@ -316,7 +316,7 @@ export function createGoogleGmailChatOrchestrator(
       };
     }
 
-    let decision = deps.planGoogleGmailToolAction({
+    let decision = await deps.planGoogleGmailToolAction({
       config: usableRuntime.data.config,
       latestUserMessage: input.latestUserMessage,
       recentMessages: input.recentMessages,
@@ -448,6 +448,7 @@ export function createGoogleGmailChatOrchestrator(
         },
         workflowTemplateId: setupState?.workflowTemplateId ?? null,
         automationPreset: setupState?.automationPreset ?? null,
+        agentScope: setupState?.agentScope ?? "operations",
       });
 
       if (approvalRequest.error || !approvalRequest.data) {

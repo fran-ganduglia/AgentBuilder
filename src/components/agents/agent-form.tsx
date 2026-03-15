@@ -4,12 +4,17 @@ import { AgentBehaviorSection, AgentEngineSection, AgentIdentitySection, AgentSt
 import type { AgentFormErrors, AgentFormFields } from "@/components/agents/agent-form-shared";
 import type { AgentConnection, Role } from "@/types/app";
 import type { AgentConnectionSummary } from "@/lib/agents/connection-policy";
+import type { AgentSetupState } from "@/lib/agents/agent-setup";
+import type { PromptSyncMode } from "@/lib/agents/agent-templates";
 
 type AgentFormProps = {
   fields: AgentFormFields;
   errors: AgentFormErrors;
   connection?: AgentConnection | null;
   connectionSummary?: AgentConnectionSummary | null;
+  setupState?: AgentSetupState | null;
+  recommendedPrompt?: string;
+  promptSyncMode?: PromptSyncMode;
   userRole?: Role;
   onChange: <K extends keyof AgentFormFields>(field: K, value: AgentFormFields[K]) => void;
 };
@@ -19,6 +24,9 @@ export function AgentForm({
   errors,
   connection,
   connectionSummary,
+  setupState,
+  recommendedPrompt,
+  promptSyncMode = "custom",
   userRole = "admin",
   onChange,
 }: AgentFormProps) {
@@ -48,6 +56,9 @@ export function AgentForm({
         errors={errors}
         promptWords={promptWords}
         promptLines={promptLines}
+        setupState={setupState ?? null}
+        recommendedPrompt={recommendedPrompt ?? fields.systemPrompt}
+        promptSyncMode={promptSyncMode}
         onChange={onChange}
         disabled={!canEditRemoteManagedFields}
       />

@@ -50,7 +50,6 @@ type StepTemplateSelectProps = {
   selectedTemplateId: AgentTemplateId | null;
   whatsappConnection: WhatsAppConnectionView;
   salesforceOperationalView: IntegrationOperationalView;
-  hubspotOperationalView: IntegrationOperationalView;
   onSelectEcosystem: (ecosystemId: WizardEcosystemId) => void;
   onSelectTemplate: (templateId: AgentTemplateId) => void;
 };
@@ -61,7 +60,6 @@ export function StepTemplateSelect({
   selectedTemplateId,
   whatsappConnection,
   salesforceOperationalView,
-  hubspotOperationalView,
   onSelectEcosystem,
   onSelectTemplate,
 }: StepTemplateSelectProps) {
@@ -76,11 +74,7 @@ export function StepTemplateSelect({
         ? salesforceOperationalView.status === "connected" || salesforceOperationalView.status === "expiring_soon"
           ? "Salesforce ya esta conectado para esta organizacion. Si eliges un template Salesforce, el borrador se crea con la tool CRM autoasignada."
           : "Salesforce todavia no esta listo para esta organizacion. El borrador se crea igual, pero quedara bloqueado hasta conectar Salesforce y guardar la tool CRM."
-        : activeEcosystem?.id === "hubspot"
-          ? hubspotOperationalView.status === "connected" || hubspotOperationalView.status === "expiring_soon"
-            ? "HubSpot ya esta conectado para esta organizacion. Si eliges un template HubSpot, el borrador se crea con la tool CRM autoasignada."
-            : "HubSpot todavia no esta listo para esta organizacion. El borrador se crea igual, pero quedara bloqueado hasta conectar HubSpot y guardar la tool CRM."
-          : "Estos templates vienen hardcodeados para acelerar onboarding. La conexion real todavia depende del estado del ecosistema elegido.";
+        : "Estos templates vienen hardcodeados para acelerar onboarding. La conexion real todavia depende del estado del ecosistema elegido.";
 
   return (
     <section className="space-y-8">
@@ -159,7 +153,6 @@ export function StepTemplateSelect({
             ecosystem={activeEcosystem}
             role={role}
             salesforceOperationalView={activeEcosystem.id === "salesforce" ? salesforceOperationalView : undefined}
-            hubspotOperationalView={activeEcosystem.id === "hubspot" ? hubspotOperationalView : undefined}
           />
         )
       ) : null}

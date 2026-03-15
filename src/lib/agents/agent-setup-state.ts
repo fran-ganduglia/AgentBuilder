@@ -15,6 +15,10 @@ export function normalizeSetupState(
   setupState: ParsedSetupStateInput,
   context: SetupResolutionContext = {}
 ): AgentSetupState {
+  const hasExplicitAgentScope =
+    typeof Reflect.get(setupState as Record<string, unknown>, "agentScope") === "string";
+  const hasExplicitOutOfScopePolicy =
+    typeof Reflect.get(setupState as Record<string, unknown>, "outOfScopePolicy") === "string";
   const parsedSetupState = agentSetupStateSchema.parse(setupState);
   const baseState = parsedSetupState.template_id
     ? createSetupStateForTemplate(parsedSetupState.template_id, {
@@ -22,6 +26,9 @@ export function normalizeSetupState(
     })
     : createDefaultAgentSetupState({
       templateId: null,
+      workflowId: parsedSetupState.workflowId,
+      agentScope: hasExplicitAgentScope ? parsedSetupState.agentScope : undefined,
+      outOfScopePolicy: hasExplicitOutOfScopePolicy ? parsedSetupState.outOfScopePolicy : undefined,
       workflowTemplateId: parsedSetupState.workflowTemplateId,
       areas: parsedSetupState.areas,
       integrations: parsedSetupState.integrations,
@@ -48,8 +55,15 @@ export function normalizeSetupState(
     {
       ...baseState,
       template_id: parsedSetupState.template_id,
+      workflowId: parsedSetupState.workflowId,
+      agentScope: hasExplicitAgentScope ? parsedSetupState.agentScope : baseState.agentScope,
+      outOfScopePolicy: hasExplicitOutOfScopePolicy
+        ? parsedSetupState.outOfScopePolicy
+        : baseState.outOfScopePolicy,
       workflowTemplateId: parsedSetupState.workflowTemplateId,
       workflowCategory: parsedSetupState.workflowCategory,
+      capabilities: parsedSetupState.capabilities,
+      businessInstructions: parsedSetupState.businessInstructions,
       requiredIntegrations: parsedSetupState.requiredIntegrations,
       optionalIntegrations: parsedSetupState.optionalIntegrations,
       allowedAutomationPresets: parsedSetupState.allowedAutomationPresets,

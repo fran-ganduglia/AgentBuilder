@@ -11,10 +11,10 @@ import { getConversationByIdWithServiceRole, incrementConversationMessageCount }
 import { insertPlanLimitNotification } from "@/lib/db/notifications-writer";
 import { getWhatsAppIntegrationConfig } from "@/lib/db/whatsapp-integrations";
 import {
-  getOrganizationPlanLimit,
   incrementMessageCount,
   resolveProviderFromModel,
 } from "@/lib/db/usage-records";
+import { getCurrentOrganizationSessionUsage } from "@/lib/db/session-usage";
 import { assertUsableIntegration } from "@/lib/integrations/access";
 import type { AgentSetupState } from "@/lib/agents/agent-setup";
 import { processWorkflowStepExecution } from "@/lib/workflows/execution";
@@ -42,9 +42,9 @@ export async function processMessageCreated(event: EventRow): Promise<void> {
   }
 
   const llmProvider = resolveProviderFromModel(payload.llm_model ?? null);
-  const orgTotal = await incrementMessageCount({ organizationId, agentId, llmProvider });
+  const incrementResult = await incrementMessageCount({ organizationId, agentId, llmProvider });
 
-  if (orgTotal === null) {
+  if (incrementResult === null) {
     throw new Error("increment_usage_messages RPC failed");
   }
 
@@ -59,8 +59,14 @@ export async function processMessageCreated(event: EventRow): Promise<void> {
     }
   }
 
-  const planLimit = await getOrganizationPlanLimit(organizationId);
-  await insertPlanLimitNotification({ organizationId, currentUsage: orgTotal, planLimit });
+  const sessionUsage = await getCurrentOrganizationSessionUsage(organizationId);
+  if (sessionUsage.planLimit && sessionUsage.planLimit > 0) {
+    await insertPlanLimitNotification({
+      organizationId,
+      currentUsage: sessionUsage.currentSessions,
+      planLimit: sessionUsage.planLimit,
+    });
+  }
 }
 
 export async function processConversationCreated(

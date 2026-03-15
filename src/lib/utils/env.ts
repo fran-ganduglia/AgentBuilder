@@ -116,21 +116,6 @@ export const env = {
     return getOptionalServerEnv("SALESFORCE_API_VERSION", "v61.0");
   },
 
-  get HUBSPOT_CLIENT_ID() {
-    return requireServerEnv("HUBSPOT_CLIENT_ID");
-  },
-
-  get HUBSPOT_CLIENT_SECRET() {
-    return requireServerEnv("HUBSPOT_CLIENT_SECRET");
-  },
-
-  get HUBSPOT_OAUTH_SCOPES() {
-    return getOptionalServerEnv(
-      "HUBSPOT_OAUTH_SCOPES",
-      "crm.objects.contacts.read crm.objects.contacts.write crm.objects.companies.read crm.objects.companies.write crm.objects.deals.read crm.objects.deals.write crm.objects.owners.read crm.objects.tasks.write crm.objects.meetings.write"
-    );
-  },
-
   get GOOGLE_CLIENT_ID() {
     return requireServerEnv("GOOGLE_CLIENT_ID");
   },

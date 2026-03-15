@@ -19,43 +19,37 @@ import {
   createDefaultAgentSetupState,
   getCustomToolScopeSelections,
   resolveSetupState,
-  type AgentArea,
   type AgentSetupState,
   type ChannelIntent,
   type PromptBuilderDraft,
 } from "@/lib/agents/agent-setup";
 import type { OrganizationPlanName } from "@/lib/agents/agent-integration-limits";
-import {
-  buildRecommendedSystemPrompt,
-  syncSystemPromptWithSetup,
-  type RecommendedPromptEnvironment,
-} from "@/lib/agents/agent-templates";
+import { buildRecommendedSystemPrompt } from "@/lib/agents/agent-templates";
+import { AGENT_SCOPE_LABELS, type AgentScope } from "@/lib/agents/agent-scope";
 import type { WhatsAppConnectionView } from "@/lib/agents/whatsapp-connection";
-import type { WizardIntegrationId } from "@/lib/agents/wizard-integrations";
+import {
+  GENERAL_OPERATIONS_WORKFLOW,
+  type AgentCapability,
+} from "@/lib/agents/public-workflow";
+import {
+  WIZARD_INTEGRATION_IDS,
+  type WizardIntegrationId,
+} from "@/lib/agents/wizard-integrations";
 import { getWizardIntegrationById } from "@/lib/agents/wizard-integrations";
-import {
-  getWorkflowTemplateById,
-  type SuccessMetricId,
-  type WorkflowInstanceConfig,
-  type WorkflowTemplate,
-} from "@/lib/agents/workflow-templates";
-import {
-  isIntegrationOperationalViewUsable,
-  type IntegrationOperationalView,
-} from "@/lib/integrations/metadata";
+import type { IntegrationOperationalView } from "@/lib/integrations/metadata";
 import type { GoogleSurfaceOperationalView } from "@/lib/integrations/google-workspace";
 
 const stepOneSchema = z.object({
-  workflowTemplateId: z.string().min(1, "Selecciona un workflow template"),
+  agentScope: z.string().min(1, "Selecciona un tipo de agente"),
 });
 
 const stepTwoSchema = z.object({
-  name: z.string().min(1, "El nombre de la instancia es requerido").max(100, "El nombre no puede superar 100 caracteres"),
+  name: z.string().min(1, "El nombre del agente es requerido").max(100, "El nombre no puede superar 100 caracteres"),
 });
 
 const stepFiveSchema = z.object({
   description: z.string().max(500, "La descripcion no puede superar 500 caracteres").optional(),
-  systemPrompt: z.string().min(1, "El system prompt es requerido"),
+  systemPrompt: z.string().min(1, "El system prompt compilado no puede quedar vacio"),
   llmModel: agentModelSchema,
   llmTemperature: z.number().min(0, "La temperatura minima es 0.0").max(1, "La temperatura maxima es 1.0"),
 });
@@ -63,7 +57,7 @@ const stepFiveSchema = z.object({
 type WizardStep = 1 | 2 | 3 | 4 | 5 | 6;
 
 type WizardErrors = Partial<Record<
-  "workflowTemplateId" | "name" | "description" | "systemPrompt" | "llmModel" | "llmTemperature" | "integrations",
+  "workflowId" | "name" | "description" | "systemPrompt" | "llmModel" | "llmTemperature" | "integrations",
   string
 >>;
 
@@ -79,66 +73,37 @@ type WizardFields = {
 type AgentCreationWizardProps = {
   whatsappConnection: WhatsAppConnectionView;
   salesforceOperationalView: IntegrationOperationalView;
-  hubspotOperationalView: IntegrationOperationalView;
   gmailOperationalView: GoogleSurfaceOperationalView;
   googleCalendarOperationalView: GoogleSurfaceOperationalView;
   planName: OrganizationPlanName;
 };
 
 function getInitialWizardFields(): WizardFields {
-  const setupState = applySuggestedSetupState(createDefaultAgentSetupState({ currentStep: 1 }), "");
+  const setupState = applySuggestedSetupState(createDefaultAgentSetupState({
+    currentStep: 1,
+    workflowId: "general_operations",
+    agentScope: "operations",
+    toolScopePreset: "conservative",
+  }), "");
 
   return {
     name: "",
     description: "",
-    llmModel: resolveRecommendedModelForSetup(setupState),
+    llmModel: resolveRecommendedModelForSetup(),
     llmTemperature: 0.7,
     systemPrompt: buildRecommendedSystemPrompt(setupState, {}),
     setupState,
   };
 }
 
-function getWorkflowTemplate(setupState: AgentSetupState): WorkflowTemplate | null {
-  return setupState.workflowTemplateId
-    ? getWorkflowTemplateById(setupState.workflowTemplateId)
-    : null;
-}
-
-function resolveRecommendedModelForAreas(areas: AgentArea[]): string {
-  return AGENT_MODEL_OPTIONS.find((option) => areas.some((area) => option.recommendedAreas.includes(area)))?.value ?? "gpt-4o";
-}
-
-function resolveRecommendedModelForSetup(setupState: AgentSetupState): string {
-  const workflowTemplate = getWorkflowTemplate(setupState);
-  return workflowTemplate?.recommendedModels.find((item) => item.isPrimary)?.model
-    ?? resolveRecommendedModelForAreas(setupState.areas);
-}
-
-function resolvePromptEnvironment(
-  setupState: AgentSetupState,
-  salesforceOperationalView: IntegrationOperationalView,
-  hubspotOperationalView: IntegrationOperationalView,
-  gmailOperationalView: GoogleSurfaceOperationalView,
-  googleCalendarOperationalView: GoogleSurfaceOperationalView
-): RecommendedPromptEnvironment {
-  return {
-    salesforceUsable: setupState.integrations.includes("salesforce")
-      ? isIntegrationOperationalViewUsable(salesforceOperationalView)
-      : false,
-    hubspotUsable: setupState.integrations.includes("hubspot")
-      ? isIntegrationOperationalViewUsable(hubspotOperationalView)
-      : false,
-    gmailConfigured: setupState.integrations.includes("gmail"),
-    gmailRuntimeAvailable: gmailOperationalView.tone === "emerald",
-    googleCalendarConfigured: setupState.integrations.includes("google_calendar"),
-    googleCalendarRuntimeAvailable: googleCalendarOperationalView.tone === "emerald",
-  };
+function resolveRecommendedModelForSetup(): string {
+  return GENERAL_OPERATIONS_WORKFLOW.recommendedModels.find((item) => item.isPrimary)?.model
+    ?? AGENT_MODEL_OPTIONS[0]?.value
+    ?? "gpt-4o";
 }
 
 function resolveChannelFromSetup(setupState: AgentSetupState): ChannelIntent {
-  return setupState.integrations.includes("whatsapp") || setupState.requiredIntegrations.includes("whatsapp")
-    ? "whatsapp"
-    : "web";
+  return setupState.integrations.includes("whatsapp") ? "whatsapp" : "web";
 }
 
 function toggleInList<T extends string>(items: T[], item: T): T[] {
@@ -146,53 +111,79 @@ function toggleInList<T extends string>(items: T[], item: T): T[] {
 }
 
 function buildSuggestedBuilderDraft(input: {
-  workflowTemplate: WorkflowTemplate | null;
   name: string;
   integrations: WizardIntegrationId[];
   channel: ChannelIntent;
-  instanceConfig: WorkflowInstanceConfig;
   previous: PromptBuilderDraft;
 }): PromptBuilderDraft {
   const integrationLabels = input.integrations.map((integrationId) => getWizardIntegrationById(integrationId).name);
-  const workflowName = input.workflowTemplate?.name ?? "workflow";
-  const role = input.name.trim() || `Instancia de ${workflowName}`;
+  const role = input.name.trim() || "Agente operativo";
 
   return {
-    objective: `Operar la instancia ${role} del workflow ${workflowName} con reglas claras, trazabilidad y sin inventar resultados.`,
+    objective:
+      input.previous.objective.trim() ||
+      `Operar solicitudes, automatizaciones y entregables del workflow unico con reglas claras y trazabilidad.`,
     role,
-    audience: input.instanceConfig.ownerLabel.trim() || "Equipos internos y usuarios finales de la organizacion",
-    allowedTasks: [
-      `Seguir el workflow ${workflowName} respetando integraciones requeridas y opcionales.`,
-      integrationLabels.length > 0 ? `Usar el contexto de ${integrationLabels.join(", ")} cuando este realmente disponible.` : null,
-      input.instanceConfig.routingMode.trim() || null,
-    ].filter((value): value is string => Boolean(value)).join(" "),
+    audience:
+      input.previous.audience.trim() ||
+      "Equipos internos y usuarios finales de la organizacion",
+    allowedTasks:
+      input.previous.allowedTasks.trim() ||
+      [
+        "Resolver pedidos dentro del alcance configurado.",
+        integrationLabels.length > 0
+          ? `Usar contexto real de ${integrationLabels.join(", ")} cuando este disponible.`
+          : null,
+      ].filter((value): value is string => Boolean(value)).join(" "),
     tone: input.previous.tone,
-    restrictions: [
-      "No inventar datos, accesos, resultados ni side effects.",
-      "Si una integracion requerida falla, frenar y dar una salida segura y accionable.",
-      "Si una integracion opcional falla, continuar aclarando que el resultado es parcial.",
-    ].join(" "),
-    humanHandoff: input.instanceConfig.handoffThreshold.trim()
-      || "Escalar a una persona cuando falte contexto, aprobacion o disponibilidad real de una integracion requerida.",
-    openingMessage: input.previous.openingMessage.trim()
-      || `Hola, soy ${role}. Te acompano dentro de este workflow y te dire con claridad que puedo hacer en este turno.`,
+    restrictions:
+      input.previous.restrictions.trim() ||
+      "No inventar datos, resultados ni side effects. Toda escritura sensible requiere approval.",
+    humanHandoff:
+      input.previous.humanHandoff.trim() ||
+      "Escalar a una persona cuando falte contexto, aprobacion o una integracion requerida falle.",
+    openingMessage:
+      input.previous.openingMessage.trim() ||
+      `Hola, soy ${role}. Te ayudo a resolver este workflow con claridad y pasos accionables.`,
     channel: input.channel,
   };
 }
 
 function applySuggestedSetupState(setupState: AgentSetupState, name: string): AgentSetupState {
-  const workflowTemplate = getWorkflowTemplate(setupState);
   const channel = resolveChannelFromSetup(setupState);
+  const scopeLabel = AGENT_SCOPE_LABELS[setupState.agentScope].toLowerCase();
 
   return resolveSetupState({
     ...setupState,
+    workflowId: "general_operations",
+    outOfScopePolicy: "reject_and_redirect",
     channel,
+    businessInstructions: {
+      ...setupState.businessInstructions,
+      objective:
+        setupState.businessInstructions.objective ||
+        setupState.builder_draft.objective,
+      context:
+        setupState.businessInstructions.context ||
+        setupState.builder_draft.audience,
+      tasks:
+        setupState.businessInstructions.tasks ||
+        setupState.builder_draft.allowedTasks,
+      restrictions:
+        setupState.businessInstructions.restrictions ||
+        setupState.builder_draft.restrictions ||
+        `No inventar datos ni ejecutar tools fuera del scope de ${scopeLabel}. Si el pedido corresponde a otro scope, rechazar y derivar.`,
+      handoffCriteria:
+        setupState.businessInstructions.handoffCriteria ||
+        setupState.builder_draft.humanHandoff,
+      outputStyle:
+        setupState.businessInstructions.outputStyle ||
+        setupState.instanceConfig.toneSummary,
+    },
     builder_draft: buildSuggestedBuilderDraft({
-      workflowTemplate,
       name,
       integrations: setupState.integrations,
       channel,
-      instanceConfig: setupState.instanceConfig,
       previous: setupState.builder_draft,
     }),
   });
@@ -201,23 +192,17 @@ function applySuggestedSetupState(setupState: AgentSetupState, name: string): Ag
 function buildConnectionStates(input: {
   whatsappConnection: WhatsAppConnectionView;
   salesforceOperationalView: IntegrationOperationalView;
-  hubspotOperationalView: IntegrationOperationalView;
   gmailOperationalView: GoogleSurfaceOperationalView;
   googleCalendarOperationalView: GoogleSurfaceOperationalView;
 }): Partial<Record<WizardIntegrationId, WizardIntegrationConnectionState>> {
   return {
     whatsapp: input.whatsappConnection.isConnected
       ? { label: "Conectado", summary: "Cuenta lista para usar en el canal real", tone: "emerald" }
-      : { label: "Sin conectar", summary: "Conecta el numero antes de crear una instancia que lo requiera", tone: "slate" },
+      : { label: "Sin conectar", summary: "Conecta el numero antes de usar el canal WhatsApp", tone: "slate" },
     salesforce: {
       label: input.salesforceOperationalView.label,
       summary: input.salesforceOperationalView.summary,
       tone: input.salesforceOperationalView.tone,
-    },
-    hubspot: {
-      label: input.hubspotOperationalView.label,
-      summary: input.hubspotOperationalView.summary,
-      tone: input.hubspotOperationalView.tone,
     },
     gmail: {
       label: input.gmailOperationalView.label,
@@ -244,7 +229,6 @@ function getMissingRequiredIntegrations(
 export function AgentCreationWizard({
   whatsappConnection,
   salesforceOperationalView,
-  hubspotOperationalView,
   gmailOperationalView,
   googleCalendarOperationalView,
   planName,
@@ -259,12 +243,11 @@ export function AgentCreationWizard({
   const connectionStates = buildConnectionStates({
     whatsappConnection,
     salesforceOperationalView,
-    hubspotOperationalView,
     gmailOperationalView,
     googleCalendarOperationalView,
   });
   const customSelections = getCustomToolScopeSelections(fields.setupState.task_data);
-  const workflowTemplate = getWorkflowTemplate(fields.setupState);
+  const workflow = GENERAL_OPERATIONS_WORKFLOW;
 
   function updateSetupState(
     updater: (setupState: AgentSetupState) => AgentSetupState,
@@ -274,33 +257,13 @@ export function AgentCreationWizard({
       const nextName = options.nextName ?? prev.name;
       const nextRawSetupState = updater(prev.setupState);
       const nextSetupState = applySuggestedSetupState(nextRawSetupState, nextName);
-      const previousEnvironment = resolvePromptEnvironment(
-        prev.setupState,
-        salesforceOperationalView,
-        hubspotOperationalView,
-        gmailOperationalView,
-        googleCalendarOperationalView
-      );
-      const nextEnvironment = resolvePromptEnvironment(
-        nextSetupState,
-        salesforceOperationalView,
-        hubspotOperationalView,
-        gmailOperationalView,
-        googleCalendarOperationalView
-      );
 
       return {
         ...prev,
         name: nextName,
         llmModel: options.nextModel ?? prev.llmModel,
         setupState: nextSetupState,
-        systemPrompt: syncSystemPromptWithSetup(
-          prev.systemPrompt,
-          prev.setupState,
-          nextSetupState,
-          previousEnvironment,
-          nextEnvironment
-        ),
+        systemPrompt: buildRecommendedSystemPrompt(nextSetupState, {}),
       };
     });
     setSubmitError(null);
@@ -308,15 +271,15 @@ export function AgentCreationWizard({
 
   function validateStepOne(): boolean {
     const parsed = stepOneSchema.safeParse({
-      workflowTemplateId: fields.setupState.workflowTemplateId,
+      agentScope: fields.setupState.agentScope,
     });
 
     if (parsed.success) {
-      setErrors((prev) => ({ ...prev, workflowTemplateId: undefined }));
+      setErrors((prev) => ({ ...prev, workflowId: undefined }));
       return true;
     }
 
-    setErrors((prev) => ({ ...prev, workflowTemplateId: parsed.error.errors[0]?.message ?? "Selecciona un workflow template" }));
+    setErrors((prev) => ({ ...prev, workflowId: parsed.error.errors[0]?.message ?? "Selecciona un tipo de agente" }));
     return false;
   }
 
@@ -342,7 +305,7 @@ export function AgentCreationWizard({
 
     setErrors((prev) => ({
       ...prev,
-      integrations: `Falta conectar ${missingRequired.join(", ")}. Las integraciones requeridas bloquean la creacion de la instancia.`,
+      integrations: `Falta conectar ${missingRequired.join(", ")}. Las integraciones requeridas bloquean la creacion del agente.`,
     }));
     return false;
   }
@@ -457,9 +420,13 @@ export function AgentCreationWizard({
         body: JSON.stringify({
           name: fields.name,
           description: fields.description || undefined,
-          systemPrompt: fields.systemPrompt,
           llmModel: fields.llmModel,
           llmTemperature: fields.llmTemperature,
+          workflowId: setupState.workflowId,
+          agentScope: setupState.agentScope,
+          outOfScopePolicy: setupState.outOfScopePolicy,
+          capabilities: setupState.capabilities,
+          businessInstructions: setupState.businessInstructions,
           setupState,
         }),
       });
@@ -470,7 +437,7 @@ export function AgentCreationWizard({
       };
 
       if (!response.ok || !result.data) {
-        setSubmitError(result.error ?? "No se pudo crear la workflow instance");
+        setSubmitError(result.error ?? "No se pudo crear el agente");
         return;
       }
 
@@ -490,41 +457,51 @@ export function AgentCreationWizard({
       <div className="rounded-3xl border border-slate-200 bg-white p-7 shadow-sm sm:p-8">
         {currentStep === 1 ? (
           <StepWorkflowSelect
-            selectedWorkflowTemplateId={fields.setupState.workflowTemplateId}
-            error={errors.workflowTemplateId}
-            onSelectWorkflow={(workflowTemplateId) => updateSetupState(
-              () => {
-                const template = getWorkflowTemplateById(workflowTemplateId);
-
-                return {
-                  ...createDefaultAgentSetupState({
-                    currentStep: 1,
-                    workflowTemplateId,
-                    templateId: workflowTemplateId === "advanced_builder" ? "from_scratch" : null,
-                    toolScopePreset: "conservative",
-                  }),
-                  workflowTemplateId,
-                  template_id: workflowTemplateId === "advanced_builder" ? "from_scratch" : null,
-                  automationPreset: template.defaultAutomationPreset,
-                  successMetrics: [...template.successMetrics],
-                  instanceConfig: { ...template.defaultInstanceConfig },
-                  integrations: [...template.requiredIntegrations],
-                };
-              },
-              { nextModel: getWorkflowTemplateById(workflowTemplateId).recommendedModels.find((item) => item.isPrimary)?.model ?? "gpt-4o" }
+            selectedScope={fields.setupState.agentScope}
+            error={errors.workflowId}
+            onSelectScope={(agentScope: AgentScope) => updateSetupState(
+              () => ({
+                ...createDefaultAgentSetupState({
+                  currentStep: 1,
+                  workflowId: "general_operations",
+                  agentScope,
+                  outOfScopePolicy: "reject_and_redirect",
+                  toolScopePreset: "conservative",
+                }),
+                workflowId: "general_operations",
+                agentScope,
+                outOfScopePolicy: "reject_and_redirect",
+                capabilities: [...workflow.defaultCapabilities],
+                successMetrics: [...workflow.successMetrics],
+                instanceConfig: { ...workflow.defaultInstanceConfig },
+                optionalIntegrations: [...WIZARD_INTEGRATION_IDS],
+                integrations: [],
+              }),
+              { nextModel: workflow.recommendedModels.find((item) => item.isPrimary)?.model ?? "gpt-4o" }
             )}
           />
         ) : null}
 
         {currentStep === 2 ? (
           <StepInstanceConfig
-            workflowTemplate={workflowTemplate}
+            workflow={workflow}
             name={fields.name}
             description={fields.description}
             instanceConfig={fields.setupState.instanceConfig}
+            promptBuilder={{
+              objective: fields.setupState.builder_draft.objective,
+              audience: fields.setupState.builder_draft.audience,
+            }}
             error={errors.name}
             onNameChange={(value) => updateSetupState((setupState) => setupState, { nextName: value })}
             onDescriptionChange={(value) => setFields((prev) => ({ ...prev, description: value }))}
+            onPromptBuilderChange={(patch) => updateSetupState((setupState) => ({
+              ...setupState,
+              builder_draft: {
+                ...setupState.builder_draft,
+                ...patch,
+              },
+            }))}
             onInstanceConfigChange={(patch) => updateSetupState((setupState) => ({
               ...setupState,
               instanceConfig: {
@@ -579,13 +556,25 @@ export function AgentCreationWizard({
 
         {currentStep === 4 ? (
           <StepWorkflowRules
-            workflowTemplate={workflowTemplate}
-            automationPreset={fields.setupState.automationPreset}
+            workflow={workflow}
+            capabilities={fields.setupState.capabilities}
+            businessInstructions={{
+              tasks: fields.setupState.businessInstructions.tasks,
+              restrictions: fields.setupState.businessInstructions.restrictions,
+              handoffCriteria: fields.setupState.businessInstructions.handoffCriteria,
+            }}
             instanceConfig={fields.setupState.instanceConfig}
             successMetrics={fields.setupState.successMetrics}
-            onAutomationPresetChange={(value) => updateSetupState((setupState) => ({
+            onToggleCapability={(capability: AgentCapability) => updateSetupState((setupState) => ({
               ...setupState,
-              automationPreset: value,
+              capabilities: toggleInList(setupState.capabilities, capability),
+            }))}
+            onBusinessInstructionsChange={(patch) => updateSetupState((setupState) => ({
+              ...setupState,
+              businessInstructions: {
+                ...setupState.businessInstructions,
+                ...patch,
+              },
             }))}
             onInstanceConfigChange={(patch) => updateSetupState((setupState) => ({
               ...setupState,
@@ -596,14 +585,14 @@ export function AgentCreationWizard({
             }))}
             onToggleSuccessMetric={(metric) => updateSetupState((setupState) => ({
               ...setupState,
-              successMetrics: toggleInList(setupState.successMetrics, metric as SuccessMetricId),
+              successMetrics: toggleInList(setupState.successMetrics, metric),
             }))}
           />
         ) : null}
 
         {currentStep === 5 ? (
           <StepModelSelect
-            workflowTemplate={workflowTemplate}
+            workflow={workflow}
             description={fields.description}
             llmModel={fields.llmModel}
             llmTemperature={fields.llmTemperature}
@@ -630,7 +619,6 @@ export function AgentCreationWizard({
                 openingMessage: value,
               },
             }))}
-            onSystemPromptChange={(value) => setFields((prev) => ({ ...prev, systemPrompt: value }))}
           />
         ) : null}
 
@@ -642,7 +630,7 @@ export function AgentCreationWizard({
             llmTemperature={fields.llmTemperature}
             systemPrompt={fields.systemPrompt}
             setupState={fields.setupState}
-            workflowTemplate={workflowTemplate}
+            workflow={workflow}
           />
         ) : null}
       </div>
@@ -687,7 +675,7 @@ export function AgentCreationWizard({
               disabled={loading}
               className="inline-flex items-center justify-center rounded-lg bg-emerald-600 px-6 py-2.5 text-sm font-bold text-white shadow-sm transition-all hover:-translate-y-0.5 hover:bg-emerald-700 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0"
             >
-              {loading ? "Creando borrador..." : "Crear workflow instance"}
+              {loading ? "Creando borrador..." : "Crear agente"}
             </button>
           )}
         </div>

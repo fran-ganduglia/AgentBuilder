@@ -1,11 +1,7 @@
 import "server-only";
 
 import { z } from "zod";
-import {
-  buildChatFormActionInput,
-  getAvailableChatForms,
-  parseChatFormSubmissionMessage,
-} from "@/lib/chat/inline-forms";
+// Legacy form imports removed — dynamic forms are now handled via interactive-markers
 import { sendChatCompletion } from "@/lib/llm/litellm";
 import {
   executeSalesforceCrmToolSchema,
@@ -277,35 +273,7 @@ export async function planSalesforceToolAction(input: {
     return { kind: "respond" };
   }
 
-  const structuredSubmission = parseChatFormSubmissionMessage(
-    input.latestUserMessage
-  );
-  if (structuredSubmission) {
-    const supportedForms = getAvailableChatForms(
-      "salesforce",
-      input.config.allowed_actions
-    );
-    const submittedForm = supportedForms.find(
-      (form) => form.id === structuredSubmission.formId
-    );
 
-    if (submittedForm) {
-      const parsedInput = executeSalesforceCrmToolSchema.safeParse(
-        buildChatFormActionInput(
-          structuredSubmission.formId,
-          structuredSubmission.values
-        )
-      );
-
-      if (parsedInput.success) {
-        return {
-          kind: "action",
-          requiresConfirmation: false,
-          input: parsedInput.data,
-        };
-      }
-    }
-  }
 
   const deterministicAction = preclassifySalesforceLeadAction(input.latestUserMessage, input.config);
   if (deterministicAction) {

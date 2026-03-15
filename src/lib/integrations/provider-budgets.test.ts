@@ -4,7 +4,7 @@ import { decideProviderBudgetAdmission } from "./provider-budgets";
 
 function main(): void {
   const basePolicy = {
-    methodKey: "hubspot.oauth_public_api",
+    methodKey: "salesforce.rest_api",
     limit: 100,
     windowSeconds: 60,
   };

@@ -25,6 +25,20 @@ import {
   type WorkflowTemplateId,
 } from "@/lib/agents/workflow-templates";
 import {
+  AGENT_CAPABILITIES,
+  GENERAL_OPERATIONS_WORKFLOW,
+  PUBLIC_WORKFLOW_IDS,
+  type AgentCapability,
+  type PublicWorkflowId,
+} from "@/lib/agents/public-workflow";
+import {
+  AGENT_SCOPES,
+  OUT_OF_SCOPE_POLICIES,
+  deriveAgentScope,
+  type AgentScope,
+  type OutOfScopePolicy,
+} from "@/lib/agents/agent-scope";
+import {
   GMAIL_TOOL_ACTIONS,
   getGmailActionDescription,
   getGmailActionLabel,
@@ -32,12 +46,6 @@ import {
   getGoogleCalendarActionLabel,
   GOOGLE_CALENDAR_TOOL_ACTIONS,
 } from "@/lib/integrations/google-agent-tools";
-import {
-  getHubSpotActionDescription,
-  getHubSpotActionLabel,
-  HUBSPOT_CRM_ACTIONS,
-  HUBSPOT_LOOKUP_ACTIONS,
-} from "@/lib/integrations/hubspot-tools";
 import {
   getSalesforceActionDescription,
   getSalesforceActionLabel,
@@ -103,10 +111,6 @@ export const AGENT_TEMPLATE_IDS = [
   "salesforce_case_triage",
   "salesforce_opportunity_follow_up",
   "salesforce_post_sale_handoff",
-  "hubspot_lead_capture",
-  "hubspot_pipeline_follow_up",
-  "hubspot_meeting_booking",
-  "hubspot_reactivation_follow_up",
   "gmail_inbox_assistant",
   "calendar_booking_assistant",
   "gmail_follow_up_assistant",
@@ -134,7 +138,6 @@ export type AgentSetupChecklistVerificationMode = (typeof CHECKLIST_VERIFICATION
 
 export const PROVIDER_INTEGRATION_PROVIDERS = [
   "salesforce",
-  "hubspot",
   "gmail",
   "google_calendar",
 ] as const;
@@ -202,8 +205,13 @@ export type AgentSetupTaskData = Record<string, unknown>;
 export type AgentSetupState = {
   version: 1;
   template_id: AgentTemplateId | null;
+  workflowId: PublicWorkflowId;
+  agentScope: AgentScope;
+  outOfScopePolicy: OutOfScopePolicy;
   workflowTemplateId: WorkflowTemplateId | null;
   workflowCategory: WorkflowCategory | null;
+  capabilities: AgentCapability[];
+  businessInstructions: BusinessInstructions;
   requiredIntegrations: WizardIntegrationId[];
   optionalIntegrations: WizardIntegrationId[];
   allowedAutomationPresets: AutomationPreset[];
@@ -229,6 +237,7 @@ export type ActivationReadiness = {
 
 export type SetupResolutionContext = {
   hasReadyDocuments?: boolean;
+  hasAutomations?: boolean;
   fallbackTimezone?: string;
   googleCalendarDetectedTimezone?: string | null;
   providerIntegrations?: Partial<Record<ProviderIntegrationProvider, {
@@ -237,6 +246,15 @@ export type SetupResolutionContext = {
     checklistLabel?: string;
     checklistDescription?: string;
   }>>;
+};
+
+export type BusinessInstructions = {
+  objective: string;
+  context: string;
+  tasks: string;
+  restrictions: string;
+  handoffCriteria: string;
+  outputStyle: string;
 };
 
 export const promptBuilderDraftSchema = z.object({
@@ -260,6 +278,16 @@ export const workflowInstanceConfigSchema = z.object({
   toneSummary: z.string(),
 });
 
+export const businessInstructionsSchema = z.object({
+  objective: z.string(),
+  context: z.string(),
+  tasks: z.string(),
+  restrictions: z.string(),
+  handoffCriteria: z.string(),
+  outputStyle: z.string(),
+});
+export const businessInstructionsPatchSchema = businessInstructionsSchema.partial();
+
 export const agentSetupChecklistItemSchema = z.object({
   id: z.string().min(1, "Item de setup invalido"),
   label: z.string().min(1, "Etiqueta invalida"),
@@ -277,8 +305,20 @@ export const agentSetupChecklistItemSchema = z.object({
 export const agentSetupStateSchema = z.object({
   version: z.literal(1),
   template_id: z.enum(AGENT_TEMPLATE_IDS).nullable(),
+  workflowId: z.enum(PUBLIC_WORKFLOW_IDS).optional().default("general_operations"),
+  agentScope: z.enum(AGENT_SCOPES).optional().default("operations"),
+  outOfScopePolicy: z.enum(OUT_OF_SCOPE_POLICIES).optional().default("reject_and_redirect"),
   workflowTemplateId: z.enum(WORKFLOW_TEMPLATE_IDS).nullable().optional().default(null),
   workflowCategory: z.enum(WORKFLOW_CATEGORIES).nullable().optional().default(null),
+  capabilities: z.array(z.enum(AGENT_CAPABILITIES)).optional().default([]),
+  businessInstructions: businessInstructionsSchema.optional().default({
+    objective: "",
+    context: "",
+    tasks: "",
+    restrictions: "",
+    handoffCriteria: "",
+    outputStyle: "",
+  }),
   requiredIntegrations: z.array(z.enum(WIZARD_INTEGRATION_IDS)).optional().default([]),
   optionalIntegrations: z.array(z.enum(WIZARD_INTEGRATION_IDS)).optional().default([]),
   allowedAutomationPresets: z.array(z.enum(AUTOMATION_PRESETS)).optional().default([]),
@@ -332,8 +372,13 @@ export function deriveSetupStatus(checklist: AgentSetupChecklistItem[]): AgentSe
 
 export function createSetupState(input: {
   templateId: AgentTemplateId | null;
+  workflowId?: PublicWorkflowId;
+  agentScope?: AgentScope;
+  outOfScopePolicy?: OutOfScopePolicy;
   workflowTemplateId?: WorkflowTemplateId | null;
   workflowCategory?: WorkflowCategory | null;
+  capabilities?: AgentCapability[];
+  businessInstructions?: BusinessInstructions;
   requiredIntegrations?: WizardIntegrationId[];
   optionalIntegrations?: WizardIntegrationId[];
   allowedAutomationPresets?: AutomationPreset[];
@@ -354,8 +399,13 @@ export function createSetupState(input: {
     {
       version: 1,
       template_id: input.templateId,
+      workflowId: input.workflowId ?? "general_operations",
+      agentScope: input.agentScope ?? "operations",
+      outOfScopePolicy: input.outOfScopePolicy ?? "reject_and_redirect",
       workflowTemplateId: input.workflowTemplateId ?? null,
       workflowCategory: input.workflowCategory ?? null,
+      capabilities: input.capabilities ?? [],
+      businessInstructions: input.businessInstructions ?? createEmptyBusinessInstructions(),
       requiredIntegrations: input.requiredIntegrations ?? [],
       optionalIntegrations: input.optionalIntegrations ?? [],
       allowedAutomationPresets: input.allowedAutomationPresets ?? [],
@@ -378,6 +428,9 @@ export function createSetupState(input: {
 
 export function createDefaultAgentSetupState(input: {
   templateId?: AgentTemplateId | null;
+  workflowId?: PublicWorkflowId;
+  agentScope?: AgentScope;
+  outOfScopePolicy?: OutOfScopePolicy;
   workflowTemplateId?: WorkflowTemplateId | null;
   areas?: AgentArea[];
   integrations?: WizardIntegrationId[];
@@ -392,8 +445,13 @@ export function createDefaultAgentSetupState(input: {
     {
       version: 1,
       template_id: input.templateId ?? null,
+      workflowId: input.workflowId ?? "general_operations",
+      agentScope: input.agentScope ?? "operations",
+      outOfScopePolicy: input.outOfScopePolicy ?? "reject_and_redirect",
       workflowTemplateId: input.workflowTemplateId ?? null,
       workflowCategory: null,
+      capabilities: [],
+      businessInstructions: createEmptyBusinessInstructions(),
       requiredIntegrations: [],
       optionalIntegrations: [],
       allowedAutomationPresets: [],
@@ -465,10 +523,20 @@ export function resolveSetupState(
   const instanceConfigSource =
     setupState.instanceConfig ?? createEmptyWorkflowInstanceConfig();
   const builderDraftSource = setupState.builder_draft ?? createEmptyPromptBuilderDraft(setupState.channel);
+  const businessInstructionsSource =
+    setupState.businessInstructions ?? createEmptyBusinessInstructions();
   const taskDataSource = setupState.task_data ?? {};
   const workflowTemplate = setupState.workflowTemplateId
     ? getWorkflowTemplateById(setupState.workflowTemplateId)
     : null;
+  const agentScope = deriveAgentScope({
+    agentScope: setupState.agentScope,
+    templateId: setupState.template_id,
+    workflowCategory: workflowTemplate?.category ?? setupState.workflowCategory,
+    workflowTemplateId: setupState.workflowTemplateId,
+  });
+  const outOfScopePolicy: OutOfScopePolicy = "reject_and_redirect";
+  const publicWorkflow = GENERAL_OPERATIONS_WORKFLOW;
   const requiredIntegrations = workflowTemplate
     ? [...workflowTemplate.requiredIntegrations]
     : [...requiredIntegrationsSource];
@@ -487,7 +555,7 @@ export function resolveSetupState(
       ? setupState.automationPreset
       : workflowTemplate?.defaultAutomationPreset ?? null;
   const instanceConfig = {
-    ...(workflowTemplate?.defaultInstanceConfig ?? createEmptyWorkflowInstanceConfig()),
+    ...(workflowTemplate?.defaultInstanceConfig ?? publicWorkflow.defaultInstanceConfig),
     ...instanceConfigSource,
   };
   const areas = workflowTemplate
@@ -520,10 +588,27 @@ export function resolveSetupState(
       status: resolveChecklistItemStatus(normalizedItem, setupState, taskData, context, fallbackTimezone),
     };
   });
+  const normalizedBusinessInstructions = normalizeBusinessInstructions({
+    businessInstructions: businessInstructionsSource,
+    builderDraft: builderDraftSource,
+    instanceConfig,
+  });
+  const capabilities = deriveCapabilities({
+    capabilities: setupState.capabilities,
+    integrations,
+    taskData,
+    hasAutomations: context.hasAutomations,
+    hasLegacyAutomationPreset: setupState.automationPreset !== null,
+  });
 
   return {
     ...setupState,
+    workflowId: setupState.workflowId ?? "general_operations",
+    agentScope,
+    outOfScopePolicy,
     workflowCategory: workflowTemplate?.category ?? setupState.workflowCategory,
+    capabilities,
+    businessInstructions: normalizedBusinessInstructions,
     requiredIntegrations: [...new Set(requiredIntegrations)],
     optionalIntegrations: [...new Set(optionalIntegrations)],
     allowedAutomationPresets: [...new Set(allowedAutomationPresets)],
@@ -695,6 +780,17 @@ export function createEmptyPromptBuilderDraft(channel: ChannelIntent): PromptBui
   };
 }
 
+export function createEmptyBusinessInstructions(): BusinessInstructions {
+  return {
+    objective: "",
+    context: "",
+    tasks: "",
+    restrictions: "",
+    handoffCriteria: "",
+    outputStyle: "",
+  };
+}
+
 export function createEmptyWorkflowInstanceConfig(): WorkflowInstanceConfig {
   return {
     language: "es",
@@ -731,11 +827,6 @@ const SALESFORCE_TOOL_SCOPE: IntegrationToolScope = {
   full: [...SALESFORCE_CRM_ACTIONS],
 };
 
-const HUBSPOT_TOOL_SCOPE: IntegrationToolScope = {
-  conservative: [...HUBSPOT_LOOKUP_ACTIONS, "create_task"],
-  full: [...HUBSPOT_CRM_ACTIONS],
-};
-
 const GMAIL_TOOL_SCOPE: IntegrationToolScope = {
   conservative: ["search_threads", "read_thread"],
   full: ["search_threads", "read_thread"],
@@ -748,7 +839,6 @@ const GOOGLE_CALENDAR_TOOL_SCOPE: IntegrationToolScope = {
 
 const INTEGRATION_TOOL_SCOPES: Partial<Record<WizardIntegrationId, IntegrationToolScope>> = {
   salesforce: SALESFORCE_TOOL_SCOPE,
-  hubspot: HUBSPOT_TOOL_SCOPE,
   gmail: GMAIL_TOOL_SCOPE,
   google_calendar: GOOGLE_CALENDAR_TOOL_SCOPE,
 };
@@ -758,11 +848,6 @@ const INTEGRATION_TOOL_OPTIONS: Partial<Record<WizardIntegrationId, ToolScopeOpt
     id: action,
     label: getSalesforceActionLabel(action),
     description: getSalesforceActionDescription(action),
-  })),
-  hubspot: HUBSPOT_CRM_ACTIONS.map((action) => ({
-    id: action,
-    label: getHubSpotActionLabel(action),
-    description: getHubSpotActionDescription(action),
   })),
   gmail: GMAIL_TOOL_ACTIONS.map((action) => ({
     id: action,
@@ -829,8 +914,103 @@ export function getResolvedToolsForIntegration(
   return getToolsForScope(integration, setupState.tool_scope_preset, customSelections[integration]);
 }
 
+export function applyPublicWorkflowFields(input: {
+  setupState: AgentSetupState | null | undefined;
+  workflowId?: PublicWorkflowId;
+  agentScope?: AgentScope;
+  outOfScopePolicy?: OutOfScopePolicy;
+  capabilities?: AgentCapability[];
+  businessInstructions?: Partial<BusinessInstructions>;
+  fallbackTimezone?: string;
+}): AgentSetupState {
+  const baseSetupState = input.setupState
+    ? resolveSetupState(input.setupState, { fallbackTimezone: input.fallbackTimezone })
+    : createDefaultAgentSetupState({ fallbackTimezone: input.fallbackTimezone });
 
+  return resolveSetupState(
+    {
+      ...baseSetupState,
+      workflowId: input.workflowId ?? baseSetupState.workflowId,
+      agentScope: input.agentScope ?? baseSetupState.agentScope,
+      outOfScopePolicy: input.outOfScopePolicy ?? baseSetupState.outOfScopePolicy,
+      capabilities: input.capabilities ?? baseSetupState.capabilities,
+      businessInstructions: {
+        ...baseSetupState.businessInstructions,
+        ...(input.businessInstructions ?? {}),
+      },
+    },
+    { fallbackTimezone: input.fallbackTimezone }
+  );
+}
 
+function normalizeBusinessInstructions(input: {
+  businessInstructions: BusinessInstructions;
+  builderDraft: PromptBuilderDraft;
+  instanceConfig: WorkflowInstanceConfig;
+}): BusinessInstructions {
+  const builderContext = [
+    input.builderDraft.audience.trim(),
+    input.instanceConfig.ownerLabel.trim(),
+    input.instanceConfig.routingMode.trim(),
+  ].filter((value) => value.length > 0).join(" ");
+  const outputStyle = [
+    input.instanceConfig.toneSummary.trim(),
+    input.builderDraft.openingMessage.trim()
+      ? `Mensaje inicial sugerido: ${input.builderDraft.openingMessage.trim()}`
+      : "",
+  ].filter((value) => value.length > 0).join(" ");
 
+  return {
+    objective: input.businessInstructions.objective.trim() || input.builderDraft.objective.trim(),
+    context: input.businessInstructions.context.trim() || builderContext,
+    tasks: input.businessInstructions.tasks.trim() || input.builderDraft.allowedTasks.trim(),
+    restrictions: input.businessInstructions.restrictions.trim() || input.builderDraft.restrictions.trim(),
+    handoffCriteria:
+      input.businessInstructions.handoffCriteria.trim() || input.builderDraft.humanHandoff.trim(),
+    outputStyle: input.businessInstructions.outputStyle.trim() || outputStyle,
+  };
+}
+
+function deriveCapabilities(input: {
+  capabilities: AgentCapability[];
+  integrations: WizardIntegrationId[];
+  taskData: AgentSetupTaskData;
+  hasAutomations?: boolean;
+  hasLegacyAutomationPreset: boolean;
+}): AgentCapability[] {
+  const explicit = Array.isArray(input.capabilities)
+    ? input.capabilities.filter((capability): capability is AgentCapability =>
+      AGENT_CAPABILITIES.includes(capability))
+    : [];
+
+  if (explicit.length > 0) {
+    return [...new Set<AgentCapability>(["request_handling", ...explicit])];
+  }
+
+  const derived = new Set<AgentCapability>(["request_handling"]);
+  const integrations = input.integrations.filter((integration) => INTEGRATION_TOOL_SCOPES[integration]);
+
+  if (integrations.length > 0) {
+    derived.add("integrated_reads");
+  }
+
+  const hasWriteTools = integrations.some((integration) =>
+    getToolsForScope(integration, "full").some((action) => isWriteAction(action))
+  );
+
+  if (hasWriteTools) {
+    derived.add("integrated_writes_with_approval");
+  }
+
+  if (input.hasAutomations === true || input.hasLegacyAutomationPreset) {
+    derived.add("scheduled_jobs");
+  }
+
+  return [...derived];
+}
+
+function isWriteAction(actionId: string): boolean {
+  return !["search", "read", "list", "check", "get"].some((prefix) => actionId.startsWith(prefix));
+}
 
 

@@ -1,17 +1,21 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { DynamicChatFormCard } from "@/components/chat/dynamic-chat-form-card";
 import {
   InlineChatConfirmationCard,
-  InlineChatFormCard,
 } from "@/components/chat/inline-chat-form-card";
 import type { ActiveChatUiState } from "@/lib/chat/chat-form-state";
 import { extractChatFollowUpIntents } from "@/lib/chat/follow-up-intents";
 import {
-  getChatFormDefinition,
   parseChatConfirmationMarker,
-  parseChatFormMarker,
 } from "@/lib/chat/inline-forms";
+import {
+  parseChoiceChipsMarker,
+  parseDynamicFormMarker,
+  buildDynamicFormSubmissionMessage,
+  type DynamicFormDefinition,
+} from "@/lib/chat/interactive-markers";
 import {
   resolveInlineFallbackQuickActions,
   type ChatQuickAction,
@@ -26,14 +30,8 @@ type MessageListProps = {
   onQuickActionSelect?: (prompt: string) => void;
   onFollowUpIntentSelect?: (prompt: string) => void;
   activeUiState?: ActiveChatUiState;
-  activeFormValues?: Record<string, string>;
-  activeFormFieldErrors?: Record<string, string>;
-  activeFormError?: string | null;
-  isSavingFormDraft?: boolean;
-  onFormDraftChange?: (values: Record<string, string>) => void;
-  onFormDismiss?: () => void;
-  onFormSubmit?: (values: Record<string, string>) => void | Promise<void>;
   onFormConfirm?: () => void;
+  onDynamicFormSubmit?: (definition: DynamicFormDefinition, values: Record<string, string>) => void;
   isLoading?: boolean;
 };
 
@@ -44,14 +42,8 @@ export function MessageList({
   onQuickActionSelect,
   onFollowUpIntentSelect,
   activeUiState = { kind: "none" },
-  activeFormValues,
-  activeFormFieldErrors,
-  activeFormError,
-  isSavingFormDraft = false,
-  onFormDraftChange,
-  onFormDismiss,
-  onFormSubmit,
   onFormConfirm,
+  onDynamicFormSubmit,
   isLoading = false,
 }: MessageListProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -60,7 +52,7 @@ export function MessageList({
   >(new Set());
   const inlineFallbackActions = useMemo(
     () =>
-      quickActions?.isCrmChat
+      quickActions?.hasConnectedIntegrations
         ? resolveInlineFallbackQuickActions(quickActions)
         : [],
     [quickActions]
@@ -115,32 +107,40 @@ export function MessageList({
     <div className="flex flex-1 flex-col overflow-y-auto">
       {messages.map((message) => {
         const isUser = message.role === "user";
-        const parsedFormMarker = isUser ? null : parseChatFormMarker(message.content);
         const parsedConfirmationMarker =
-          isUser || parsedFormMarker
+          isUser ? null : parseChatConfirmationMarker(message.content);
+        const parsedChoices =
+          isUser || parsedConfirmationMarker
             ? null
-            : parseChatConfirmationMarker(message.content);
+            : parseChoiceChipsMarker(message.content);
+        const parsedDynamicForm =
+          isUser || parsedConfirmationMarker || parsedChoices
+            ? null
+            : parseDynamicFormMarker(message.content);
         const renderedContent =
-          parsedFormMarker?.content ??
+          parsedChoices?.strippedContent ??
+          parsedDynamicForm?.strippedContent ??
           parsedConfirmationMarker?.content ??
           message.content;
-        const isActiveFormInline =
-          activeUiState.kind === "form" &&
-          activeUiState.session.sourceMessageId === message.id &&
-          !dismissedInlineSurfaces.has(message.id) &&
-          !isLoading;
         const isActiveConfirmationInline =
           activeUiState.kind === "confirmation" &&
           activeUiState.sourceMessageId === message.id &&
           !dismissedInlineSurfaces.has(message.id) &&
           !isLoading;
-        const activeFormDefinition =
-          isActiveFormInline
-            ? getChatFormDefinition(activeUiState.session.formId)
-            : null;
         const shouldShowConfirmationCard = isActiveConfirmationInline;
+        const shouldShowDynamicForm =
+          !isUser &&
+          !isLoading &&
+          parsedDynamicForm !== null &&
+          message.id === lastAssistantMessageId &&
+          !dismissedInlineSurfaces.has(message.id) &&
+          !shouldShowConfirmationCard;
+        const shouldShowChoiceChips =
+          !isUser &&
+          parsedChoices !== null &&
+          !shouldShowConfirmationCard;
         const followUpIntents =
-          isUser || activeFormDefinition || shouldShowConfirmationCard
+          isUser || shouldShowChoiceChips || shouldShowDynamicForm || shouldShowConfirmationCard
             ? []
             : extractChatFollowUpIntents(renderedContent);
         const shouldShowInlineFallback =
@@ -148,7 +148,8 @@ export function MessageList({
           !isLoading &&
           followUpIntents.length === 0 &&
           message.id === lastAssistantMessageId &&
-          !activeFormDefinition &&
+          !shouldShowDynamicForm &&
+          !shouldShowChoiceChips &&
           !shouldShowConfirmationCard &&
           inlineFallbackActions.length > 0;
 
@@ -181,43 +182,39 @@ export function MessageList({
                     {renderedContent}
                   </div>
                 ) : null}
-                {!isUser ? (
-                  <div className="mt-4 flex items-center gap-2">
-                    <button
-                      type="button"
-                      className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50"
-                      aria-label="Marcar respuesta como util"
-                    >
-                      ??
-                    </button>
-                    <button
-                      type="button"
-                      className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50"
-                      aria-label="Marcar respuesta como no util"
-                    >
-                      ??
-                    </button>
-                  </div>
-                ) : null}
-                {activeFormDefinition ? (
-                  <InlineChatFormCard
-                    definition={activeFormDefinition}
-                    initialValues={activeFormValues}
-                    fieldErrors={activeFormFieldErrors}
-                    submitError={activeFormError}
+                {shouldShowDynamicForm && parsedDynamicForm ? (
+                  <DynamicChatFormCard
+                    definition={parsedDynamicForm.definition}
                     disabled={isLoading}
-                    isSavingDraft={isSavingFormDraft}
-                    onChange={onFormDraftChange}
+                    onSubmit={(values) =>
+                      onDynamicFormSubmit?.(
+                        parsedDynamicForm.definition,
+                        values
+                      )
+                    }
                     onDismiss={() => {
                       setDismissedInlineSurfaces((current) => {
                         const next = new Set(current);
                         next.add(message.id);
                         return next;
                       });
-                      onFormDismiss?.();
                     }}
-                    onSubmit={onFormSubmit ?? (() => undefined)}
                   />
+                ) : null}
+                {shouldShowChoiceChips && parsedChoices ? (
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    {parsedChoices.choices.map((choice) => (
+                      <button
+                        key={`${message.id}-choice-${choice}`}
+                        type="button"
+                        disabled={isLoading}
+                        onClick={() => onFollowUpIntentSelect?.(choice)}
+                        className="rounded-full border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-800 shadow-sm transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {choice}
+                      </button>
+                    ))}
+                  </div>
                 ) : null}
                 {shouldShowConfirmationCard ? (
                   <InlineChatConfirmationCard
@@ -258,6 +255,32 @@ export function MessageList({
                   </div>
                 ) : null}
               </div>
+
+              {!isUser ? (
+                <div className="ml-2 flex shrink-0 flex-col items-center gap-1 pt-6">
+                  <p className="mb-1 text-[9px] font-bold uppercase tracking-[0.15em] text-slate-400">QA</p>
+                  <button
+                    type="button"
+                    className="flex h-7 w-7 items-center justify-center rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-600 transition hover:bg-emerald-100 hover:text-emerald-700"
+                    aria-label="Respuesta correcta"
+                    title="Respuesta correcta"
+                  >
+                    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                    </svg>
+                  </button>
+                  <button
+                    type="button"
+                    className="flex h-7 w-7 items-center justify-center rounded-lg border border-rose-200 bg-rose-50 text-rose-500 transition hover:bg-rose-100 hover:text-rose-600"
+                    aria-label="Respuesta incorrecta"
+                    title="Respuesta incorrecta"
+                  >
+                    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+              ) : null}
             </div>
           </div>
         );

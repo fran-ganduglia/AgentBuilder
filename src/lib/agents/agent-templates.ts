@@ -18,6 +18,7 @@ import {
   createDefaultCriteriaTaskData,
   createDefaultScheduleTaskData,
 } from "@/lib/agents/agent-setup-task-data";
+import { compileLayeredSystemPrompt } from "@/lib/agents/prompt-compiler";
 import type { WizardEcosystemId } from "@/lib/agents/wizard-ecosystems";
 
 export type AgentTemplate = {
@@ -825,240 +826,6 @@ export const AGENT_TEMPLATES: AgentTemplate[] = [
     ],
   },
   {
-    id: "hubspot_lead_capture",
-    name: "Captura de Leads HubSpot",
-    description: "Hace preguntas clave, estructura contexto y deja el lead listo para un pipeline comercial ordenado.",
-    ecosystem: "hubspot",
-    channel: "api",
-    objectiveLabel: "Capturar leads listos para HubSpot",
-    recommendedModel: "gpt-4o",
-    recommendedTemperature: 0.55,
-    builderDefaults: {
-      objective: "Capturar leads con el contexto minimo necesario antes de enviarlos a un flujo comercial.",
-      role: "Asistente de captacion para HubSpot",
-      audience: "Visitantes o prospectos que piden informacion comercial",
-      allowedTasks: "Hacer preguntas de contexto, detectar interes real, resumir necesidad y sugerir el mejor siguiente paso.",
-      tone: "friendly",
-      restrictions: "No pedir mas datos de los necesarios, no inventar propiedades del CRM y no presionar al lead.",
-      humanHandoff: "Derivar cuando el lead pida reunion, demo o condiciones especiales que requieran a ventas.",
-      openingMessage: "Hola, voy a ayudarte a dejar tu consulta lista para el equipo comercial.",
-      channel: "api",
-    },
-    setupChecklist: [
-      providerIntegrationItem({
-        id: "connect-hubspot-crm",
-        label: "Conectar HubSpot y habilitar tool CRM",
-        description: "Requiere una integracion HubSpot usable y la tool CRM habilitada para este agente.",
-        required_for_activation: true,
-        integration_provider: "hubspot",
-      }),
-      criteriaItem({
-        id: "define-hubspot-capture-fields",
-        label: "Definir datos minimos a capturar",
-        description: "Elige que datos debe conseguir el agente antes de considerar completa la captura.",
-        required_for_activation: true,
-        options: [
-          "Nombre y empresa",
-          "Caso de uso principal",
-          "Urgencia del proyecto",
-          "Canal preferido de contacto",
-        ],
-        placeholder: "Agrega otro dato minimo.",
-      }),
-      criteriaItem({
-        id: "define-hubspot-qualification",
-        label: "Definir reglas de calificacion",
-        description: "Marca las senales que convierten una consulta en oportunidad real.",
-        required_for_activation: true,
-        options: [
-          "Problema claro a resolver",
-          "Volumen o tamano de equipo",
-          "Presupuesto orientativo",
-          "Plazo de decision",
-        ],
-        placeholder: "Agrega otra regla de calificacion.",
-      }),
-      manualConfirmItem({
-        id: "review-hubspot-owner-handoff",
-        label: "Revisar handoff a owner comercial",
-        description: "Confirma que ya este definido quien recibe el resumen o follow-up cuando el lead queda listo.",
-        required_for_activation: false,
-      }),
-    ],
-  },
-  {
-    id: "hubspot_pipeline_follow_up",
-    name: "Follow-up de Pipeline HubSpot",
-    description: "Detecta oportunidades frenadas, propone proximo paso y mantiene consistencia en el seguimiento.",
-    ecosystem: "hubspot",
-    channel: "api",
-    objectiveLabel: "Sostener seguimiento comercial",
-    recommendedModel: "gpt-4o-mini",
-    recommendedTemperature: 0.45,
-    builderDefaults: {
-      objective: "Ayudar a que el pipeline comercial no pierda ritmo y que cada oportunidad tenga un siguiente paso claro.",
-      role: "Asistente de follow-up comercial",
-      audience: "Leads y oportunidades ya calificadas que necesitan seguimiento ordenado",
-      allowedTasks: "Detectar estancamiento, resumir contexto, sugerir follow-up y advertir cuando conviene intervenir en humano.",
-      tone: "professional",
-      restrictions: "No prometer cierres, no acosar al prospecto y no asumir estados del pipeline que no esten confirmados.",
-      humanHandoff: "Derivar cuando el negocio se enfrie, surjan objeciones complejas o haga falta una negociacion humana.",
-      openingMessage: "Voy a ayudarte a mantener este seguimiento comercial claro y accionable.",
-      channel: "api",
-    },
-    setupChecklist: [
-      providerIntegrationItem({
-        id: "connect-hubspot-crm",
-        label: "Conectar HubSpot y habilitar tool CRM",
-        description: "Requiere una integracion HubSpot usable y la tool CRM habilitada para este agente.",
-        required_for_activation: true,
-        integration_provider: "hubspot",
-      }),
-      scheduleItem({
-        id: "define-hubspot-followup-cadence",
-        label: "Definir cadencia de seguimiento",
-        description: "Ajusta dias y horarios aceptables para follow-up y recordatorios.",
-        required_for_activation: true,
-      }),
-      criteriaItem({
-        id: "define-hubspot-stalled-signals",
-        label: "Definir senales de oportunidad frenada",
-        description: "Selecciona las condiciones que obligan al agente a pedir intervencion humana.",
-        required_for_activation: true,
-        options: [
-          "Sin respuesta durante varios intentos",
-          "Objecion de precio o prioridad",
-          "Cambio de decision maker",
-          "Pedido de condiciones especiales",
-        ],
-        placeholder: "Agrega otra senal de pipeline frenado.",
-      }),
-      manualConfirmItem({
-        id: "confirm-hubspot-playbook",
-        label: "Confirmar playbook de seguimiento",
-        description: "Marca este paso cuando el equipo comercial ya haya revisado el tono y la secuencia propuesta.",
-        required_for_activation: false,
-      }),
-    ],
-  },
-  {
-    id: "hubspot_meeting_booking",
-    name: "Coordinacion de Reuniones HubSpot",
-    description: "Ayuda a coordinar demos o reuniones comerciales desde HubSpot sin asumir disponibilidad inexistente.",
-    ecosystem: "hubspot",
-    channel: "api",
-    objectiveLabel: "Coordinar demos con orden",
-    recommendedModel: "gpt-4o-mini",
-    recommendedTemperature: 0.4,
-    builderDefaults: {
-      objective: "Coordinar demos y reuniones comerciales con reglas claras de disponibilidad y derivacion.",
-      role: "Asistente de coordinacion comercial",
-      audience: "Leads u oportunidades que necesitan agendar una demo o reunion desde flujos de HubSpot",
-      allowedTasks: "Proponer horarios, resumir condiciones, ordenar booking y advertir cuando hace falta intervencion humana.",
-      tone: "friendly",
-      restrictions: "No confirmar horarios inexistentes, no mover reuniones sensibles sin reglas y no inventar disponibilidad.",
-      humanHandoff: "Derivar cuando haya excepciones de agenda, conflicto de participantes o una validacion humana necesaria para cerrar la reunion.",
-      openingMessage: "Voy a ayudarte a coordinar esta reunion comercial de forma clara y sin fricciones.",
-      channel: "api",
-    },
-    setupChecklist: [
-      providerIntegrationItem({
-        id: "connect-hubspot-crm",
-        label: "Conectar HubSpot y habilitar tool CRM",
-        description: "Requiere una integracion HubSpot usable y la tool CRM habilitada para este agente.",
-        required_for_activation: true,
-        integration_provider: "hubspot",
-      }),
-      scheduleItem({
-        id: "define-hubspot-meeting-availability-window",
-        label: "Definir ventana de disponibilidad",
-        description: "Configura los dias y horarios base en los que se pueden proponer demos o reuniones.",
-        required_for_activation: true,
-      }),
-      criteriaItem({
-        id: "define-hubspot-booking-rules",
-        label: "Definir reglas de booking",
-        description: "Alinea las condiciones que el agente debe respetar antes de proponer o confirmar una reunion.",
-        required_for_activation: true,
-        options: [
-          "Buffer entre reuniones",
-          "Duracion permitida",
-          "Participantes obligatorios",
-          "Confirmacion humana para casos especiales",
-        ],
-        placeholder: "Agrega otra regla de booking comercial.",
-      }),
-      manualConfirmItem({
-        id: "confirm-hubspot-booking-exceptions",
-        label: "Confirmar manejo de excepciones",
-        description: "Marca este item cuando el equipo ya haya definido como actuar ante conflictos o pedidos fuera de norma.",
-        required_for_activation: false,
-      }),
-    ],
-  },
-  {
-    id: "hubspot_reactivation_follow_up",
-    name: "Reactivacion de Leads HubSpot",
-    description: "Retoma conversaciones pausadas con follow-up liviano y limites claros de recontacto.",
-    ecosystem: "hubspot",
-    channel: "api",
-    objectiveLabel: "Reactivar leads frios",
-    recommendedModel: "gpt-4o-mini",
-    recommendedTemperature: 0.45,
-    builderDefaults: {
-      objective: "Reactivar leads frios o conversaciones pausadas sin perder criterio ni exceder la politica de contacto.",
-      role: "Asistente de reactivacion comercial",
-      audience: "Leads frios o conversaciones pausadas dentro de HubSpot que todavia podrian reactivarse",
-      allowedTasks: "Resumir contexto, sugerir follow-up simple, detectar si conviene cerrar y advertir cuando es mejor pasar a una persona.",
-      tone: "direct",
-      restrictions: "No spamear, no insistir fuera de politica y no inventar interes del lead.",
-      humanHandoff: "Derivar cuando el lead responda con un caso especial, aparezcan objeciones complejas o haya que redefinir la estrategia de contacto.",
-      openingMessage: "Voy a ayudarte a retomar esta conversacion con un follow-up breve y bien medido.",
-      channel: "api",
-    },
-    setupChecklist: [
-      providerIntegrationItem({
-        id: "connect-hubspot-crm",
-        label: "Conectar HubSpot y habilitar tool CRM",
-        description: "Requiere una integracion HubSpot usable y la tool CRM habilitada para este agente.",
-        required_for_activation: true,
-        integration_provider: "hubspot",
-      }),
-      scheduleItem({
-        id: "define-hubspot-reactivation-cadence",
-        label: "Definir cadencia de recontacto",
-        description: "Ajusta cada cuanto y en que horarios el agente puede intentar una reactivacion.",
-        required_for_activation: true,
-      }),
-      criteriaItem({
-        id: "define-hubspot-reactivation-close-rules",
-        label: "Definir criterios de cierre o pausa",
-        description: "Selecciona cuando el agente debe cerrar el intento, pausar o pedir una intervencion humana.",
-        required_for_activation: true,
-        options: [
-          "Sin respuesta tras varios intentos",
-          "Pedido explicito de no contacto",
-          "Lead sin prioridad actual",
-          "Caso especial que requiere a ventas",
-        ],
-        placeholder: "Agrega otro criterio de cierre o pausa.",
-      }),
-      criteriaItem({
-        id: "define-hubspot-reactivation-contact-limits",
-        label: "Definir limites de recontacto",
-        description: "Marca los topes que el agente debe respetar antes de volver a escribir.",
-        required_for_activation: true,
-        options: [
-          "Maximo de intentos por lead",
-          "No insistir fuera de horario",
-          "Esperar enfriamiento antes de retomar",
-          "Cambiar a humano si responde con objeciones",
-        ],
-        placeholder: "Agrega otro limite de recontacto.",
-      }),
-    ],
-  },
-  {
     id: "gmail_inbox_assistant",
     name: "Asistente de Inbox Gmail",
     description: "Prioriza correos, propone respuesta y ordena handoffs operativos para el equipo.",
@@ -1559,7 +1326,6 @@ export const AGENT_TEMPLATES: AgentTemplate[] = [
 export type PromptSyncMode = "recommended" | "custom";
 export type RecommendedPromptEnvironment = {
   salesforceUsable?: boolean;
-  hubspotUsable?: boolean;
   gmailConfigured?: boolean;
   gmailRuntimeAvailable?: boolean;
   googleCalendarConfigured?: boolean;
@@ -1572,7 +1338,6 @@ export type RecommendedPromptCandidate = {
   prompt: string;
   variant: RecommendedPromptVariant;
   salesforceUsable: boolean | null;
-  hubspotUsable: boolean | null;
   gmailConfigured: boolean | null;
   gmailRuntimeAvailable: boolean | null;
   googleCalendarConfigured: boolean | null;
@@ -1601,7 +1366,6 @@ export function getRecommendedPromptCandidates(
         prompt: buildCurrentRecommendedSystemPrompt(setupState, environment),
         variant: "current",
         salesforceUsable: null,
-        hubspotUsable: null,
         gmailConfigured: null,
         gmailRuntimeAvailable: null,
         googleCalendarConfigured: null,
@@ -1620,7 +1384,6 @@ export function getRecommendedPromptCandidates(
       ),
       variant: "current",
       salesforceUsable: variantEnvironment.salesforceUsable ?? null,
-      hubspotUsable: variantEnvironment.hubspotUsable ?? null,
       gmailConfigured: variantEnvironment.gmailConfigured ?? null,
       gmailRuntimeAvailable: variantEnvironment.gmailRuntimeAvailable ?? null,
       googleCalendarConfigured: variantEnvironment.googleCalendarConfigured ?? null,
@@ -1637,7 +1400,6 @@ export function getRecommendedPromptCandidates(
       ),
       variant: "legacy",
       salesforceUsable: variantEnvironment.salesforceUsable ?? null,
-      hubspotUsable: variantEnvironment.hubspotUsable ?? null,
       gmailConfigured: variantEnvironment.gmailConfigured ?? null,
       gmailRuntimeAvailable: variantEnvironment.gmailRuntimeAvailable ?? null,
       googleCalendarConfigured: variantEnvironment.googleCalendarConfigured ?? null,
@@ -1684,6 +1446,14 @@ function buildCurrentRecommendedSystemPrompt(
     environment
   );
   const capabilityLines = resolveCapabilityLines(input, normalizedEnvironment);
+
+  if (isSetupState(input)) {
+    return compileLayeredSystemPrompt({
+      setupState: input,
+      onboardingContext,
+      integrationPolicyLines: capabilityLines,
+    });
+  }
 
   return buildPromptFromSections(draft, onboardingContext, capabilityLines);
 }
@@ -1743,7 +1513,6 @@ function normalizeRecommendedPromptEnvironment(
 ): RecommendedPromptEnvironment {
   if (
     !isSalesforceRecommendedPromptInput(input) &&
-    !isHubSpotRecommendedPromptInput(input) &&
     !isGmailRecommendedPromptInput(input) &&
     !isGoogleCalendarRecommendedPromptInput(input)
   ) {
@@ -1753,9 +1522,6 @@ function normalizeRecommendedPromptEnvironment(
   return {
     ...(isSalesforceRecommendedPromptInput(input)
       ? { salesforceUsable: environment.salesforceUsable === true }
-      : {}),
-    ...(isHubSpotRecommendedPromptInput(input)
-      ? { hubspotUsable: environment.hubspotUsable === true }
       : {}),
     ...(isGmailRecommendedPromptInput(input)
       ? {
@@ -1786,14 +1552,6 @@ function getRecommendedPromptEnvironmentVariants(
       environment.salesforceUsable === true
         ? [{ salesforceUsable: true }, { salesforceUsable: false }]
         : [{ salesforceUsable: false }, { salesforceUsable: true }]
-    );
-  }
-
-  if (environment.hubspotUsable !== undefined) {
-    dimensions.push(
-      environment.hubspotUsable === true
-        ? [{ hubspotUsable: true }, { hubspotUsable: false }]
-        : [{ hubspotUsable: false }, { hubspotUsable: true }]
     );
   }
 
@@ -1885,18 +1643,6 @@ function resolveCrmCapabilityLines(
     return [];
   }
 
-  if (!isHubSpotRecommendedPromptInput(input)) {
-    return [];
-  }
-
-  if (environment.hubspotUsable === true) {
-    return [
-      "Tienes acceso operativo al CRM mediante la integracion backend de HubSpot y las tools habilitadas de este agente.",
-      "Si el usuario pregunta por HubSpot o por el CRM, confirma ese acceso operativo sin prometer acciones que todavia no ejecutaste en este turno.",
-      "Si falta contexto para leer o escribir algo puntual, describe esa situacion concreta sin negar el acceso general al CRM.",
-    ];
-  }
-
   return [];
 }
 
@@ -1985,12 +1731,6 @@ function resolveLegacyCrmCapabilityLines(
       : [];
   }
 
-  if (isHubSpotRecommendedPromptInput(input)) {
-    return environment.hubspotUsable === true
-      ? ["Trabaja con contexto de CRM cuando este disponible, sin inventar datos ni asumir cambios no confirmados."]
-      : [];
-  }
-
   return [];
 }
 
@@ -2002,12 +1742,6 @@ function isSalesforceRecommendedPromptInput(
   value: RecommendedPromptInput
 ): value is AgentSetupState {
   return isSetupState(value) && (isSalesforceTemplateId(value.template_id) || value.integrations.includes("salesforce"));
-}
-
-function isHubSpotRecommendedPromptInput(
-  value: RecommendedPromptInput
-): value is AgentSetupState {
-  return isSetupState(value) && (isHubSpotTemplateId(value.template_id) || value.integrations.includes("hubspot"));
 }
 
 function isGmailRecommendedPromptInput(
@@ -2159,8 +1893,4 @@ function resolveToneInstruction(tone: PromptBuilderDraft["tone"]): string {
 
 
 
-
-export function isHubSpotTemplateId(templateId: AgentTemplateId | null | undefined): boolean {
-  return Boolean(templateId && getAgentTemplateById(templateId).ecosystem === "hubspot");
-}
 

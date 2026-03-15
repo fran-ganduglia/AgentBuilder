@@ -44,8 +44,6 @@ Copiar en el servicio las variables server-side que hoy usa la app para processo
 - `WORKERS_ENABLED=true`
 - `GOOGLE_CLIENT_ID`
 - `GOOGLE_CLIENT_SECRET`
-- `HUBSPOT_CLIENT_ID`
-- `HUBSPOT_CLIENT_SECRET`
 - `SALESFORCE_CLIENT_ID`
 - `SALESFORCE_CLIENT_SECRET`
 - `SALESFORCE_LOGIN_URL`

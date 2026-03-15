@@ -400,6 +400,7 @@ export function createGoogleCalendarChatOrchestrator(
         },
         workflowTemplateId: setupState?.workflowTemplateId ?? null,
         automationPreset: setupState?.automationPreset ?? null,
+        agentScope: setupState?.agentScope ?? "operations",
       });
 
       if (approvalRequest.error || !approvalRequest.data) {

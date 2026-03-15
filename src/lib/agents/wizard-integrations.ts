@@ -1,13 +1,9 @@
 ﻿export const WIZARD_INTEGRATION_IDS = [
   "whatsapp",
   "salesforce",
-  "hubspot",
   "gmail",
   "google_calendar",
   "slack",
-  "teams",
-  "notion",
-  "zapier",
 ] as const;
 
 export type WizardIntegrationId = (typeof WIZARD_INTEGRATION_IDS)[number];
@@ -41,14 +37,6 @@ export const WIZARD_INTEGRATIONS: WizardIntegration[] = [
     requiresConnection: true,
   },
   {
-    id: "hubspot",
-    name: "HubSpot",
-    description: "CRM para contactos, pipeline y marketing",
-    theme: "orange",
-    available: true,
-    requiresConnection: true,
-  },
-  {
     id: "gmail",
     name: "Gmail",
     description: "Bandeja de entrada y respuestas",
@@ -71,30 +59,6 @@ export const WIZARD_INTEGRATIONS: WizardIntegration[] = [
     theme: "violet",
     available: false,
     requiresConnection: true,
-  },
-  {
-    id: "teams",
-    name: "Microsoft Teams",
-    description: "Colaboracion y soporte empresarial",
-    theme: "violet",
-    available: false,
-    requiresConnection: true,
-  },
-  {
-    id: "notion",
-    name: "Notion",
-    description: "Base de conocimiento y documentacion",
-    theme: "slate",
-    available: false,
-    requiresConnection: true,
-  },
-  {
-    id: "zapier",
-    name: "Zapier",
-    description: "Automatizacion con miles de apps",
-    theme: "amber",
-    available: false,
-    requiresConnection: false,
   },
 ];
 

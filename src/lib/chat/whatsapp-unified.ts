@@ -1,3 +1,7 @@
+import {
+  buildOutOfScopeResponse,
+  type AgentScope,
+} from "@/lib/agents/agent-scope";
 import { resolveEffectiveAgentPrompt } from "@/lib/agents/effective-prompt";
 import { getAgentTemplateById } from "@/lib/agents/agent-templates";
 import { readAgentSetupState } from "@/lib/agents/agent-setup-state";
@@ -19,6 +23,13 @@ const ROUTING_FALLBACK_ALERT_THRESHOLD = 0.3;
 const CLASSIFIER_MAX_TOKENS = 120;
 
 const routingFallbackWindow: boolean[] = [];
+
+const WHATSAPP_INTENT_SCOPE_MAP: Record<WhatsAppKnownIntent, AgentScope> = {
+  support: "support",
+  sales: "sales",
+  appointment_booking: "operations",
+  reminder_follow_up: "operations",
+};
 
 export type PreparedWhatsAppUnifiedTurn =
   | {
@@ -70,6 +81,10 @@ export function buildWhatsAppUnifiedSystemPrompt(basePrompt: string, activeInten
     "PLAYBOOK_ACTIVO\n<active_playbook>\n" + buildWhatsAppActivePlaybook(activeIntent) + "\n</active_playbook>",
     "AISLAMIENTO_DE_INTENCION\nCambia de playbook solo si la senal del turno actual es claramente fuerte. Si no lo es, mantente en el playbook actual o pide aclaracion con menu.",
   ].join("\n\n");
+}
+
+export function resolveScopeForWhatsAppIntent(intent: WhatsAppKnownIntent): AgentScope {
+  return WHATSAPP_INTENT_SCOPE_MAP[intent];
 }
 
 function buildIntentMetadataPatch(input: {
@@ -250,6 +265,18 @@ export async function prepareWhatsAppUnifiedTurn(input: {
     return {
       kind: "respond_now",
       content: buildClarificationMenu(),
+      conversationMetadataPatch,
+    };
+  }
+
+  const targetScope = resolveScopeForWhatsAppIntent(decision.activeIntent);
+  if (targetScope !== setupState.agentScope) {
+    return {
+      kind: "respond_now",
+      content: buildOutOfScopeResponse({
+        agentScope: setupState.agentScope,
+        targetScope,
+      }),
       conversationMetadataPatch,
     };
   }

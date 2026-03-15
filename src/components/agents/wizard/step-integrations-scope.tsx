@@ -10,6 +10,7 @@ import {
 import {
   getIntegrationPlanUpsell,
   getMaxIntegrations,
+  getPlanScopeEducation,
   hasIntegrationLimitReached,
   type OrganizationPlanName,
 } from "@/lib/agents/agent-integration-limits";
@@ -116,6 +117,7 @@ export function StepIntegrationsScope({
   );
   const maxIntegrations = getMaxIntegrations(planName);
   const upsell = getIntegrationPlanUpsell(planName);
+  const scopeEducation = getPlanScopeEducation(planName);
   const selectedCount = selectedIntegrationIds.length;
   const hasReachedPlanLimit = hasIntegrationLimitReached(planName, selectedCount);
 
@@ -125,7 +127,7 @@ export function StepIntegrationsScope({
         <p className="text-sm font-semibold uppercase tracking-[0.2em] text-emerald-700">Paso 3</p>
         <h2 className="mt-2 text-2xl font-bold tracking-tight text-slate-900">Conecta sistemas requeridos y opcionales</h2>
         <p className="mt-2 max-w-3xl text-sm leading-relaxed text-slate-600">
-          Las integraciones requeridas quedan fijas por workflow template. Las opcionales pueden sumarse para enriquecer contexto sin bloquear la creacion del borrador.
+          Las integraciones requeridas quedan fijas por workflow template. En planes pagos puedes sumar multiples integraciones dentro del mismo agente; el crecimiento comercial se mide por scopes activos y sesiones mensuales.
         </p>
       </div>
 
@@ -148,7 +150,20 @@ export function StepIntegrationsScope({
             </Link>
           </div>
         </div>
-      ) : null}
+      ) : (
+        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5 shadow-sm">
+          <p className="text-sm font-semibold text-slate-900">{scopeEducation.title}</p>
+          <p className="mt-2 text-sm text-slate-600">{scopeEducation.description}</p>
+          <div className="mt-4">
+            <Link
+              href="/settings/billing"
+              className="inline-flex items-center justify-center rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-100"
+            >
+              Ver planes
+            </Link>
+          </div>
+        </div>
+      )}
 
       {requiredIntegrationIds.length > 0 ? (
         <article className="space-y-4">

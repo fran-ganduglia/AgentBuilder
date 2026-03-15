@@ -84,6 +84,78 @@ export type Database = {
           },
         ]
       }
+      agent_automations: {
+        Row: {
+          id: string
+          organization_id: string
+          agent_id: string
+          name: string
+          description: string | null
+          is_enabled: boolean
+          trigger_type: string
+          trigger_config: Json
+          action_type: string
+          action_config: Json
+          condition_config: Json
+          last_run_at: string | null
+          last_run_status: string | null
+          created_at: string
+          updated_at: string
+          deleted_at: string | null
+        }
+        Insert: {
+          id?: string
+          organization_id: string
+          agent_id: string
+          name: string
+          description?: string | null
+          is_enabled?: boolean
+          trigger_type: string
+          trigger_config?: Json
+          action_type: string
+          action_config?: Json
+          condition_config?: Json
+          last_run_at?: string | null
+          last_run_status?: string | null
+          created_at?: string
+          updated_at?: string
+          deleted_at?: string | null
+        }
+        Update: {
+          id?: string
+          organization_id?: string
+          agent_id?: string
+          name?: string
+          description?: string | null
+          is_enabled?: boolean
+          trigger_type?: string
+          trigger_config?: Json
+          action_type?: string
+          action_config?: Json
+          condition_config?: Json
+          last_run_at?: string | null
+          last_run_status?: string | null
+          created_at?: string
+          updated_at?: string
+          deleted_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agent_automations_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "agent_automations_agent_id_organization_id_fkey"
+            columns: ["agent_id", "organization_id"]
+            isOneToOne: false
+            referencedRelation: "agents"
+            referencedColumns: ["id", "organization_id"]
+          },
+        ]
+      }
       agent_documents: {
         Row: {
           agent_id: string

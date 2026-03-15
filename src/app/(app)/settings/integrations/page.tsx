@@ -3,7 +3,6 @@ import { requireUser } from "@/lib/auth/require-user";
 import { createWhatsAppConnectionView } from "@/lib/agents/whatsapp-connection";
 import { getLatestIntegrationByType } from "@/lib/db/integration-operations";
 import { getPrimaryGoogleIntegration } from "@/lib/db/google-integrations";
-import { getPrimaryHubSpotIntegration } from "@/lib/db/hubspot-integrations";
 import { getPrimarySalesforceIntegration } from "@/lib/db/salesforce-integrations";
 import { type GoogleSurface } from "@/lib/integrations/google-scopes";
 import { getGoogleSurfaceOperationalView } from "@/lib/integrations/google-workspace";
@@ -12,7 +11,6 @@ import { GoogleWorkspaceConnectionForm } from "@/components/settings/google-work
 import { OpenAIAssistantsImportForm } from "@/components/settings/openai-assistants-import-form";
 import { OpenAIConnectionForm } from "@/components/settings/openai-connection-form";
 import { RevokeAllIntegrationsButton } from "@/components/settings/integration-revoke-actions";
-import { HubSpotConnectionForm } from "@/components/settings/hubspot-connection-form";
 import { SalesforceConnectionForm } from "@/components/settings/salesforce-connection-form";
 import { WhatsAppConnectionForm } from "@/components/settings/whatsapp-connection-form";
 
@@ -20,8 +18,6 @@ type IntegrationsPageProps = {
   searchParams?: Promise<{
     salesforce_status?: string | string[];
     salesforce_message?: string | string[];
-    hubspot_status?: string | string[];
-    hubspot_message?: string | string[];
     google_status?: string | string[];
     google_message?: string | string[];
     google_surface?: string | string[];
@@ -41,23 +37,20 @@ export default async function IntegrationsPage({ searchParams }: IntegrationsPag
   }
 
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
-  const [openAiIntegrationResult, whatsappIntegrationResult, salesforceIntegrationResult, hubspotIntegrationResult, googleIntegrationResult] = await Promise.all([
+  const [openAiIntegrationResult, whatsappIntegrationResult, salesforceIntegrationResult, googleIntegrationResult] = await Promise.all([
     getLatestIntegrationByType("openai", user.organizationId),
     getLatestIntegrationByType("whatsapp", user.organizationId),
     getPrimarySalesforceIntegration(user.organizationId),
-    getPrimaryHubSpotIntegration(user.organizationId),
     getPrimaryGoogleIntegration(user.organizationId),
   ]);
 
   const openAiIntegration = openAiIntegrationResult.data;
   const whatsappIntegration = whatsappIntegrationResult.data;
   const salesforceIntegration = salesforceIntegrationResult.data;
-  const hubspotIntegration = hubspotIntegrationResult.data;
   const googleIntegration = googleIntegrationResult.data;
   const openAiOperationalView = getIntegrationOperationalView(openAiIntegration);
   const whatsappOperationalView = getIntegrationOperationalView(whatsappIntegration);
   const salesforceOperationalView = getIntegrationOperationalView(salesforceIntegration);
-  const hubspotOperationalView = getIntegrationOperationalView(hubspotIntegration);
   const gmailOperationalView = getGoogleSurfaceOperationalView(googleIntegration, "gmail");
   const googleCalendarOperationalView = getGoogleSurfaceOperationalView(
     googleIntegration,
@@ -67,8 +60,6 @@ export default async function IntegrationsPage({ searchParams }: IntegrationsPag
   const canImportOpenAI = openAiOperationalView.status === "connected" || openAiOperationalView.status === "expiring_soon";
   const salesforceStatus = getSingleQueryValue(resolvedSearchParams?.salesforce_status);
   const salesforceMessage = getSingleQueryValue(resolvedSearchParams?.salesforce_message);
-  const hubspotStatus = getSingleQueryValue(resolvedSearchParams?.hubspot_status);
-  const hubspotMessage = getSingleQueryValue(resolvedSearchParams?.hubspot_message);
   const googleStatus = getSingleQueryValue(resolvedSearchParams?.google_status);
   const googleMessage = getSingleQueryValue(resolvedSearchParams?.google_message);
   const googleSurface = getSingleQueryValue(resolvedSearchParams?.google_surface);
@@ -116,17 +107,6 @@ export default async function IntegrationsPage({ searchParams }: IntegrationsPag
           grantedScopes={salesforceOperationalView.grantedScopes}
           callbackMessage={salesforceMessage}
           callbackStatus={salesforceStatus === "connected" || salesforceStatus === "error" ? salesforceStatus : null}
-        />
-
-        <HubSpotConnectionForm
-          initialName={hubspotIntegration?.name ?? "HubSpot CRM"}
-          integrationId={hubspotIntegration?.id ?? null}
-          isConnected={Boolean(hubspotIntegration?.is_active)}
-          operationalView={hubspotOperationalView}
-          hubId={getMetadataString(hubspotIntegration?.metadata ?? null, "hub_id")}
-          grantedScopes={hubspotOperationalView.grantedScopes}
-          callbackMessage={hubspotMessage}
-          callbackStatus={hubspotStatus === "connected" || hubspotStatus === "error" ? hubspotStatus : null}
         />
 
         <GoogleWorkspaceConnectionForm

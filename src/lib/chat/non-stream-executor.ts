@@ -2,7 +2,12 @@
 
 import { setupStateExpectsGmailIntegration } from "@/lib/agents/gmail-agent-integration";
 import { setupStateExpectsGoogleCalendarIntegration } from "@/lib/agents/google-calendar-agent-integration";
-import { isHubSpotTemplateId, isSalesforceTemplateId } from "@/lib/agents/agent-templates";
+import { isSalesforceTemplateId } from "@/lib/agents/agent-templates";
+import {
+  buildAmbiguousScopeResponse,
+  buildOutOfScopeResponse,
+  classifyScopeIntent,
+} from "@/lib/agents/agent-scope";
 import { resolveEffectiveAgentPrompt } from "@/lib/agents/effective-prompt";
 import { readAgentSetupState } from "@/lib/agents/agent-setup-state";
 import {
@@ -11,24 +16,21 @@ import {
   type ConversationMetadata,
 } from "@/lib/chat/conversation-metadata";
 import { orchestrateGoogleCalendarForChat } from "@/lib/chat/google-calendar-tool-orchestrator";
-import { orchestrateHubSpotForChat } from "@/lib/chat/hubspot-tool-orchestrator";
 import { orchestrateSalesforceForChat } from "@/lib/chat/salesforce-tool-orchestrator";
 import { prepareWhatsAppUnifiedTurn } from "@/lib/chat/whatsapp-unified";
 import { hasReadyDocuments } from "@/lib/db/agent-documents";
 import { getConversationByIdWithServiceRole } from "@/lib/db/conversations";
 import { formatChunksAsContext, searchChunks } from "@/lib/db/rag";
+import { checkSessionLimitForConversation } from "@/lib/db/session-usage";
 import { generateEmbedding } from "@/lib/llm/embeddings";
 import { LiteLLMError, sendChatCompletion } from "@/lib/llm/litellm";
 import { getGoogleAgentToolRuntime } from "@/lib/integrations/google-agent-runtime";
 import { createServiceSupabaseClient } from "@/lib/supabase/service";
 import type { Agent, Conversation, Organization } from "@/types/app";
-import type { Tables } from "@/types/database";
 
 const RUN_MEMORY_MAX_MESSAGES = 20;
 const RUN_RAG_TIMEOUT_MS = 1200;
 
-type PlanLimits = Pick<Tables<"plans">, "max_messages_month">;
-type UsageRow = Pick<Tables<"usage_records">, "total_messages">;
 type OrganizationPlan = Pick<Organization, "plan_id" | "is_active" | "deleted_at">;
 
 type ChatMessage = {
@@ -122,60 +124,6 @@ async function loadOperationalAgent(
   return { agent, error: null, status: null };
 }
 
-async function checkPlanLimits(
-  organizationId: string
-): Promise<{ allowed: boolean; message?: string }> {
-  const serviceClient = createServiceSupabaseClient();
-  const { data: organizationData } = await serviceClient
-    .from("organizations")
-    .select("plan_id")
-    .eq("id", organizationId)
-    .single();
-
-  const organization = organizationData as Pick<Organization, "plan_id"> | null;
-  if (!organization) {
-    return { allowed: false, message: "No se pudo verificar el plan" };
-  }
-
-  const { data: planData } = await serviceClient
-    .from("plans")
-    .select("max_messages_month")
-    .eq("id", organization.plan_id)
-    .single();
-
-  const plan = planData as PlanLimits | null;
-  if (!plan) {
-    return { allowed: false, message: "No se pudo verificar el plan" };
-  }
-
-  if (plan.max_messages_month <= 0) {
-    return { allowed: true };
-  }
-
-  const now = new Date();
-  const periodStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
-  const periodEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString();
-
-  const { data: usageData } = await serviceClient
-    .from("usage_records")
-    .select("total_messages")
-    .eq("organization_id", organizationId)
-    .eq("period_start", periodStart)
-    .eq("period_end", periodEnd);
-
-  const usageRows = (usageData ?? []) as UsageRow[];
-  const totalMessages = usageRows.reduce((sum, row) => sum + (row.total_messages ?? 0), 0);
-
-  if (totalMessages >= plan.max_messages_month) {
-    return {
-      allowed: false,
-      message: `Limite de mensajes alcanzado (${plan.max_messages_month}/mes). Actualiza tu plan para continuar.`,
-    };
-  }
-
-  return { allowed: true };
-}
-
 async function loadMessagesFromDb(conversationId: string, organizationId: string): Promise<ChatMessage[]> {
   const serviceClient = createServiceSupabaseClient();
   const { data, error } = await serviceClient
@@ -242,11 +190,6 @@ export async function executeNonStreamingAgentTurn(input: {
     return { ok: false, status: agentLoad.status ?? 404, error: agentLoad.error ?? "Agente no encontrado" };
   }
 
-  const planCheck = await checkPlanLimits(input.organizationId);
-  if (!planCheck.allowed) {
-    return { ok: false, status: 429, error: planCheck.message ?? "Limite del plan alcanzado" };
-  }
-
   const conversationResult = await getConversationByIdWithServiceRole(
     input.conversationId,
     input.agentId,
@@ -259,6 +202,13 @@ export async function executeNonStreamingAgentTurn(input: {
 
   const agent = agentLoad.agent;
   const conversation = conversationResult.data;
+  const planCheck = await checkSessionLimitForConversation({
+    organizationId: input.organizationId,
+    conversationId: conversation.id,
+  });
+  if (!planCheck.allowed) {
+    return { ok: false, status: 429, error: planCheck.message ?? "Limite del plan alcanzado" };
+  }
   const [dbHistory, ragContext] = await Promise.all([
     loadMessagesFromDb(conversation.id, input.organizationId),
     buildRagContext(input.agentId, input.organizationId, input.latestUserMessage),
@@ -267,6 +217,47 @@ export async function executeNonStreamingAgentTurn(input: {
   const nextMemory = trimMemory(dbHistory);
   const agentSetupState = readAgentSetupState(agent);
   const conversationMetadata = readConversationMetadata(conversation.metadata);
+  const scopeDecision = agentSetupState
+    ? classifyScopeIntent({
+        content: input.latestUserMessage,
+        agentScope: agentSetupState.agentScope,
+      })
+    : { decision: "in_scope" as const };
+
+  if (scopeDecision.decision === "ambiguous") {
+    return {
+      ok: true,
+      agent,
+      conversation,
+      reply: {
+        content: buildAmbiguousScopeResponse(agentSetupState?.agentScope ?? "operations"),
+        llmModel: null,
+        llmProvider: null,
+        responseTimeMs: null,
+        tokensInput: 0,
+        tokensOutput: 0,
+      },
+    };
+  }
+
+  if (scopeDecision.decision === "out_of_scope") {
+    return {
+      ok: true,
+      agent,
+      conversation,
+      reply: {
+        content: buildOutOfScopeResponse({
+          agentScope: agentSetupState?.agentScope ?? "operations",
+          targetScope: scopeDecision.targetScope,
+        }),
+        llmModel: null,
+        llmProvider: null,
+        responseTimeMs: null,
+        tokensInput: 0,
+        tokensOutput: 0,
+      },
+    };
+  }
 
   if (
     agentSetupState?.template_id === "whatsapp_unified" &&
@@ -343,35 +334,6 @@ export async function executeNonStreamingAgentTurn(input: {
   try {
     if (setupTemplateId && isSalesforceTemplateId(setupTemplateId)) {
       const orchestration = await orchestrateSalesforceForChat({
-        agent,
-        conversation,
-        organizationId: input.organizationId,
-        userId: input.orchestrationUserId ?? input.organizationId,
-        latestUserMessage: input.latestUserMessage,
-        recentMessages: nextMemory,
-      });
-
-      if (orchestration.kind === "respond_now") {
-        return {
-          ok: true,
-          agent,
-          conversation,
-          reply: {
-            content: orchestration.content,
-            llmModel: null,
-            llmProvider: null,
-            responseTimeMs: null,
-            tokensInput: 0,
-            tokensOutput: 0,
-          },
-        };
-      }
-
-      toolContext = orchestration.toolContext;
-    }
-
-    if (setupTemplateId && isHubSpotTemplateId(setupTemplateId)) {
-      const orchestration = await orchestrateHubSpotForChat({
         agent,
         conversation,
         organizationId: input.organizationId,

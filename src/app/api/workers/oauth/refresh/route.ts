@@ -4,10 +4,8 @@ import {
   getGoogleRefreshState,
   rotateGoogleTokens,
 } from "@/lib/db/google-integration-config";
-import { getHubSpotIntegrationConfig, getHubSpotRefreshState, rotateHubSpotTokens } from "@/lib/db/hubspot-integrations";
 import { markIntegrationReauthRequired } from "@/lib/db/integration-operations";
 import { refreshGoogleAccessToken } from "@/lib/integrations/google";
-import { refreshHubSpotAccessToken } from "@/lib/integrations/hubspot";
 import { coordinateIntegrationRefresh } from "@/lib/integrations/refresh-coordination";
 import { createServiceSupabaseClient } from "@/lib/supabase/service";
 import {
@@ -49,14 +47,12 @@ function readAuthStatus(metadata: unknown): string | null {
   return typeof authStatus === "string" && authStatus.length > 0 ? authStatus : null;
 }
 
-async function listExpiringIntegrationsByType(
-  type: "hubspot" | "google"
-): Promise<ExpiringIntegrationRow[]> {
+async function listExpiringGoogleIntegrations(): Promise<ExpiringIntegrationRow[]> {
   const supabase = createServiceSupabaseClient();
   const { data, error } = await supabase
     .from("integrations")
     .select("id, organization_id, metadata")
-    .eq("type", type)
+    .eq("type", "google")
     .eq("is_active", true)
     .is("deleted_at", null)
     .limit(50);
@@ -82,55 +78,6 @@ async function listExpiringIntegrationsByType(
       id: row.id,
       organization_id: row.organization_id,
     }));
-}
-
-async function refreshHubSpotRow(row: ExpiringIntegrationRow): Promise<boolean> {
-  const coordination = await coordinateIntegrationRefresh({
-    provider: "hubspot",
-    integrationId: row.id,
-    onLockError: "refresh_without_lock",
-    loadState: async () => {
-      const stateResult = await getHubSpotRefreshState(row.id, row.organization_id);
-      return stateResult.data ?? { tokenGeneration: 0, authStatus: null };
-    },
-    refresh: async () => {
-      const configResult = await getHubSpotIntegrationConfig(row.id, row.organization_id);
-      if (configResult.error || !configResult.data) {
-        throw new Error(configResult.error ?? "No se pudo leer la configuracion de HubSpot");
-      }
-
-      if (!configResult.data.refreshToken) {
-        await markIntegrationReauthRequired(
-          row.id,
-          row.organization_id,
-          "HubSpot no devolvio refresh token; reconecta la integracion."
-        );
-        throw new Error("HubSpot no tiene refresh token");
-      }
-
-      const refreshResult = await refreshHubSpotAccessToken(configResult.data.refreshToken);
-      const rotateResult = await rotateHubSpotTokens({
-        integrationId: row.id,
-        organizationId: row.organization_id,
-        userId: row.organization_id,
-        accessToken: refreshResult.accessToken,
-        refreshToken: refreshResult.refreshToken ?? configResult.data.refreshToken,
-        grantedScopes:
-          refreshResult.grantedScopes.length > 0
-            ? refreshResult.grantedScopes
-            : configResult.data.grantedScopes,
-        accessTokenExpiresAt: refreshResult.accessTokenExpiresAt,
-        hubId: refreshResult.hubId ?? configResult.data.hubId,
-        tokenType: refreshResult.tokenType,
-      });
-
-      if (rotateResult.error) {
-        throw new Error(rotateResult.error);
-      }
-    },
-  });
-
-  return coordination.kind !== "timeout";
 }
 
 async function refreshGoogleRow(row: ExpiringIntegrationRow): Promise<boolean> {
@@ -189,17 +136,12 @@ async function refreshGoogleRow(row: ExpiringIntegrationRow): Promise<boolean> {
   return coordination.kind !== "timeout";
 }
 
-async function processBatch(
-  provider: "hubspot" | "google",
-  rows: ExpiringIntegrationRow[]
-): Promise<RefreshStats> {
+async function processBatch(rows: ExpiringIntegrationRow[]): Promise<RefreshStats> {
   const stats: RefreshStats = { processed: 0, failed: 0 };
 
   for (const row of rows) {
     try {
-      const ok = provider === "hubspot"
-        ? await refreshHubSpotRow(row)
-        : await refreshGoogleRow(row);
+      const ok = await refreshGoogleRow(row);
 
       if (ok) {
         stats.processed += 1;
@@ -207,7 +149,7 @@ async function processBatch(
         stats.failed += 1;
       }
     } catch (error) {
-      console.error(`worker.oauth.refresh.${provider}.error`, {
+      console.error("worker.oauth.refresh.google.error", {
         integrationId: row.id,
         organizationId: row.organization_id,
         error: error instanceof Error ? error.message : "unknown",
@@ -228,23 +170,16 @@ export async function GET(request: Request) {
     return getWorkersDisabledResponse();
   }
 
-  const [expiringHubSpot, expiringGoogle] = await Promise.all([
-    listExpiringIntegrationsByType("hubspot"),
-    listExpiringIntegrationsByType("google"),
-  ]);
+  const expiringGoogle = await listExpiringGoogleIntegrations();
 
-  if (expiringHubSpot.length === 0 && expiringGoogle.length === 0) {
+  if (expiringGoogle.length === 0) {
     return withWorkerCompatibilityHeaders(new NextResponse(null, { status: 204 }));
   }
 
-  const [hubspotStats, googleStats] = await Promise.all([
-    processBatch("hubspot", expiringHubSpot),
-    processBatch("google", expiringGoogle),
-  ]);
+  const googleStats = await processBatch(expiringGoogle);
 
   return withWorkerCompatibilityHeaders(NextResponse.json({
     data: {
-      hubspot: hubspotStats,
       google: googleStats,
     },
   }));

@@ -75,6 +75,10 @@ async function runQueuePass(): Promise<number> {
       "webhooks",
       await getWebhooksWorker(createWorkerRequest("/api/workers/webhooks"))
     ),
+    parseBatchResponse(
+      "automations",
+      await getAutomationsWorker(createWorkerRequest("/api/workers/automations"))
+    ),
   ]);
 
   let processedTotal = 0;
@@ -256,10 +260,12 @@ const [
   { GET: getEventsWorker },
   { GET: getRagWorker },
   { GET: getWebhooksWorker },
+  { GET: getAutomationsWorker },
 ] = await Promise.all([
   import("@/app/api/workers/events/route"),
   import("@/app/api/workers/rag/route"),
   import("@/app/api/workers/webhooks/route"),
+  import("@/app/api/workers/automations/route"),
 ]);
 
 await startHealthServer();

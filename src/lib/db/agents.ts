@@ -141,6 +141,30 @@ export async function listAgentsByIdsIncludingDeleted(
   return { data, error: null };
 }
 
+export async function listActiveAgentsByIds(
+  agentIds: string[]
+): Promise<DbResult<Agent[]>> {
+  const uniqueAgentIds = [...new Set(agentIds)];
+
+  if (uniqueAgentIds.length === 0) {
+    return { data: [], error: null };
+  }
+
+  const supabase = createServiceSupabaseClient();
+
+  const { data, error } = await supabase
+    .from("agents")
+    .select("*")
+    .in("id", uniqueAgentIds)
+    .is("deleted_at", null);
+
+  if (error) {
+    return { data: null, error: error.message };
+  }
+
+  return { data, error: null };
+}
+
 export async function getAgentById(agentId: string, organizationId: string): Promise<DbResult<Agent>> {
   const supabase = await createServerSupabaseClient();
 

@@ -108,7 +108,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
       {isAdmin && usage ? (
         <PlanLimitBanner
           usagePercent={usage.usagePercent}
-          totalMessages={usage.totalMessages}
+          totalMessages={usage.totalConversations}
           planLimit={usage.planLimit}
         />
       ) : null}

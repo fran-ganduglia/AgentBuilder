@@ -30,6 +30,7 @@ import {
   type ExecuteSalesforceCrmToolInput,
 } from "@/lib/integrations/salesforce-tools";
 import { createApprovalRequest } from "@/lib/workflows/approval-request";
+import type { AgentScope } from "@/lib/agents/agent-scope";
 import type { Agent, Conversation } from "@/types/app";
 
 type ChatMessage = {
@@ -69,6 +70,7 @@ function buildSalesforceAdapter(input: {
   conversationId: string;
   workflowTemplateId: string | null;
   automationPreset: "copilot" | "assisted" | "autonomous" | null;
+  agentScope: AgentScope;
 }): CrmChatAdapter<
   SalesforceAgentToolRuntime,
   ExecuteSalesforceCrmToolInput,
@@ -201,6 +203,7 @@ function buildSalesforceAdapter(input: {
         },
         workflowTemplateId: input.workflowTemplateId,
         automationPreset: input.automationPreset,
+        agentScope: input.agentScope,
       }),
   };
 }
@@ -235,6 +238,7 @@ export async function orchestrateSalesforceForChat(input: {
       conversationId: input.conversation.id,
       workflowTemplateId: setupState?.workflowTemplateId ?? null,
       automationPreset: setupState?.automationPreset ?? null,
+      agentScope: setupState?.agentScope ?? "operations",
     }),
     conversation: input.conversation,
     agentId: input.agent.id,

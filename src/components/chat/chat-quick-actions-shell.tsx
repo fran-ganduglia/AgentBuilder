@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { AGENT_SCOPE_LABELS } from "@/lib/agents/agent-scope";
 import { ChatQuickActionsPanel } from "@/components/chat/chat-quick-actions-panel";
 import type { ResolvedChatQuickActions } from "@/lib/chat/quick-actions";
 
@@ -23,13 +24,17 @@ export function ChatQuickActionsShell({
   onCloseMobile,
   activeRail,
 }: ChatQuickActionsShellProps) {
-  if (!quickActions.isCrmChat) {
+  if (!quickActions.hasConnectedIntegrations) {
     return activeRail ? (
       <aside className="hidden border-l border-slate-200 bg-white/80 px-4 py-4 xl:block">
         <div className="sticky top-4">{activeRail}</div>
       </aside>
     ) : null;
   }
+
+  const scopeLabel = quickActions.agentScope
+    ? AGENT_SCOPE_LABELS[quickActions.agentScope].toLowerCase()
+    : "este agente";
 
   return (
     <>
@@ -69,7 +74,7 @@ export function ChatQuickActionsShell({
                   Acciones
                 </p>
                 <p className="mt-1 text-sm text-slate-600">
-                  Usa el mismo flujo del chat para pedir contexto, sintesis o siguiente paso.
+                  Usa el mismo flujo del chat para pedir contexto, sintesis o siguiente paso de {scopeLabel}.
                 </p>
               </div>
               <button

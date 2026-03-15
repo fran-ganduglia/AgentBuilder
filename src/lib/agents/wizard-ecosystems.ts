@@ -1,7 +1,6 @@
 export const WIZARD_ECOSYSTEM_IDS = [
   "whatsapp",
   "salesforce",
-  "hubspot",
   "google_workspace",
   "collaboration",
 ] as const;
@@ -134,54 +133,6 @@ export const WIZARD_ECOSYSTEMS: WizardEcosystem[] = [
     },
   },
   {
-    id: "hubspot",
-    name: "HubSpot",
-    description: "Acelera captacion y seguimiento comercial con templates enfocados en pipeline y lead capture.",
-    availabilityLabel: "Conexion real disponible",
-    theme: "orange",
-    tutorialTitle: "Conecta HubSpot y deja el agente listo para operar",
-    tutorialDescription:
-      "Si tu organizacion ya tiene una integracion HubSpot usable, el borrador se crea con la tool CRM vinculada automaticamente. Si todavia no existe o necesita revision, el wizard crea el borrador igual y lo deja pendiente hasta completar la conexion.",
-    prerequisites: [
-      "Permiso de admin para abrir Settings > Integraciones en AgentBuilder",
-      "Una integracion HubSpot activa y operable para la organizacion",
-      "Definir el flujo a cubrir: contactos, deals, tasks o meetings",
-    ],
-    steps: [
-      {
-        title: "Conecta HubSpot desde Integraciones",
-        description:
-          "Revisa si la organizacion ya tiene OAuth operativo en Settings > Integraciones. Si falta, ese es el primer paso antes de activar el agente.",
-      },
-      {
-        title: "Crea el borrador con un template HubSpot",
-        description:
-          "Cuando la integracion esta usable, el agente se guarda con la tool CRM autoasignada. Si no, el borrador queda pendiente y el setup lo muestra como bloqueo real.",
-      },
-      {
-        title: "Valida la tool CRM del agente",
-        description:
-          "Para agentes nuevos suele quedar lista automaticamente. En agentes existentes, abre la configuracion de tools y guarda la tool CRM si todavia no esta vinculada.",
-      },
-    ],
-    resourceLinks: [
-      {
-        label: "HubSpot OAuth quickstart",
-        href: "https://developers.hubspot.com/docs/apps/developer-platform/build-apps/authentication/oauth/oauth-quickstart-guide",
-        external: true,
-      },
-    ],
-    primaryAction: {
-      label: "Abrir integraciones",
-      href: "/settings/integrations",
-    },
-    secondaryAction: {
-      label: "Guia oficial de HubSpot",
-      href: "https://developers.hubspot.com/docs/apps/developer-platform/build-apps/authentication/oauth/oauth-quickstart-guide",
-      external: true,
-    },
-  },
-  {
     id: "google_workspace",
     name: "Gmail + Calendar",
     description: "Asistentes para inbox y agenda sobre una sola integracion compartida de Google Workspace.",
@@ -235,28 +186,27 @@ export const WIZARD_ECOSYSTEMS: WizardEcosystem[] = [
   },
   {
     id: "collaboration",
-    name: "Slack + Teams",
-    description: "Arma asistentes internos para soporte, onboarding y operaciones en espacios colaborativos.",
+    name: "Slack",
+    description: "Arma asistentes internos para soporte, onboarding y operaciones en Slack.",
     availabilityLabel: "Conexion real disponible",
     theme: "violet",
-    tutorialTitle: "Define la experiencia interna antes de conectar el canal colaborativo",
+    tutorialTitle: "Define la experiencia interna antes de conectar Slack",
     tutorialDescription:
-      "Slack y Teams todavia no tienen integracion nativa en AgentBuilder. Puedes usar esta fase para acordar permisos, mensajes y criterios operativos mientras el equipo tecnico prepara la app externa.",
+      "Slack todavia no tiene integracion nativa en AgentBuilder. Puedes usar esta fase para acordar permisos, mensajes y criterios operativos mientras el equipo tecnico prepara la Slack app.",
     prerequisites: [
-      "Decidir si el agente vivira en Slack, Teams o ambos",
       "Identificar el alcance: helpdesk interno, onboarding o soporte operativo",
       "Evitar classic Slack apps y legacy bots; usar Slack apps con OAuth v2",
     ],
     steps: [
       {
-        title: "Prepara la app del workspace",
+        title: "Prepara la Slack app del workspace",
         description:
-          "Slack hoy se apoya en Slack apps con OAuth v2. Teams se administra desde Developer Portal y su packaging de app.",
+          "Slack se apoya en Slack apps con OAuth v2. Crea la app en api.slack.com/apps y configura los scopes necesarios.",
       },
       {
         title: "Alinea permisos y datos visibles",
         description:
-          "Define que puede leer o responder el agente dentro del espacio colaborativo antes de fijar el template.",
+          "Define que puede leer o responder el agente dentro del workspace antes de fijar el template.",
       },
       {
         title: "Elige el template operativo",
@@ -268,11 +218,6 @@ export const WIZARD_ECOSYSTEMS: WizardEcosystem[] = [
       {
         label: "Slack OAuth v2",
         href: "https://api.slack.com/authentication/oauth-v2",
-        external: true,
-      },
-      {
-        label: "Teams Developer Portal",
-        href: "https://learn.microsoft.com/en-us/microsoftteams/platform/concepts/build-and-test/manage-your-apps-in-developer-portal",
         external: true,
       },
       {

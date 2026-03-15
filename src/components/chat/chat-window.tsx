@@ -5,6 +5,10 @@ import { ChatActiveRail } from "@/components/chat/chat-active-rail";
 import { ChatQuickActionsShell } from "@/components/chat/chat-quick-actions-shell";
 import type { ActiveChatUiState } from "@/lib/chat/chat-form-state";
 import {
+  buildDynamicFormSubmissionMessage,
+  type DynamicFormDefinition,
+} from "@/lib/chat/interactive-markers";
+import {
   getChatEmptyStateQuickActions,
   type ResolvedChatQuickActions,
 } from "@/lib/chat/quick-actions";
@@ -56,32 +60,21 @@ export function ChatWindow({
   const [activeUiState, setActiveUiState] = useState<ActiveChatUiState>({
     kind: "none",
   });
-  const [activeFormValues, setActiveFormValues] = useState<Record<string, string>>(
-    {}
-  );
-  const [activeFormFieldErrors, setActiveFormFieldErrors] = useState<
-    Record<string, string>
-  >({});
-  const [activeFormError, setActiveFormError] = useState<string | null>(null);
-  const [isSavingFormDraft, setIsSavingFormDraft] = useState(false);
   const abortControllerRef = useRef<AbortController | null>(null);
-  const draftSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    if (!initialQuickActions.isCrmChat) {
+    if (!initialQuickActions.hasConnectedIntegrations) {
       setIsMobileActionsOpen(false);
     }
-  }, [initialQuickActions.isCrmChat]);
+  }, [initialQuickActions.hasConnectedIntegrations]);
 
   const emptyStateActions = getChatEmptyStateQuickActions(initialQuickActions);
   const activeSourceMessageId =
-    activeUiState.kind === "form"
-      ? activeUiState.session.sourceMessageId
-      : activeUiState.kind === "confirmation"
-        ? activeUiState.sourceMessageId
-        : null;
+    activeUiState.kind === "confirmation"
+      ? activeUiState.sourceMessageId
+      : null;
   const shouldShowRail =
-    activeUiState.kind !== "none" &&
+    activeUiState.kind === "confirmation" &&
     (!activeSourceMessageId ||
       !messages.some((message) => message.id === activeSourceMessageId));
 
@@ -108,18 +101,9 @@ export function ChatWindow({
         }
 
         const payload = (await response.json()) as { data?: ActiveChatUiState };
-        const nextState = payload.data ?? { kind: "none" };
-        setActiveUiState(nextState);
-
-        if (nextState.kind === "form") {
-          setActiveFormValues(nextState.session.draftValues);
-        } else {
-          setActiveFormValues({});
-          setActiveFormFieldErrors({});
-          setActiveFormError(null);
-        }
+        setActiveUiState(payload.data ?? { kind: "none" });
       } catch {
-        // La UI del form es accesoria; no interrumpir el chat si falla.
+        // La UI de confirmation es accesoria; no interrumpir el chat si falla.
       }
     },
     [agentId]
@@ -128,14 +112,6 @@ export function ChatWindow({
   useEffect(() => {
     void refreshActiveUiState(conversationId);
   }, [conversationId, refreshActiveUiState]);
-
-  useEffect(() => {
-    return () => {
-      if (draftSaveTimerRef.current) {
-        clearTimeout(draftSaveTimerRef.current);
-      }
-    };
-  }, []);
 
   const handleSend = useCallback(
     async (content: string) => {
@@ -253,122 +229,14 @@ export function ChatWindow({
     [handleSend]
   );
 
-  const handleFormDraftChange = useCallback(
-    (values: Record<string, string>) => {
-      setActiveFormValues(values);
-      setActiveFormFieldErrors({});
-      setActiveFormError(null);
-
-      if (
-        !conversationId ||
-        activeUiState.kind !== "form" ||
-        draftSaveTimerRef.current
-      ) {
-        if (draftSaveTimerRef.current) {
-          clearTimeout(draftSaveTimerRef.current);
-          draftSaveTimerRef.current = null;
-        }
-      }
-
-      if (!conversationId || activeUiState.kind !== "form") {
-        return;
-      }
-
-      draftSaveTimerRef.current = setTimeout(async () => {
-        setIsSavingFormDraft(true);
-        try {
-          const response = await fetch("/api/chat/forms/draft", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              agentId,
-              conversationId,
-              formId: activeUiState.session.formId,
-              draftValues: values,
-              relationSelections: {},
-            }),
-          });
-
-          if (response.ok) {
-            const payload = (await response.json()) as { data?: ActiveChatUiState };
-            if (payload.data) {
-              setActiveUiState(payload.data);
-            }
-          }
-        } finally {
-          draftSaveTimerRef.current = null;
-          setIsSavingFormDraft(false);
-        }
-      }, 350);
-    },
-    [activeUiState, agentId, conversationId]
-  );
-
-  const handleFormDismiss = useCallback(async () => {
-    if (!conversationId) {
-      return;
-    }
-
-    const response = await fetch("/api/chat/forms/dismiss", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ agentId, conversationId }),
-    });
-
-    if (!response.ok) {
-      return;
-    }
-
-    const payload = (await response.json()) as { data?: ActiveChatUiState };
-    setActiveUiState(payload.data ?? { kind: "none" });
-  }, [agentId, conversationId]);
-
-  const handleFormSubmit = useCallback(
-    async (values: Record<string, string>) => {
-      if (!conversationId || activeUiState.kind !== "form") {
-        return;
-      }
-
-      setIsLoading(true);
-      setActiveFormFieldErrors({});
-      setActiveFormError(null);
-
-      try {
-        const response = await fetch("/api/chat/forms/submit", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            agentId,
-            conversationId,
-            formId: activeUiState.session.formId,
-            submissionKey: crypto.randomUUID(),
-            draftValues: values,
-            relationSelections: {},
-          }),
-        });
-
-        const payload = (await response.json()) as {
-          data?: ActiveChatUiState;
-          error?: string;
-          fieldErrors?: Record<string, string>;
-        };
-
-        if (!response.ok) {
-          setActiveFormFieldErrors(payload.fieldErrors ?? {});
-          setActiveFormError(payload.error ?? "No se pudo validar el formulario.");
-          return;
-        }
-
-        setActiveUiState(payload.data ?? { kind: "none" });
-        setActiveFormValues({});
-        void refreshActiveUiState(conversationId);
-      } catch {
-        setActiveFormError("No se pudo enviar el formulario al servidor.");
-      } finally {
-        setIsLoading(false);
+  const handleDynamicFormSubmit = useCallback(
+    (definition: DynamicFormDefinition, values: Record<string, string>) => {
+      const serialized = buildDynamicFormSubmissionMessage(definition, values);
+      if (serialized.trim().length > 0) {
+        void handleSend(serialized);
       }
     },
-    [activeUiState, agentId, conversationId, refreshActiveUiState]
+    [handleSend]
   );
 
   const handleFormConfirm = useCallback(() => {
@@ -379,13 +247,6 @@ export function ChatWindow({
     <ChatActiveRail
       state={activeUiState}
       disabled={isLoading}
-      draftValues={activeFormValues}
-      fieldErrors={activeFormFieldErrors}
-      submitError={activeFormError}
-      isSavingDraft={isSavingFormDraft}
-      onDraftChange={handleFormDraftChange}
-      onSubmit={handleFormSubmit}
-      onDismiss={handleFormDismiss}
       onConfirm={handleFormConfirm}
     />
   ) : null;
@@ -410,14 +271,8 @@ export function ChatWindow({
             onQuickActionSelect={handleQuickActionSelect}
             onFollowUpIntentSelect={handleQuickActionSelect}
             activeUiState={activeUiState}
-            activeFormValues={activeFormValues}
-            activeFormFieldErrors={activeFormFieldErrors}
-            activeFormError={activeFormError}
-            isSavingFormDraft={isSavingFormDraft}
-            onFormDraftChange={handleFormDraftChange}
-            onFormDismiss={handleFormDismiss}
-            onFormSubmit={handleFormSubmit}
             onFormConfirm={handleFormConfirm}
+            onDynamicFormSubmit={handleDynamicFormSubmit}
             isLoading={isLoading}
           />
           {errorMessage ? (

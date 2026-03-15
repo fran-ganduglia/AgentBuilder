@@ -2,6 +2,7 @@ import type {
   ExecuteGoogleGmailToolInput,
   GmailAgentToolConfig,
 } from "@/lib/integrations/google-agent-tools";
+import { extractGmailIntent } from "@/lib/chat/gmail-intent-extractor";
 
 type ChatMessage = {
   role: "user" | "assistant";
@@ -262,12 +263,12 @@ function buildThreadReference(
   };
 }
 
-export function planGoogleGmailToolAction(input: {
+export async function planGoogleGmailToolAction(input: {
   config: GmailAgentToolConfig;
   latestUserMessage: string;
   recentMessages: ChatMessage[];
   recentToolContext?: string;
-}): PlanGoogleGmailToolActionResult {
+}): Promise<PlanGoogleGmailToolActionResult> {
   const recent = parseRecentThreadContext(input.recentToolContext);
   const explicitThreadId = extractThreadId(input.latestUserMessage);
 
@@ -286,7 +287,21 @@ export function planGoogleGmailToolAction(input: {
     input.recentToolContext
   );
 
-  if (LABEL_TRIGGER_PATTERN.test(input.latestUserMessage)) {
+  const regexLabel = LABEL_TRIGGER_PATTERN.test(input.latestUserMessage);
+  const regexArchive = ARCHIVE_TRIGGER_PATTERN.test(input.latestUserMessage);
+  const regexDraft = DRAFT_TRIGGER_PATTERN.test(input.latestUserMessage);
+  const regexRead = shouldReadThread(input.latestUserMessage);
+  const regexSearch = shouldSearchThreads(input.latestUserMessage, input.recentMessages);
+
+  const needsLlmFallback = !regexLabel && !regexArchive && !regexDraft && !regexRead && !regexSearch;
+  const intent = needsLlmFallback
+    ? await extractGmailIntent(input.latestUserMessage)
+    : { action: "none" as const };
+
+  const wantsApplyLabel =
+    intent.action === "apply_label" || regexLabel;
+
+  if (wantsApplyLabel) {
     if (!threadReference.threadId) {
       return {
         kind: "missing_data",
@@ -338,7 +353,10 @@ export function planGoogleGmailToolAction(input: {
     };
   }
 
-  if (ARCHIVE_TRIGGER_PATTERN.test(input.latestUserMessage)) {
+  const wantsArchive =
+    intent.action === "archive_thread" || regexArchive;
+
+  if (wantsArchive) {
     if (!threadReference.threadId) {
       return {
         kind: "missing_data",
@@ -379,7 +397,10 @@ export function planGoogleGmailToolAction(input: {
     };
   }
 
-  if (DRAFT_TRIGGER_PATTERN.test(input.latestUserMessage)) {
+  const wantsDraft =
+    intent.action === "create_draft_reply" || regexDraft;
+
+  if (wantsDraft) {
     if (!threadReference.threadId) {
       return {
         kind: "missing_data",
@@ -431,7 +452,10 @@ export function planGoogleGmailToolAction(input: {
     };
   }
 
-  if (shouldReadThread(input.latestUserMessage) && recent.threadId) {
+  const wantsReadThread =
+    intent.action === "read_thread" || regexRead;
+
+  if (wantsReadThread && recent.threadId) {
     return {
       kind: "read",
       input: {
@@ -441,7 +465,10 @@ export function planGoogleGmailToolAction(input: {
     };
   }
 
-  if (shouldSearchThreads(input.latestUserMessage, input.recentMessages)) {
+  const wantsSearchThreads =
+    intent.action === "search_threads" || regexSearch;
+
+  if (wantsSearchThreads) {
     return {
       kind: "search",
       input: {

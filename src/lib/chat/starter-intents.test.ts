@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { createSetupStateForTemplate } from "../agents/agent-templates";
 import { resolveInitialChatStarterIntents } from "./starter-intents";
-import type { HubSpotCrmAction } from "../integrations/hubspot-tools";
 import type { SalesforceCrmAction } from "../integrations/salesforce-tools";
 import type { Agent } from "../../types/app";
 
@@ -12,10 +11,6 @@ type RuntimeResult<T> = {
 
 type SalesforceRuntimeResult = RuntimeResult<{
   config: { allowed_actions: SalesforceCrmAction[] };
-}>;
-
-type HubSpotRuntimeResult = RuntimeResult<{
-  config: { allowed_actions: HubSpotCrmAction[] };
 }>;
 
 function buildAgent(templateId: string): Agent {
@@ -29,8 +24,6 @@ function buildAgent(templateId: string): Agent {
 function createDeps(input: {
   salesforceRuntime?: SalesforceRuntimeResult;
   salesforceUsable?: SalesforceRuntimeResult;
-  hubspotRuntime?: HubSpotRuntimeResult;
-  hubspotUsable?: HubSpotRuntimeResult;
 }) {
   return {
     loadSalesforceRuntime: async () =>
@@ -38,30 +31,12 @@ function createDeps(input: {
     assertSalesforceRuntimeUsable: async () =>
       input.salesforceUsable ??
       input.salesforceRuntime ?? { data: null, error: "unusable" },
-    loadHubSpotRuntime: async () =>
-      input.hubspotRuntime ?? { data: null, error: "missing" },
-    assertHubSpotRuntimeUsable: async () =>
-      input.hubspotUsable ??
-      input.hubspotRuntime ?? { data: null, error: "unusable" },
   };
 }
 
 function createSalesforceRuntime(
   allowedActions: readonly SalesforceCrmAction[]
 ): SalesforceRuntimeResult {
-  return {
-    data: {
-      config: {
-        allowed_actions: [...allowedActions],
-      },
-    },
-    error: null,
-  };
-}
-
-function createHubSpotRuntime(
-  allowedActions: readonly HubSpotCrmAction[]
-): HubSpotRuntimeResult {
   return {
     data: {
       config: {
@@ -223,120 +198,6 @@ async function run(): Promise<void> {
     assert.deepEqual(intents, testCase.expected);
   }
 
-  const hubspotCases = [
-    {
-      templateId: "hubspot_lead_capture",
-      runtime: [
-        "lookup_records",
-        "lookup_deals",
-      ] as const satisfies readonly HubSpotCrmAction[],
-      expected: [
-        {
-          id: "hubspot_lead_capture:lookup_records",
-          provider: "hubspot",
-          action: "lookup_records",
-          label: "Verificar contacto/empresa",
-          prompt: "Busc\u00e1 si el contacto o la empresa ya existen en HubSpot",
-          priority: 10,
-        },
-        {
-          id: "hubspot_lead_capture:lookup_deals",
-          provider: "hubspot",
-          action: "lookup_deals",
-          label: "Revisar deals",
-          prompt: "Mostrame si ya hay deals abiertos",
-          priority: 20,
-        },
-      ],
-    },
-    {
-      templateId: "hubspot_pipeline_follow_up",
-      runtime: [
-        "lookup_deals",
-        "lookup_records",
-      ] as const satisfies readonly HubSpotCrmAction[],
-      expected: [
-        {
-          id: "hubspot_pipeline_follow_up:lookup_deals",
-          provider: "hubspot",
-          action: "lookup_deals",
-          label: "Deals abiertos",
-          prompt: "Mostrame los deals abiertos",
-          priority: 10,
-        },
-        {
-          id: "hubspot_pipeline_follow_up:lookup_records",
-          provider: "hubspot",
-          action: "lookup_records",
-          label: "Buscar contacto/empresa",
-          prompt: "Busc\u00e1 el contacto o la empresa asociada",
-          priority: 20,
-        },
-      ],
-    },
-    {
-      templateId: "hubspot_meeting_booking",
-      runtime: [
-        "lookup_records",
-        "lookup_deals",
-      ] as const satisfies readonly HubSpotCrmAction[],
-      expected: [
-        {
-          id: "hubspot_meeting_booking:lookup_records",
-          provider: "hubspot",
-          action: "lookup_records",
-          label: "Verificar contacto/empresa",
-          prompt: "Busc\u00e1 el contacto o la empresa antes de coordinar la reuni\u00f3n",
-          priority: 10,
-        },
-        {
-          id: "hubspot_meeting_booking:lookup_deals",
-          provider: "hubspot",
-          action: "lookup_deals",
-          label: "Deals relacionados",
-          prompt: "Mostrame los deals abiertos relacionados",
-          priority: 20,
-        },
-      ],
-    },
-    {
-      templateId: "hubspot_reactivation_follow_up",
-      runtime: [
-        "lookup_deals",
-        "lookup_records",
-      ] as const satisfies readonly HubSpotCrmAction[],
-      expected: [
-        {
-          id: "hubspot_reactivation_follow_up:lookup_deals",
-          provider: "hubspot",
-          action: "lookup_deals",
-          label: "Deals recientes",
-          prompt: "Mostrame los deals abiertos o m\u00e1s recientes",
-          priority: 10,
-        },
-        {
-          id: "hubspot_reactivation_follow_up:lookup_records",
-          provider: "hubspot",
-          action: "lookup_records",
-          label: "Buscar contacto/empresa",
-          prompt: "Busc\u00e1 el contacto o la empresa a reactivar",
-          priority: 20,
-        },
-      ],
-    },
-  ] as const;
-
-  for (const testCase of hubspotCases) {
-    const intents = await resolveInitialChatStarterIntents(
-      buildAgent(testCase.templateId),
-      createDeps({
-        hubspotRuntime: createHubSpotRuntime(testCase.runtime),
-      })
-    );
-
-    assert.deepEqual(intents, testCase.expected);
-  }
-
   const filteredSalesforceIntents = await resolveInitialChatStarterIntents(
     buildAgent("salesforce_lead_qualification"),
     createDeps({
@@ -365,40 +226,11 @@ async function run(): Promise<void> {
     },
   ]);
 
-  const filteredHubSpotIntents = await resolveInitialChatStarterIntents(
-    buildAgent("hubspot_pipeline_follow_up"),
-    createDeps({
-      hubspotRuntime: createHubSpotRuntime(["lookup_records"]),
-    })
-  );
-  assert.deepEqual(filteredHubSpotIntents, [
-    {
-      id: "hubspot_pipeline_follow_up:lookup_records",
-      provider: "hubspot",
-      action: "lookup_records",
-      label: "Buscar contacto/empresa",
-      prompt: "Busc\u00e1 el contacto o la empresa asociada",
-      priority: 20,
-    },
-  ]);
-
   const nonCrmIntents = await resolveInitialChatStarterIntents(
     buildAgent("web_faq"),
     createDeps({})
   );
   assert.deepEqual(nonCrmIntents, []);
-
-  const unusableRuntimeIntents = await resolveInitialChatStarterIntents(
-    buildAgent("hubspot_pipeline_follow_up"),
-    createDeps({
-      hubspotRuntime: createHubSpotRuntime(["lookup_deals"]),
-      hubspotUsable: {
-        data: null,
-        error: "not usable",
-      },
-    })
-  );
-  assert.deepEqual(unusableRuntimeIntents, []);
 
   const hiddenCuratedIntents = await resolveInitialChatStarterIntents(
     buildAgent("salesforce_case_triage"),

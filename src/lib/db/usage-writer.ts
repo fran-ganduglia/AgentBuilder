@@ -1,5 +1,6 @@
 ﻿import "server-only";
 
+import { getOrganizationPlan } from "@/lib/db/organization-plans";
 import { createServiceSupabaseClient } from "@/lib/supabase/service";
 import type { Tables, TablesInsert } from "@/types/database";
 
@@ -12,8 +13,8 @@ type RecordUsageInput = {
 };
 
 type RecordUsageResult = {
-  totalMessages: number;
-  planLimit: number;
+  currentUsage: number;
+  planLimit: number | null;
 };
 
 type AssistantUsageMessageRow = Pick<
@@ -309,42 +310,35 @@ export async function recordUsage(input: RecordUsageInput): Promise<RecordUsageR
 
     await backfillUsageRecordsForOrganization(input.organizationId, 1);
 
-    const { data: orgData } = await serviceClient
-      .from("organizations")
-      .select("plan_id")
-      .eq("id", input.organizationId)
-      .single();
+    const planResult = await getOrganizationPlan(input.organizationId);
 
-    if (!orgData) {
-      return { totalMessages: 0, planLimit: 0 };
+    if (planResult.error || !planResult.data) {
+      return { currentUsage: 0, planLimit: null };
     }
 
-    const { data: planData } = await serviceClient
-      .from("plans")
-      .select("max_messages_month")
-      .eq("id", orgData.plan_id)
-      .single();
-
-    const planLimit = planData?.max_messages_month ?? 0;
-
     const { data: allUsage, error: usageError } = await serviceClient
-      .from("usage_records")
-      .select("total_messages")
+      .from("messages")
+      .select("conversation_id")
       .eq("organization_id", input.organizationId)
-      .eq("period_start", periodStart)
-      .eq("period_end", periodEnd);
+      .eq("role", "assistant")
+      .gte("created_at", periodStart)
+      .lt("created_at", periodEnd);
 
     if (usageError) {
       console.error("usage_writer.readback_error", { error: usageError.message });
       return null;
     }
 
-    const orgTotalMessages = (allUsage ?? []).reduce(
-      (sum, row) => sum + (row.total_messages ?? 0),
-      0
+    const sessionIds = new Set(
+      (allUsage ?? [])
+        .map((row) => row.conversation_id)
+        .filter((conversationId): conversationId is string => typeof conversationId === "string")
     );
 
-    return { totalMessages: orgTotalMessages, planLimit };
+    return {
+      currentUsage: sessionIds.size,
+      planLimit: planResult.data.config.maxSessionsMonth,
+    };
   } catch (error) {
     console.error("usage_writer.unexpected_error", {
       error: error instanceof Error ? error.message : "unknown",

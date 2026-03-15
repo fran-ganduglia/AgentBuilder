@@ -19,15 +19,15 @@ export function PlanLimitBanner({ usagePercent, totalMessages, planLimit }: Plan
 
   return (
     <div
-      className={`flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between rounded-xl border px-6 py-5 shadow-sm ${
+      className={`flex flex-col gap-4 rounded-xl border px-6 py-5 shadow-sm sm:flex-row sm:items-center sm:justify-between ${
         isOver
           ? "border-rose-200 bg-rose-50"
           : "border-amber-200 bg-amber-50"
       }`}
     >
-      <div className="flex items-start sm:items-center gap-4">
+      <div className="flex items-start gap-4 sm:items-center">
         <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ring-1 ring-inset ${
-          isOver ? "bg-rose-100 ring-rose-600/20 text-rose-600" : "bg-amber-100 ring-amber-600/20 text-amber-600"
+          isOver ? "bg-rose-100 text-rose-600 ring-rose-600/20" : "bg-amber-100 text-amber-600 ring-amber-600/20"
         }`}>
           <svg
             className="h-5 w-5"
@@ -44,7 +44,7 @@ export function PlanLimitBanner({ usagePercent, totalMessages, planLimit }: Plan
         </div>
         <div>
           <h3 className={`text-sm font-bold ${isOver ? "text-rose-900" : "text-amber-900"}`}>
-             {isOver ? "Alerta Resolutiva de Límite Alcanzado" : "Alerta Temprana de Consumo"}
+            {isOver ? "Alerta de limite de sesiones" : "Alerta temprana de sesiones"}
           </h3>
           <p
             className={`mt-1 text-sm font-medium ${
@@ -52,20 +52,20 @@ export function PlanLimitBanner({ usagePercent, totalMessages, planLimit }: Plan
             }`}
           >
             {isOver
-              ? `Has excedido o alcanzado el límite operativo de mensajes de tu ciclo (${formatNumber(planLimit)}/mes).`
-              : `Estás utilizando el ${usagePercent}% de tu cuota de mensajes asignada en el ciclo actual (${formatNumber(totalMessages)} / ${formatNumber(planLimit)} limitados).`}
+              ? `Has alcanzado el limite operativo de sesiones de tu ciclo (${formatNumber(planLimit)}/mes).`
+              : `Estas utilizando el ${usagePercent}% de tu cuota de sesiones asignada en el ciclo actual (${formatNumber(totalMessages)} / ${formatNumber(planLimit)} limitadas).`}
           </p>
         </div>
       </div>
       <Link
         href="/settings/billing"
-        className={`inline-flex shrink-0 items-center justify-center rounded-lg px-5 py-2.5 text-sm font-bold transition-all shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 ${
+        className={`inline-flex shrink-0 items-center justify-center rounded-lg px-5 py-2.5 text-sm font-bold shadow-sm transition-all focus:outline-none focus:ring-2 focus:ring-offset-2 ${
           isOver
-            ? "bg-white border border-rose-300 text-rose-800 hover:bg-rose-50 hover:shadow-md focus:ring-rose-500"
-            : "bg-white border border-amber-300 text-amber-800 hover:bg-amber-50 hover:shadow-md focus:ring-amber-500"
+            ? "border border-rose-300 bg-white text-rose-800 hover:bg-rose-50 hover:shadow-md focus:ring-rose-500"
+            : "border border-amber-300 bg-white text-amber-800 hover:bg-amber-50 hover:shadow-md focus:ring-amber-500"
         }`}
       >
-        Gestor de Planes
+        Ver planes
       </Link>
     </div>
   );

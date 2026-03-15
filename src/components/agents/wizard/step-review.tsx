@@ -1,13 +1,16 @@
 import { AGENT_MODEL_OPTIONS } from "@/lib/agents/agent-config";
 import {
-  AUTOMATION_PRESET_LABELS,
   CHANNEL_LABELS,
   TOOL_SCOPE_PRESET_LABELS,
   getResolvedToolsForIntegration,
   getSetupProgress,
   type AgentSetupState,
 } from "@/lib/agents/agent-setup";
-import type { WorkflowTemplate } from "@/lib/agents/workflow-templates";
+import {
+  AGENT_CAPABILITY_LABELS,
+  type PublicWorkflowDefinition,
+} from "@/lib/agents/public-workflow";
+import { AGENT_SCOPE_LABELS } from "@/lib/agents/agent-scope";
 import { getWizardIntegrationById } from "@/lib/agents/wizard-integrations";
 
 type StepReviewProps = {
@@ -17,35 +20,23 @@ type StepReviewProps = {
   llmTemperature: number;
   systemPrompt: string;
   setupState: AgentSetupState;
-  workflowTemplate: WorkflowTemplate | null;
+  workflow: PublicWorkflowDefinition;
 };
 
 function isWriteAction(actionId: string): boolean {
-  return ![
-    "search",
-    "read",
-    "list",
-    "check",
-    "get",
-  ].some((prefix) => actionId.startsWith(prefix));
+  return !["search", "read", "list", "check", "get"].some((prefix) => actionId.startsWith(prefix));
 }
 
 function buildActionSummary(setupState: AgentSetupState): {
   auto: string[];
   confirm: string[];
-  suggest: string[];
 } {
   const selectedIntegrations = setupState.integrations.map((integrationId) => getWizardIntegrationById(integrationId));
   const auto: string[] = [];
   const confirm: string[] = [];
-  const suggest: string[] = [];
 
   for (const integration of selectedIntegrations) {
     const resolvedTools = getResolvedToolsForIntegration(setupState, integration.id);
-
-    if (resolvedTools.length === 0) {
-      continue;
-    }
 
     for (const actionId of resolvedTools) {
       const label = `${integration.name}: ${actionId}`;
@@ -55,15 +46,11 @@ function buildActionSummary(setupState: AgentSetupState): {
         continue;
       }
 
-      if (setupState.automationPreset === "assisted") {
-        confirm.push(label);
-      } else {
-        suggest.push(label);
-      }
+      confirm.push(label);
     }
   }
 
-  return { auto, confirm, suggest };
+  return { auto, confirm };
 }
 
 function renderLines(lines: string[], empty: string, className: string) {
@@ -87,11 +74,11 @@ export function StepReview({
   llmTemperature,
   systemPrompt,
   setupState,
-  workflowTemplate,
+  workflow,
 }: StepReviewProps) {
   const progress = getSetupProgress(setupState);
   const modelLabel = AGENT_MODEL_OPTIONS.find((item) => item.value === llmModel)?.label ?? llmModel;
-  const modelRecommendation = workflowTemplate?.recommendedModels.find((item) => item.model === llmModel) ?? null;
+  const modelRecommendation = workflow.recommendedModels.find((item) => item.model === llmModel) ?? null;
   const actionSummary = buildActionSummary(setupState);
 
   return (
@@ -100,37 +87,41 @@ export function StepReview({
         <p className="text-sm font-semibold uppercase tracking-[0.2em] text-emerald-700">Paso 6</p>
         <h2 className="mt-2 text-2xl font-bold tracking-tight text-slate-900">Revision antes de crear</h2>
         <p className="mt-2 text-sm leading-relaxed text-slate-600">
-          La instancia se crea en borrador, pero ya deja persistido el workflow template, el preset permitido, el alcance por integracion y las metricas observables a seguir.
+          El agente se crea en borrador con un scope publico definido, capacidades activas, integraciones seleccionadas y prompt compilado.
         </p>
       </div>
 
       <div className="grid gap-6 xl:grid-cols-2">
         <article className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <h3 className="text-sm font-bold uppercase tracking-[0.2em] text-slate-500">Instancia</h3>
+          <h3 className="text-sm font-bold uppercase tracking-[0.2em] text-slate-500">Agente</h3>
           <p className="mt-4 text-xl font-bold tracking-tight text-slate-900">{name}</p>
           <p className="mt-2 text-sm text-slate-600">{description || "Sin descripcion interna"}</p>
           <div className="mt-5 flex flex-wrap gap-2 text-xs font-semibold">
-            {workflowTemplate ? <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-700">{workflowTemplate.name}</span> : null}
+            <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-700">{workflow.name}</span>
+            <span className="rounded-full bg-sky-50 px-3 py-1 text-sky-700">{AGENT_SCOPE_LABELS[setupState.agentScope]}</span>
             <span className="rounded-full bg-emerald-50 px-3 py-1 text-emerald-700">{CHANNEL_LABELS[setupState.channel]}</span>
-            <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-700">{AUTOMATION_PRESET_LABELS[setupState.automationPreset ?? "copilot"]}</span>
             <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-700">{TOOL_SCOPE_PRESET_LABELS[setupState.tool_scope_preset]}</span>
           </div>
 
           <div className="mt-5 grid gap-4 sm:grid-cols-2">
             <div className="rounded-xl bg-slate-50 p-4 ring-1 ring-inset ring-slate-200">
-              <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">Requeridas</p>
+              <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">Integraciones</p>
               <p className="mt-2 text-sm font-semibold text-slate-900">
-                {setupState.requiredIntegrations.length > 0
-                  ? setupState.requiredIntegrations.map((integrationId) => getWizardIntegrationById(integrationId).name).join(", ")
-                  : "Sin requeridas"}
+                {setupState.integrations.length > 0
+                  ? setupState.integrations.map((integrationId) => getWizardIntegrationById(integrationId).name).join(", ")
+                  : "Sin integraciones"}
               </p>
             </div>
             <div className="rounded-xl bg-slate-50 p-4 ring-1 ring-inset ring-slate-200">
-              <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">Opcionales</p>
+              <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">Scope</p>
               <p className="mt-2 text-sm font-semibold text-slate-900">
-                {setupState.optionalIntegrations.length > 0
-                  ? setupState.optionalIntegrations.map((integrationId) => getWizardIntegrationById(integrationId).name).join(", ")
-                  : "Sin opcionales"}
+                {AGENT_SCOPE_LABELS[setupState.agentScope]}
+              </p>
+            </div>
+            <div className="rounded-xl bg-slate-50 p-4 ring-1 ring-inset ring-slate-200">
+              <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">Capacidades</p>
+              <p className="mt-2 text-sm font-semibold text-slate-900">
+                {setupState.capabilities.map((capability) => AGENT_CAPABILITY_LABELS[capability]).join(", ")}
               </p>
             </div>
           </div>
@@ -157,42 +148,31 @@ export function StepReview({
               <p className="mt-2 text-sm text-slate-600">{modelRecommendation.tradeoffCopy}</p>
             </div>
           ) : null}
-          <div className="mt-4 rounded-xl bg-slate-950 p-4 text-sm leading-relaxed text-slate-100">
+          <pre className="mt-4 max-h-72 overflow-auto whitespace-pre-wrap rounded-xl bg-slate-950 p-4 text-sm leading-relaxed text-slate-100">
             {systemPrompt}
-          </div>
+          </pre>
         </article>
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-3">
+      <div className="grid gap-6 xl:grid-cols-2">
         <article className="rounded-2xl border border-emerald-200 bg-emerald-50 p-6 shadow-sm">
           <h3 className="text-sm font-bold uppercase tracking-[0.2em] text-emerald-700">Automatico</h3>
           <div className="mt-4">
             {renderLines(
               actionSummary.auto,
-              "No hay lecturas o analisis automaticos definidos para esta instancia.",
+              "No hay lecturas o analisis automaticos definidos para este agente.",
               "rounded-xl bg-white/70 px-4 py-3 ring-1 ring-inset ring-emerald-200"
             )}
           </div>
         </article>
 
         <article className="rounded-2xl border border-amber-200 bg-amber-50 p-6 shadow-sm">
-          <h3 className="text-sm font-bold uppercase tracking-[0.2em] text-amber-700">Con confirmacion</h3>
+          <h3 className="text-sm font-bold uppercase tracking-[0.2em] text-amber-700">Con approval</h3>
           <div className="mt-4">
             {renderLines(
               actionSummary.confirm,
-              "No hay escrituras con confirmacion para el preset elegido.",
+              "No hay escrituras con approval dentro del alcance actual.",
               "rounded-xl bg-white/80 px-4 py-3 ring-1 ring-inset ring-amber-200"
-            )}
-          </div>
-        </article>
-
-        <article className="rounded-2xl border border-sky-200 bg-sky-50 p-6 shadow-sm">
-          <h3 className="text-sm font-bold uppercase tracking-[0.2em] text-sky-700">Solo sugerencia</h3>
-          <div className="mt-4">
-            {renderLines(
-              actionSummary.suggest,
-              "No hay side effects en sugerencia dentro del alcance actual.",
-              "rounded-xl bg-white/80 px-4 py-3 ring-1 ring-inset ring-sky-200"
             )}
           </div>
         </article>
@@ -200,24 +180,14 @@ export function StepReview({
 
       <div className="grid gap-6 xl:grid-cols-2">
         <article className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <h3 className="text-sm font-bold uppercase tracking-[0.2em] text-slate-500">Instance config</h3>
-          <div className="mt-5 grid gap-3 md:grid-cols-2">
-            <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-              <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">Idioma</p>
-              <p className="mt-2 text-sm font-semibold text-slate-900">{setupState.instanceConfig.language}</p>
-            </div>
-            <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-              <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">Owner</p>
-              <p className="mt-2 text-sm font-semibold text-slate-900">{setupState.instanceConfig.ownerLabel || "Sin definir"}</p>
-            </div>
-            <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-              <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">Routing</p>
-              <p className="mt-2 text-sm text-slate-700">{setupState.instanceConfig.routingMode || "Sin definir"}</p>
-            </div>
-            <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-              <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">Handoff</p>
-              <p className="mt-2 text-sm text-slate-700">{setupState.instanceConfig.handoffThreshold || "Sin definir"}</p>
-            </div>
+          <h3 className="text-sm font-bold uppercase tracking-[0.2em] text-slate-500">Instrucciones de negocio</h3>
+          <div className="mt-5 space-y-3 text-sm text-slate-700">
+            <p><span className="font-semibold text-slate-900">Objetivo:</span> {setupState.businessInstructions.objective || "Sin definir"}</p>
+            <p><span className="font-semibold text-slate-900">Contexto:</span> {setupState.businessInstructions.context || "Sin definir"}</p>
+            <p><span className="font-semibold text-slate-900">Tareas:</span> {setupState.businessInstructions.tasks || "Sin definir"}</p>
+            <p><span className="font-semibold text-slate-900">Restricciones:</span> {setupState.businessInstructions.restrictions || "Sin definir"}</p>
+            <p><span className="font-semibold text-slate-900">Handoff:</span> {setupState.businessInstructions.handoffCriteria || "Sin definir"}</p>
+            <p><span className="font-semibold text-slate-900">Fuera de scope:</span> rechazar y derivar</p>
           </div>
         </article>
 

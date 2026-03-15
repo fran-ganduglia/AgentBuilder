@@ -47,7 +47,7 @@ async function runSearchExecutionTest(): Promise<void> {
     isPendingToolActionExpired: () => false,
     isRecentCrmToolContextExpired: () => false,
     updateConversationMetadata: async () => ({ data: null, error: null }),
-    planGoogleGmailToolAction: () => ({
+    planGoogleGmailToolAction: async () => ({
       kind: "search",
       input: {
         action: "search_threads",
@@ -133,7 +133,7 @@ async function runReadStoresMinimalContextTest(): Promise<void> {
       metadataWrites.push(patch as Record<string, unknown>);
       return { data: null, error: null };
     },
-    planGoogleGmailToolAction: () => ({
+    planGoogleGmailToolAction: async () => ({
       kind: "read",
       input: {
         action: "read_thread",
@@ -232,7 +232,7 @@ async function runResolveThreadBeforeWriteTest(): Promise<void> {
       metadataWrites.push(patch as Record<string, unknown>);
       return { data: null, error: null };
     },
-    planGoogleGmailToolAction: () => ({
+    planGoogleGmailToolAction: async () => ({
       kind: "resolve_thread_for_write",
       readInput: {
         action: "read_thread",

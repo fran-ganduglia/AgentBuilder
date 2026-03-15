@@ -1,5 +1,4 @@
 import type { PendingCrmAction } from "@/lib/chat/conversation-metadata";
-import type { ChatFormId } from "@/lib/chat/inline-forms";
 
 const DEFAULT_PENDING_ACTION_TTL_MS = 10 * 60 * 1000;
 
@@ -13,7 +12,7 @@ export function createPendingCrmAction<TActionInput>(input: {
   ttlMs?: number;
   sourceMessageId?: string | null;
   sourceContentHash?: string | null;
-  formId?: ChatFormId | null;
+  formId?: string | null;
 }): PendingCrmAction<TActionInput> {
   const createdAt = new Date().toISOString();
   const expiresAt = new Date(

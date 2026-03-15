@@ -7,7 +7,6 @@ import { getSession } from "@/lib/auth/get-session";
 import { insertAuditLog } from "@/lib/db/audit";
 import { deleteAgentTool, getAgentToolById, listAgentTools, upsertAgentTool } from "@/lib/db/agent-tools";
 import { getPrimaryGoogleIntegration } from "@/lib/db/google-integrations";
-import { getPrimaryHubSpotIntegration } from "@/lib/db/hubspot-integrations";
 import { getPrimarySalesforceIntegration } from "@/lib/db/salesforce-integrations";
 import { getIntegrationById } from "@/lib/db/integration-operations";
 import {
@@ -23,8 +22,6 @@ import {
   getIntegrationOperationalView,
   isIntegrationOperationalViewUsable,
 } from "@/lib/integrations/metadata";
-import { getHubSpotAgentToolDiagnostics } from "@/lib/integrations/hubspot-agent-tool-selection";
-import { hubSpotAgentToolConfigSchema } from "@/lib/integrations/hubspot-tools";
 import { getSalesforceAgentToolDiagnostics } from "@/lib/integrations/salesforce-agent-tool-selection";
 import { salesforceAgentToolConfigSchema } from "@/lib/integrations/salesforce-tools";
 import { parseJsonRequestBody, validateJsonMutationRequest } from "@/lib/utils/request-security";
@@ -35,18 +32,17 @@ const saveAgentToolSchema = z.object({
   isEnabled: z.boolean().optional(),
   config: z.union([
     salesforceAgentToolConfigSchema,
-    hubSpotAgentToolConfigSchema,
     gmailAgentToolConfigSchema,
     googleCalendarAgentToolConfigSchema,
   ]),
 }).superRefine((value, ctx) => {
   if (
     value.toolType === "crm" &&
-    !("provider" in value.config && (value.config.provider === "salesforce" || value.config.provider === "hubspot"))
+    !("provider" in value.config && value.config.provider === "salesforce")
   ) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
-      message: "La tool CRM debe usar config de Salesforce o HubSpot",
+      message: "La tool CRM debe usar config de Salesforce",
       path: ["config"],
     });
   }
@@ -96,10 +92,9 @@ export async function GET(_request: Request, context: RouteContext): Promise<Nex
     return NextResponse.json({ error: access.message }, { status: access.status });
   }
 
-  const [toolsResult, salesforceIntegrationResult, hubspotIntegrationResult, googleIntegrationResult] = await Promise.all([
+  const [toolsResult, salesforceIntegrationResult, googleIntegrationResult] = await Promise.all([
     listAgentTools(agentId, session.organizationId),
     getPrimarySalesforceIntegration(session.organizationId),
-    getPrimaryHubSpotIntegration(session.organizationId),
     getPrimaryGoogleIntegration(session.organizationId),
   ]);
 
@@ -107,7 +102,7 @@ export async function GET(_request: Request, context: RouteContext): Promise<Nex
     return NextResponse.json({ error: "No se pudieron cargar las tools del agente" }, { status: 500 });
   }
 
-  if (salesforceIntegrationResult.error || hubspotIntegrationResult.error || googleIntegrationResult.error) {
+  if (salesforceIntegrationResult.error || googleIntegrationResult.error) {
     return NextResponse.json({ error: "No se pudieron cargar las integraciones del agente" }, { status: 500 });
   }
 
@@ -116,12 +111,7 @@ export async function GET(_request: Request, context: RouteContext): Promise<Nex
     tools,
     salesforceIntegrationResult.data?.id ?? null
   );
-  const hubspotToolDiagnostics = getHubSpotAgentToolDiagnostics(
-    tools,
-    hubspotIntegrationResult.data?.id ?? null
-  );
   const salesforceOperationalView = getIntegrationOperationalView(salesforceIntegrationResult.data);
-  const hubspotOperationalView = getIntegrationOperationalView(hubspotIntegrationResult.data);
   const googleOperationalView = getIntegrationOperationalView(googleIntegrationResult.data);
   const gmailToolDiagnostics = getGmailAgentToolDiagnostics(
     tools,
@@ -139,9 +129,6 @@ export async function GET(_request: Request, context: RouteContext): Promise<Nex
         isIntegrationOperationalViewUsable(salesforceOperationalView) &&
         Boolean(salesforceToolDiagnostics.selectedTool?.is_enabled) &&
         salesforceToolDiagnostics.hasSelectedToolAlignedWithIntegration,
-      hubspotUsable:
-        isIntegrationOperationalViewUsable(hubspotOperationalView) &&
-        Boolean(hubspotToolDiagnostics.selectedTool?.is_enabled),
     },
     allowConflictCleanupForCustom: false,
   });
@@ -160,13 +147,6 @@ export async function GET(_request: Request, context: RouteContext): Promise<Nex
       selectedSalesforceLookupEnabled: salesforceToolDiagnostics.hasLookupRecordsAction,
       promptBlocksSalesforceAccess: promptResolution.syncMode === "custom" && promptResolution.hasPromptConflict,
       salesforcePromptConflictSnippet: promptResolution.promptConflictSnippet,
-      hubspotIntegration: hubspotIntegrationResult.data,
-      hubspotOperationalView,
-      selectedHubSpotToolId: hubspotToolDiagnostics.selectedTool?.id ?? null,
-      selectedHubSpotIntegrationId: hubspotToolDiagnostics.selectedTool?.integration_id ?? null,
-      selectedHubSpotAllowedActions: hubspotToolDiagnostics.selectedAllowedActions,
-      hasDuplicateHubSpotTools: hubspotToolDiagnostics.hasDuplicateHubSpotTools,
-      hasMisalignedHubSpotTools: hubspotToolDiagnostics.hasMisalignedHubSpotTools,
       googleIntegration: googleIntegrationResult.data,
       googleOperationalView,
       selectedGmailToolId: gmailToolDiagnostics.selectedTool?.id ?? null,

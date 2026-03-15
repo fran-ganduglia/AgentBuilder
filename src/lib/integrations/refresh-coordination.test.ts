@@ -9,7 +9,7 @@ async function runWinnerTest(): Promise<void> {
   let released = false;
 
   const result = await coordinateIntegrationRefresh({
-    provider: "hubspot",
+    provider: "salesforce",
     integrationId: "integration-1",
     loadState: async () => ({ tokenGeneration: 1, authStatus: "ok" }),
     refresh: async () => {
@@ -17,7 +17,7 @@ async function runWinnerTest(): Promise<void> {
     },
     lockStore: {
       acquire: async (key: string, token: string, ttl: number) => {
-        assert.equal(key, buildIntegrationRefreshLockKey("hubspot", "integration-1"));
+        assert.equal(key, buildIntegrationRefreshLockKey("salesforce", "integration-1"));
         assert.ok(token.length > 0);
         assert.equal(ttl, 15);
         return true;
@@ -42,7 +42,7 @@ async function runFollowerTest(): Promise<void> {
   }, 20);
 
   const result = await coordinateIntegrationRefresh({
-    provider: "hubspot",
+    provider: "salesforce",
     integrationId: "integration-2",
     loadState: async () => ({ tokenGeneration, authStatus: "ok" }),
     refresh: async () => {
@@ -62,7 +62,7 @@ async function runFollowerTest(): Promise<void> {
 
 async function runTimeoutTest(): Promise<void> {
   const result = await coordinateIntegrationRefresh({
-    provider: "hubspot",
+    provider: "salesforce",
     integrationId: "integration-3",
     loadState: async () => ({ tokenGeneration: 3, authStatus: "ok" }),
     refresh: async () => {
@@ -107,7 +107,7 @@ async function runReleaseErrorIgnoredTest(): Promise<void> {
   let refreshCalls = 0;
 
   const result = await coordinateIntegrationRefresh({
-    provider: "hubspot",
+    provider: "salesforce",
     integrationId: "integration-5",
     loadState: async () => ({ tokenGeneration: 5, authStatus: "ok" }),
     refresh: async () => {

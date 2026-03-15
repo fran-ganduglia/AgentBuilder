@@ -1,11 +1,17 @@
 ﻿import { NextResponse } from "next/server";
 import { z } from "zod";
 import { buildAgentConnectionSummary } from "@/lib/agents/connection-policy";
-import { haveIntegrationSelectionsChanged, validateIntegrationSelection } from "@/lib/agents/agent-integration-limits";
+import {
+  canActivateScope,
+  haveIntegrationSelectionsChanged,
+  validateIntegrationSelection,
+} from "@/lib/agents/agent-integration-limits";
 import { getSession } from "@/lib/auth/get-session";
 import { agentModelSchema } from "@/lib/agents/agent-config";
 import {
+  applyPublicWorkflowFields,
   agentSetupStateSchema,
+  businessInstructionsPatchSchema,
   getActivationReadiness,
   toSetupStateJson,
 } from "@/lib/agents/agent-setup";
@@ -18,18 +24,15 @@ import {
   getGoogleCalendarAgentIntegrationState,
 } from "@/lib/agents/google-calendar-agent-integration";
 import {
-  buildHubSpotSetupResolutionContext,
-  getHubSpotAgentIntegrationState,
-} from "@/lib/agents/hubspot-agent-integration";
-import {
   buildSalesforceSetupResolutionContext,
   getSalesforceAgentIntegrationState,
 } from "@/lib/agents/salesforce-agent-integration";
 import { getAgentDeletionDeadlineIso } from "@/lib/agents/agent-deletion";
 import { normalizeSetupState, readAgentSetupState } from "@/lib/agents/agent-setup-state";
+import { buildRecommendedSystemPrompt } from "@/lib/agents/agent-templates";
 import { resolveEffectiveAgentPrompt } from "@/lib/agents/effective-prompt";
 import { hasReadyDocuments } from "@/lib/db/agent-documents";
-import { getAgentById, softDeleteAgent, updateAgent } from "@/lib/db/agents";
+import { getAgentById, listAgents, softDeleteAgent, updateAgent } from "@/lib/db/agents";
 import {
   createDeletionRequest,
   isDeletionRequestsUnavailableError,
@@ -41,7 +44,7 @@ import {
 } from "@/lib/db/agent-connections";
 import { insertAuditLog } from "@/lib/db/audit";
 import { enqueueEvent } from "@/lib/db/event-queue";
-import { getOrganizationPlanName } from "@/lib/db/organization-plans";
+import { getOrganizationPlan } from "@/lib/db/organization-plans";
 import {
   getOpenAIIntegrationApiKey,
   getOpenAIIntegrationById,
@@ -58,6 +61,8 @@ import {
 import { updateOpenAIAssistant } from "@/lib/llm/openai-assistants";
 import type { Role } from "@/types/app";
 import type { Json } from "@/types/database";
+import { AGENT_CAPABILITIES, PUBLIC_WORKFLOW_IDS } from "@/lib/agents/public-workflow";
+import { AGENT_SCOPES, OUT_OF_SCOPE_POLICIES } from "@/lib/agents/agent-scope";
 import {
   parseJsonRequestBody,
   validateJsonMutationRequest,
@@ -74,6 +79,11 @@ const updateAgentSchema = z.object({
   llmTemperature: z.number().min(0, "La temperatura minima es 0.0").max(1, "La temperatura maxima es 1.0").optional(),
   status: z.enum(["draft", "active", "paused", "archived"]).optional(),
   setupState: agentSetupStateSchema.optional(),
+  workflowId: z.enum(PUBLIC_WORKFLOW_IDS).optional(),
+  agentScope: z.enum(AGENT_SCOPES).optional(),
+  outOfScopePolicy: z.enum(OUT_OF_SCOPE_POLICIES).optional(),
+  capabilities: z.array(z.enum(AGENT_CAPABILITIES)).optional(),
+  businessInstructions: businessInstructionsPatchSchema.optional(),
 });
 
 type RouteContext = {
@@ -149,13 +159,8 @@ export async function PATCH(request: Request, context: RouteContext): Promise<Ne
   let googleCalendarDetectedTimezone: string | null = null;
 
   if (baseSetupState) {
-    const [salesforceIntegrationStateResult, hubspotIntegrationStateResult, gmailIntegrationStateResult, googleCalendarIntegrationStateResult] = await Promise.all([
+    const [salesforceIntegrationStateResult, gmailIntegrationStateResult, googleCalendarIntegrationStateResult] = await Promise.all([
       getSalesforceAgentIntegrationState({
-        agentId,
-        organizationId: session.organizationId,
-        setupState: baseSetupState,
-      }),
-      getHubSpotAgentIntegrationState({
         agentId,
         organizationId: session.organizationId,
         setupState: baseSetupState,
@@ -179,13 +184,6 @@ export async function PATCH(request: Request, context: RouteContext): Promise<Ne
       );
     }
 
-    if (hubspotIntegrationStateResult.error) {
-      return NextResponse.json(
-        { error: "No se pudo validar la vinculacion HubSpot del agente" },
-        { status: 500 }
-      );
-    }
-
     if (gmailIntegrationStateResult.error) {
       return NextResponse.json(
         { error: "No se pudo validar la vinculacion Gmail del agente" },
@@ -202,7 +200,6 @@ export async function PATCH(request: Request, context: RouteContext): Promise<Ne
 
     providerIntegrations = {
       ...buildSalesforceSetupResolutionContext(salesforceIntegrationStateResult.data),
-      ...buildHubSpotSetupResolutionContext(hubspotIntegrationStateResult.data),
       ...buildGmailSetupResolutionContext(gmailIntegrationStateResult.data),
       ...buildGoogleCalendarSetupResolutionContext(googleCalendarIntegrationStateResult.data),
     };
@@ -225,21 +222,57 @@ export async function PATCH(request: Request, context: RouteContext): Promise<Ne
     googleCalendarDetectedTimezone,
     providerIntegrations,
   });
-  const nextSetupState = parsedBody.data.setupState
+  const explicitSetupState = parsedBody.data.setupState
     ? normalizeSetupState(parsedBody.data.setupState, {
       hasReadyDocuments: hasDocumentsReady,
       googleCalendarDetectedTimezone,
       providerIntegrations,
     })
     : existingSetupState;
+  const nextSetupState =
+    explicitSetupState ||
+    parsedBody.data.workflowId ||
+    parsedBody.data.agentScope ||
+    parsedBody.data.outOfScopePolicy ||
+    parsedBody.data.capabilities ||
+    parsedBody.data.businessInstructions
+      ? applyPublicWorkflowFields({
+        setupState: explicitSetupState,
+        workflowId: parsedBody.data.workflowId,
+        agentScope: parsedBody.data.agentScope,
+        outOfScopePolicy: parsedBody.data.outOfScopePolicy,
+        capabilities: parsedBody.data.capabilities,
+        businessInstructions: parsedBody.data.businessInstructions,
+      })
+      : existingSetupState;
+  const shouldRegenerateSystemPrompt = Boolean(
+    parsedBody.data.setupState ||
+    parsedBody.data.workflowId ||
+    parsedBody.data.agentScope ||
+    parsedBody.data.outOfScopePolicy ||
+    parsedBody.data.capabilities ||
+    parsedBody.data.businessInstructions
+  );
+  const resolvedSystemPrompt = shouldRegenerateSystemPrompt && nextSetupState
+    ? buildRecommendedSystemPrompt(nextSetupState, {})
+    : parsedBody.data.systemPrompt;
   const updateInput: Parameters<typeof updateAgent>[1] = {
     name: parsedBody.data.name,
     description: parsedBody.data.description,
-    systemPrompt: parsedBody.data.systemPrompt,
+    systemPrompt: resolvedSystemPrompt,
     llmModel: parsedBody.data.llmModel,
     llmTemperature: parsedBody.data.llmTemperature,
     status: parsedBody.data.status,
-    ...(parsedBody.data.setupState ? { setupState: nextSetupState ?? undefined } : {}),
+    ...(
+      parsedBody.data.setupState ||
+      parsedBody.data.workflowId ||
+      parsedBody.data.agentScope ||
+      parsedBody.data.outOfScopePolicy ||
+      parsedBody.data.capabilities ||
+      parsedBody.data.businessInstructions
+        ? { setupState: nextSetupState ?? undefined }
+        : {}
+    ),
   };
 
   const integrationsChanged = parsedBody.data.setupState
@@ -250,7 +283,7 @@ export async function PATCH(request: Request, context: RouteContext): Promise<Ne
     : false;
 
   if (parsedBody.data.setupState && integrationsChanged && nextSetupState) {
-    const planResult = await getOrganizationPlanName(session.organizationId);
+    const planResult = await getOrganizationPlan(session.organizationId);
 
     if (planResult.error || !planResult.data) {
       return NextResponse.json(
@@ -260,8 +293,9 @@ export async function PATCH(request: Request, context: RouteContext): Promise<Ne
     }
 
     const integrationValidationError = validateIntegrationSelection({
-      planName: planResult.data,
+      planName: planResult.data.name,
       integrationIds: nextSetupState.integrations,
+      features: planResult.data.features,
     });
 
     if (integrationValidationError) {
@@ -269,7 +303,9 @@ export async function PATCH(request: Request, context: RouteContext): Promise<Ne
     }
   }
 
-  if (updateInput.status === "active") {
+  const resultingStatus = updateInput.status ?? existingAgent.status;
+
+  if (resultingStatus === "active") {
     const readiness = getActivationReadiness({
       name: updateInput.name ?? existingAgent.name,
       systemPrompt: updateInput.systemPrompt ?? existingAgent.system_prompt,
@@ -284,6 +320,56 @@ export async function PATCH(request: Request, context: RouteContext): Promise<Ne
       return NextResponse.json(
         { error: buildActivationErrorMessage(readiness) },
         { status: 400 }
+      );
+    }
+
+    const planResult = await getOrganizationPlan(session.organizationId);
+
+    if (planResult.error || !planResult.data) {
+      return NextResponse.json(
+        { error: planResult.error ?? "No se pudo validar el plan de la organizacion" },
+        { status: 500 }
+      );
+    }
+
+    const targetScope = nextSetupState?.agentScope ?? existingSetupState?.agentScope ?? "operations";
+    const agentsResult = await listAgents(session.organizationId);
+
+    if (agentsResult.error || !agentsResult.data) {
+      return NextResponse.json(
+        { error: agentsResult.error ?? "No se pudieron verificar los agentes activos" },
+        { status: 500 }
+      );
+    }
+
+    const otherActiveAgents = agentsResult.data.filter(
+      (agent) => agent.id !== agentId && agent.status === "active"
+    );
+    const activeScopes = new Set<string>();
+    let activeAgentsInScope = 0;
+
+    for (const agent of otherActiveAgents) {
+      const setupState = readAgentSetupState(agent);
+      const scope = setupState?.agentScope ?? "operations";
+      activeScopes.add(scope);
+
+      if (scope === targetScope) {
+        activeAgentsInScope += 1;
+      }
+    }
+
+    const activationCheck = canActivateScope({
+      planName: planResult.data.name,
+      activeScopes: Array.from(activeScopes),
+      activeAgentsInScope,
+      targetScope,
+      features: planResult.data.features,
+    });
+
+    if (!activationCheck.allowed) {
+      return NextResponse.json(
+        { error: activationCheck.message ?? "No se pudo activar el scope en el plan actual" },
+        { status: 422 }
       );
     }
   }

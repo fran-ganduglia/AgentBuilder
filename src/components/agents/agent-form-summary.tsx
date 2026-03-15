@@ -1,6 +1,7 @@
 import type { AgentConnection } from "@/types/app";
 import { getTemperatureLabel, type AgentFormFields } from "@/components/agents/agent-form-shared";
 import type { AgentConnectionSummary } from "@/lib/agents/connection-policy";
+import { AGENT_SCOPE_LABELS, type AgentScope } from "@/lib/agents/agent-scope";
 
 type PromptSyncMode = "recommended" | "custom";
 
@@ -15,6 +16,7 @@ function StatChip({ label, value }: { label: string; value: string }) {
 
 type AgentWorkspaceSummaryProps = {
   fields: AgentFormFields;
+  agentScope: AgentScope | null;
   connection?: AgentConnection | null;
   connectionSummary: AgentConnectionSummary;
   selectedStatusLabel: string;
@@ -38,6 +40,7 @@ function getSyncDescription(summary: AgentConnectionSummary): string {
 
 function AgentWorkspaceSummary({
   fields,
+  agentScope,
   connection,
   connectionSummary,
   selectedStatusLabel,
@@ -56,6 +59,7 @@ function AgentWorkspaceSummary({
         </p>
         <p className="mt-4 text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Solapa actual: {activeTabLabel}</p>
         <div className="mt-6 grid gap-3">
+          <StatChip label="Tipo de agente" value={agentScope ? AGENT_SCOPE_LABELS[agentScope] : "Legacy"} />
           <StatChip label="Estado" value={selectedStatusLabel} />
           <StatChip label="Modelo" value={selectedModelLabel} />
           <StatChip label="Temperatura" value={`${fields.llmTemperature.toFixed(2)} / ${getTemperatureLabel(fields.llmTemperature)}`} />
@@ -71,6 +75,11 @@ function AgentWorkspaceSummary({
         <p className="mt-2 text-sm leading-relaxed text-slate-600">
           {getSyncDescription(connectionSummary)}
         </p>
+        {agentScope ? (
+          <p className="mt-3 text-sm leading-relaxed text-slate-600">
+            Este agente se presenta publicamente como <span className="font-semibold text-slate-900">{AGENT_SCOPE_LABELS[agentScope]}</span> y debe rechazar o derivar pedidos fuera de ese alcance.
+          </p>
+        ) : null}
       </section>
     </section>
   );

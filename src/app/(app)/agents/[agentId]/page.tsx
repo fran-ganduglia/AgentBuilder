@@ -13,11 +13,6 @@ import {
   getGoogleCalendarAgentIntegrationState,
 } from "@/lib/agents/google-calendar-agent-integration";
 import {
-  buildHubSpotSetupResolutionContext,
-  getHubSpotIntegrationCta,
-  getHubSpotAgentIntegrationState,
-} from "@/lib/agents/hubspot-agent-integration";
-import {
   buildSalesforceSetupResolutionContext,
   getSalesforceAgentIntegrationState,
   getSalesforceIntegrationCta,
@@ -48,7 +43,7 @@ type AgentDetailPageProps = {
 function resolveInitialTab(rawTab: string | string[] | undefined) {
   const candidate = Array.isArray(rawTab) ? rawTab[0] : rawTab;
 
-  if (candidate === "config" || candidate === "knowledge" || candidate === "setup" || candidate === "qa") {
+  if (candidate === "config" || candidate === "knowledge" || candidate === "setup" || candidate === "qa" || candidate === "automations") {
     return candidate;
   }
 
@@ -100,16 +95,9 @@ export default async function AgentDetailPage({ params, searchParams }: AgentDet
     hasReadyDocuments: hasReadyDocumentsResult,
   });
 
-  const [salesforceIntegrationStateResult, hubspotIntegrationStateResult, gmailIntegrationStateResult, googleCalendarIntegrationStateResult] = await Promise.all([
+  const [salesforceIntegrationStateResult, gmailIntegrationStateResult, googleCalendarIntegrationStateResult] = await Promise.all([
     baseSetupState
       ? getSalesforceAgentIntegrationState({
-          agentId,
-          organizationId: session.organizationId,
-          setupState: baseSetupState,
-        })
-      : Promise.resolve({ data: null, error: null }),
-    baseSetupState
-      ? getHubSpotAgentIntegrationState({
           agentId,
           organizationId: session.organizationId,
           setupState: baseSetupState,
@@ -134,9 +122,6 @@ export default async function AgentDetailPage({ params, searchParams }: AgentDet
   const salesforceIntegrationState = salesforceIntegrationStateResult.error
     ? null
     : salesforceIntegrationStateResult.data;
-  const hubspotIntegrationState = hubspotIntegrationStateResult.error
-    ? null
-    : hubspotIntegrationStateResult.data;
   const gmailIntegrationState = gmailIntegrationStateResult.error
     ? null
     : gmailIntegrationStateResult.data;
@@ -146,7 +131,6 @@ export default async function AgentDetailPage({ params, searchParams }: AgentDet
 
   const providerIntegrations = {
     ...buildSalesforceSetupResolutionContext(salesforceIntegrationState),
-    ...buildHubSpotSetupResolutionContext(hubspotIntegrationState),
     ...buildGmailSetupResolutionContext(gmailIntegrationState),
     ...buildGoogleCalendarSetupResolutionContext(googleCalendarIntegrationState),
   };
@@ -182,21 +166,6 @@ export default async function AgentDetailPage({ params, searchParams }: AgentDet
         }
       : null;
 
-  const hubspotIntegrationCta = hubspotIntegrationState
-    ? getHubSpotIntegrationCta(hubspotIntegrationState)
-    : null;
-  const hubspotIntegrationNotice =
-    hubspotIntegrationState?.expectsHubSpotIntegration && !hubspotIntegrationState.isLinked
-      ? {
-          title: hubspotIntegrationState.integration
-            ? `HubSpot: ${hubspotIntegrationState.integrationView.label}`
-            : "HubSpot pendiente",
-          message: hubspotIntegrationState.message,
-          tone: hubspotIntegrationState.integrationView.tone,
-          href: hubspotIntegrationCta?.href ?? "/settings/integrations",
-          label: hubspotIntegrationCta?.label ?? "Abrir integraciones",
-        }
-      : null;
   const gmailIntegrationCta = gmailIntegrationState
     ? getGmailIntegrationCta(gmailIntegrationState)
     : null;
@@ -253,15 +222,11 @@ export default async function AgentDetailPage({ params, searchParams }: AgentDet
       initialTab={initialTab}
       whatsappIntegrationId={whatsappIntegrationResult.data?.id ?? null}
       salesforceIntegrationNotice={salesforceIntegrationNotice}
-      hubspotIntegrationNotice={hubspotIntegrationNotice}
       gmailIntegrationNotice={gmailIntegrationNotice}
       googleCalendarIntegrationNotice={googleCalendarIntegrationNotice}
       promptEnvironment={{
         salesforceUsable: Boolean(
           salesforceIntegrationState?.hasUsableIntegration && salesforceIntegrationState?.hasEnabledTool
-        ),
-        hubspotUsable: Boolean(
-          hubspotIntegrationState?.hasUsableIntegration && hubspotIntegrationState?.hasEnabledTool
         ),
         gmailConfigured: Boolean(
           gmailIntegrationState?.hasUsableIntegration && gmailIntegrationState?.hasEnabledTool
@@ -276,4 +241,3 @@ export default async function AgentDetailPage({ params, searchParams }: AgentDet
     />
   );
 }
-

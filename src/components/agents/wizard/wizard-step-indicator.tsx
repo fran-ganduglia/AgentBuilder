@@ -4,9 +4,9 @@ type WizardStepIndicatorProps = {
 
 const STEPS = [
   "Workflow",
-  "Instancia",
+  "Contexto",
   "Integraciones",
-  "Reglas",
+  "Capacidades",
   "Modelo",
   "Revision",
 ] as const;

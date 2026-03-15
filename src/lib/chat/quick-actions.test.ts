@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
-import { createSetupStateForTemplate } from "../agents/agent-templates";
+import { createDefaultAgentSetupState, toSetupStateJson } from "../agents/agent-setup";
+import type { AgentScope } from "../agents/agent-scope";
 import { resolveChatQuickActions } from "./quick-actions-server";
 import {
   getChatEmptyStateQuickActions,
   resolveInlineFallbackQuickActions,
   type ResolvedChatQuickActions,
 } from "./quick-actions";
-import type { HubSpotCrmAction } from "../integrations/hubspot-tools";
 import type { SalesforceCrmAction } from "../integrations/salesforce-tools";
 import type { Agent } from "../../types/app";
 
@@ -19,23 +19,24 @@ type SalesforceRuntimeResult = RuntimeResult<{
   config: { allowed_actions: SalesforceCrmAction[] };
 }>;
 
-type HubSpotRuntimeResult = RuntimeResult<{
-  config: { allowed_actions: HubSpotCrmAction[] };
-}>;
-
-function buildAgent(templateId: string): Agent {
+function buildAgentWithIntegrations(
+  integrations: string[],
+  agentScope: AgentScope = "operations"
+): Agent {
+  const setupState = createDefaultAgentSetupState({
+    agentScope,
+    integrations: integrations as never,
+  });
   return {
     id: "agent-1",
     organization_id: "org-1",
-    setup_state: createSetupStateForTemplate(templateId as never),
+    setup_state: toSetupStateJson(setupState),
   } as unknown as Agent;
 }
 
 function createDeps(input: {
   salesforceRuntime?: SalesforceRuntimeResult;
   salesforceUsable?: SalesforceRuntimeResult;
-  hubspotRuntime?: HubSpotRuntimeResult;
-  hubspotUsable?: HubSpotRuntimeResult;
 }) {
   return {
     loadSalesforceRuntime: async () =>
@@ -43,11 +44,6 @@ function createDeps(input: {
     assertSalesforceRuntimeUsable: async () =>
       input.salesforceUsable ??
       input.salesforceRuntime ?? { data: null, error: "unusable" },
-    loadHubSpotRuntime: async () =>
-      input.hubspotRuntime ?? { data: null, error: "missing" },
-    assertHubSpotRuntimeUsable: async () =>
-      input.hubspotUsable ??
-      input.hubspotRuntime ?? { data: null, error: "unusable" },
   };
 }
 
@@ -64,22 +60,9 @@ function createSalesforceRuntime(
   };
 }
 
-function createHubSpotRuntime(
-  allowedActions: readonly HubSpotCrmAction[]
-): HubSpotRuntimeResult {
-  return {
-    data: {
-      config: {
-        allowed_actions: [...allowedActions],
-      },
-    },
-    error: null,
-  };
-}
-
 async function run(): Promise<void> {
   const salesforceQuickActions = await resolveChatQuickActions(
-    buildAgent("salesforce_lead_qualification"),
+    buildAgentWithIntegrations(["salesforce"], "sales"),
     createDeps({
       salesforceRuntime: createSalesforceRuntime([
         "lookup_records",
@@ -90,14 +73,15 @@ async function run(): Promise<void> {
     })
   );
 
-  assert.equal(salesforceQuickActions.isCrmChat, true);
-  assert.equal(salesforceQuickActions.provider, "salesforce");
+  assert.equal(salesforceQuickActions.hasConnectedIntegrations, true);
+  assert.equal(salesforceQuickActions.agentScope, "sales");
+  assert.deepEqual(salesforceQuickActions.providers, ["salesforce"]);
   assert.equal(salesforceQuickActions.isRuntimeUsable, true);
   assert.deepEqual(
     salesforceQuickActions.assistance.map((action) => action.label),
     [
-      "Resumir hallazgo",
-      "Sugerir proximo paso",
+      "Resumir oportunidad",
+      "Siguiente paso comercial",
       "Redactar follow-up",
     ]
   );
@@ -111,70 +95,30 @@ async function run(): Promise<void> {
   );
   assert.deepEqual(
     salesforceQuickActions.templatePlaybook.map((action) => action.label),
-    ["Leads recientes", "Leads Open"]
+    ["Leads recientes", "Buscar lead/contacto"]
   );
   assert.deepEqual(
     getChatEmptyStateQuickActions(salesforceQuickActions).map(
       (action) => action.label
     ),
-    ["Leads recientes", "Leads Open"]
+    ["Leads recientes", "Buscar lead/contacto"]
   );
   assert.deepEqual(
     resolveInlineFallbackQuickActions(salesforceQuickActions).map(
       (action) => action.label
     ),
     [
-      "Sugerir proximo paso",
+      "Siguiente paso comercial",
       "Leads recientes",
       "Buscar lead/contacto",
     ]
   );
 
-  const hubspotUnavailableQuickActions = await resolveChatQuickActions(
-    buildAgent("hubspot_pipeline_follow_up"),
-    createDeps({
-      hubspotRuntime: createHubSpotRuntime(["lookup_deals"]),
-      hubspotUsable: {
-        data: null,
-        error: "not usable",
-      },
-    })
-  );
-
-  assert.equal(hubspotUnavailableQuickActions.isCrmChat, true);
-  assert.equal(hubspotUnavailableQuickActions.provider, "hubspot");
-  assert.equal(hubspotUnavailableQuickActions.isRuntimeUsable, false);
-  assert.deepEqual(
-    hubspotUnavailableQuickActions.assistance.map((action) => action.label),
-    [
-      "Resumir hallazgo",
-      "Sugerir proximo paso",
-      "Redactar follow-up",
-    ]
-  );
-  assert.deepEqual(hubspotUnavailableQuickActions.crmShortcuts, []);
-  assert.deepEqual(hubspotUnavailableQuickActions.templatePlaybook, []);
-  assert.deepEqual(
-    getChatEmptyStateQuickActions(hubspotUnavailableQuickActions).map(
-      (action) => action.label
-    ),
-    [
-      "Resumir hallazgo",
-      "Sugerir proximo paso",
-      "Redactar follow-up",
-    ]
-  );
-  assert.deepEqual(
-    resolveInlineFallbackQuickActions(hubspotUnavailableQuickActions).map(
-      (action) => action.label
-    ),
-    ["Sugerir proximo paso"]
-  );
-
   const dedupedFallback = resolveInlineFallbackQuickActions({
-    isCrmChat: true,
-    provider: "salesforce",
+    hasConnectedIntegrations: true,
+    providers: ["salesforce"],
     isRuntimeUsable: true,
+    agentScope: "sales",
     assistance: [
       {
         id: "salesforce:assistant:next-step",
@@ -212,17 +156,36 @@ async function run(): Promise<void> {
   );
 
   const nonCrmQuickActions = await resolveChatQuickActions(
-    buildAgent("web_faq"),
+    buildAgentWithIntegrations([]),
     createDeps({})
   );
   assert.deepEqual(nonCrmQuickActions, {
-    isCrmChat: false,
-    provider: null,
+    hasConnectedIntegrations: false,
+    agentScope: null,
+    providers: [],
     isRuntimeUsable: false,
     assistance: [],
     crmShortcuts: [],
     templatePlaybook: [],
   });
+
+  // Gmail integration quick actions (no runtime check)
+  const gmailQuickActions = await resolveChatQuickActions(
+    buildAgentWithIntegrations(["gmail"], "support"),
+    createDeps({})
+  );
+  assert.equal(gmailQuickActions.hasConnectedIntegrations, true);
+  assert.equal(gmailQuickActions.agentScope, "support");
+  assert.deepEqual(gmailQuickActions.providers, ["gmail"]);
+  assert.equal(gmailQuickActions.isRuntimeUsable, true);
+  assert.deepEqual(
+    gmailQuickActions.crmShortcuts.map((action) => action.label),
+    ["Casos sin responder", "Inbox de soporte"]
+  );
+  assert.deepEqual(
+    gmailQuickActions.templatePlaybook.map((action) => action.label),
+    ["Casos sin responder", "Inbox de soporte"]
+  );
 
   console.log("quick-actions checks passed");
 }

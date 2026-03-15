@@ -1,5 +1,9 @@
 import "server-only";
 
+import {
+  getOrganizationPlanConfig,
+  normalizeOrganizationPlanName,
+} from "@/lib/agents/agent-integration-limits";
 import { createServiceSupabaseClient } from "@/lib/supabase/service";
 import {
   backfillUsageRecordsForOrganization,
@@ -24,7 +28,7 @@ type UsageRow = Pick<
 
 type PlanLimits = Pick<
   Tables<"plans">,
-  "max_messages_month" | "name" | "price_monthly_usd"
+  "features" | "name" | "price_monthly_usd"
 >;
 
 type OrganizationPlan = Pick<Tables<"organizations">, "plan_id">;
@@ -91,6 +95,38 @@ function buildAgentUsage(rows: UsageRow[], averageLatencyMs: number | null): Age
   };
 }
 
+async function countDistinctAssistantConversations(
+  supabase: DatabaseClient,
+  organizationId: string,
+  periodStart: string,
+  periodEnd: string,
+  conversationIds?: string[]
+): Promise<number> {
+  let query = supabase
+    .from("messages")
+    .select("conversation_id")
+    .eq("organization_id", organizationId)
+    .eq("role", "assistant")
+    .gte("created_at", periodStart)
+    .lt("created_at", periodEnd);
+
+  if (conversationIds && conversationIds.length > 0) {
+    query = query.in("conversation_id", conversationIds);
+  }
+
+  const { data, error } = await query;
+
+  if (error || !data) {
+    return 0;
+  }
+
+  return new Set(
+    data
+      .map((row) => row.conversation_id)
+      .filter((conversationId): conversationId is string => typeof conversationId === "string")
+  ).size;
+}
+
 async function fetchOrganizationUsageFromSnapshot(
   supabase: DatabaseClient,
   organizationId: string
@@ -111,7 +147,7 @@ async function fetchOrganizationUsageFromSnapshot(
 
   const { data: planData, error: planError } = await supabase
     .from("plans")
-    .select("max_messages_month, name, price_monthly_usd")
+    .select("features, name, price_monthly_usd")
     .eq("id", org.plan_id)
     .single();
 
@@ -139,13 +175,22 @@ async function fetchOrganizationUsageFromSnapshot(
   const totalTokensInput = rows.reduce((sum, row) => sum + (row.total_tokens_input ?? 0), 0);
   const totalTokensOutput = rows.reduce((sum, row) => sum + (row.total_tokens_output ?? 0), 0);
   const estimatedCostUsd = rows.reduce((sum, row) => sum + (row.estimated_cost_usd ?? 0), 0);
-  const totalConversations = rows.reduce(
-    (sum, row) => sum + (row.total_conversations ?? 0),
-    0
+  const totalConversations = await countDistinctAssistantConversations(
+    supabase,
+    organizationId,
+    periodStart,
+    periodEnd
   );
+  const planName = normalizeOrganizationPlanName(plan.name);
 
-  const usagePercent = plan.max_messages_month > 0
-    ? Math.round((totalMessages / plan.max_messages_month) * 100)
+  if (!planName) {
+    return { data: null, error: "El plan de la organizacion no es compatible con los limites actuales" };
+  }
+
+  const planConfig = getOrganizationPlanConfig(planName, plan.features);
+
+  const usagePercent = planConfig.maxSessionsMonth && planConfig.maxSessionsMonth > 0
+    ? Math.round((totalConversations / planConfig.maxSessionsMonth) * 100)
     : 0;
 
   return {
@@ -155,8 +200,8 @@ async function fetchOrganizationUsageFromSnapshot(
       totalTokensOutput,
       estimatedCostUsd,
       totalConversations,
-      planName: plan.name,
-      planLimit: plan.max_messages_month,
+      planName: planConfig.publicLabel,
+      planLimit: planConfig.maxSessionsMonth ?? 0,
       usagePercent,
     },
     error: null,

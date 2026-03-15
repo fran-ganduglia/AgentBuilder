@@ -1,5 +1,6 @@
 import "server-only";
 
+import { assertScopeAllowsSensitiveAction, type AgentScope } from "@/lib/agents/agent-scope";
 import { insertApprovalItem } from "@/lib/db/approval-items";
 import { insertWorkflowRun } from "@/lib/db/workflow-runs";
 import { insertWorkflowStep } from "@/lib/db/workflow-steps";
@@ -30,6 +31,7 @@ export type CreateApprovalRequestInput = {
   context?: JsonRecord;
   workflowTemplateId?: string | null;
   automationPreset?: "copilot" | "assisted" | "autonomous" | null;
+  agentScope?: AgentScope;
 };
 
 function compactJsonRecord(record?: JsonRecord): Record<string, Json> {
@@ -50,14 +52,6 @@ function inferCompensationAction(
   provider: string,
   action: string
 ): string | null {
-  if (provider === "hubspot" && action === "create_contact") {
-    return "archive_created_contact";
-  }
-
-  if (provider === "hubspot" && action === "create_task") {
-    return "archive_created_task";
-  }
-
   if (provider === "salesforce" && action === "create_contact") {
     return "delete_created_contact";
   }
@@ -76,6 +70,23 @@ function inferCompensationAction(
 export async function createApprovalRequest(
   input: CreateApprovalRequestInput
 ): Promise<DbResult<ApprovalRequestRecord>> {
+  if (input.agentScope) {
+    const scopeCheck = assertScopeAllowsSensitiveAction({
+      agentScope: input.agentScope,
+      provider: input.provider,
+      action: input.action,
+      summary: input.summary,
+    });
+
+    if (!scopeCheck.ok) {
+      return {
+        data: null,
+        error:
+          "La accion sensible queda fuera del scope de este agente. Debe derivarse antes de enviarla a approvals.",
+      };
+    }
+  }
+
   const actionPolicy = getWorkflowActionMatrixEntry(input.provider, input.action);
   const workflowStepKey = `${input.provider}:${input.action}:approval`;
   const compensationAction = inferCompensationAction(input.provider, input.action);

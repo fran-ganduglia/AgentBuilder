@@ -1,8 +1,8 @@
-import { isHubSpotTemplateId, isSalesforceTemplateId } from "../agents/agent-templates";
 import { readAgentSetupState } from "../agents/agent-setup-state";
-import type { HubSpotCrmAction } from "../integrations/hubspot-tools";
+import type { AgentScope } from "../agents/agent-scope";
 import type { SalesforceCrmAction } from "../integrations/salesforce-tools";
 import type { Agent } from "../../types/app";
+import type { ChatQuickActionProvider } from "./quick-actions";
 
 type RuntimeResult<T> = {
   data: T | null;
@@ -15,41 +15,16 @@ type SalesforceRuntimeLike = {
   };
 };
 
-type HubSpotRuntimeLike = {
-  config: {
-    allowed_actions: HubSpotCrmAction[];
-  };
-};
-
-type ChatStarterIntentAction = SalesforceCrmAction | HubSpotCrmAction;
-
 export type ChatStarterIntent = {
   id: string;
-  provider: "salesforce" | "hubspot";
-  action: ChatStarterIntentAction;
+  provider: ChatQuickActionProvider;
+  action?: string;
   label: string;
   prompt: string;
   priority: number;
 };
 
-type StarterCatalogIntent<TAction extends ChatStarterIntentAction> = Omit<
-  ChatStarterIntent,
-  "id"
-> & {
-  action: TAction;
-};
-
-type SalesforceStarterTemplateId =
-  | "salesforce_lead_qualification"
-  | "salesforce_case_triage"
-  | "salesforce_opportunity_follow_up"
-  | "salesforce_post_sale_handoff";
-
-type HubSpotStarterTemplateId =
-  | "hubspot_lead_capture"
-  | "hubspot_pipeline_follow_up"
-  | "hubspot_meeting_booking"
-  | "hubspot_reactivation_follow_up";
+type StarterCatalogEntry = Omit<ChatStarterIntent, "id">;
 
 type ResolveInitialChatStarterIntentsDeps = {
   loadSalesforceRuntime: (
@@ -59,182 +34,163 @@ type ResolveInitialChatStarterIntentsDeps = {
   assertSalesforceRuntimeUsable: (
     runtime: SalesforceRuntimeLike
   ) => Promise<RuntimeResult<SalesforceRuntimeLike>>;
-  loadHubSpotRuntime: (
-    agentId: string,
-    organizationId: string
-  ) => Promise<RuntimeResult<HubSpotRuntimeLike>>;
-  assertHubSpotRuntimeUsable: (
-    runtime: HubSpotRuntimeLike
-  ) => Promise<RuntimeResult<HubSpotRuntimeLike>>;
 };
 
-const SALESFORCE_STARTER_INTENT_CATALOG_BY_TEMPLATE = {
-  salesforce_lead_qualification: [
-    {
-      provider: "salesforce",
-      action: "list_leads_recent",
-      label: "Leads recientes",
-      prompt: "Dame los leads recientes",
-      priority: 10,
-    },
-    {
-      provider: "salesforce",
-      action: "list_leads_by_status",
-      label: "Leads Open",
-      prompt: "Dame los leads Open",
-      priority: 20,
-    },
-    {
-      provider: "salesforce",
-      action: "lookup_records",
-      label: "Buscar lead/contacto",
-      prompt: "Busc\u00e1 un lead o contacto por nombre",
-      priority: 30,
-    },
-  ],
-  salesforce_case_triage: [
-    {
-      provider: "salesforce",
-      action: "lookup_cases",
-      label: "Cases abiertos",
-      prompt: "Mostrame los cases abiertos",
-      priority: 10,
-    },
-    {
-      provider: "salesforce",
-      action: "lookup_accounts",
-      label: "Buscar account",
-      prompt: "Busc\u00e1 la account del cliente",
-      priority: 20,
-    },
-    {
-      provider: "salesforce",
-      action: "lookup_records",
-      label: "Buscar contacto",
-      prompt: "Busc\u00e1 el lead o contacto asociado",
-      priority: 30,
-    },
-  ],
-  salesforce_opportunity_follow_up: [
-    {
-      provider: "salesforce",
-      action: "lookup_opportunities",
-      label: "Oportunidades abiertas",
-      prompt: "Mostrame las oportunidades abiertas",
-      priority: 10,
-    },
-    {
-      provider: "salesforce",
-      action: "summarize_pipeline",
-      label: "Resumir pipeline",
-      prompt: "Resum\u00ed el pipeline",
-      priority: 20,
-    },
-    {
-      provider: "salesforce",
-      action: "lookup_accounts",
-      label: "Buscar account",
-      prompt: "Busc\u00e1 la account asociada",
-      priority: 30,
-    },
-  ],
-  salesforce_post_sale_handoff: [
-    {
-      provider: "salesforce",
-      action: "lookup_opportunities",
-      label: "Opportunity cerrada",
-      prompt: "Busc\u00e1 la oportunidad cerrada a transferir",
-      priority: 10,
-    },
-    {
-      provider: "salesforce",
-      action: "lookup_accounts",
-      label: "Account del cliente",
-      prompt: "Busc\u00e1 la account del cliente",
-      priority: 20,
-    },
-    {
-      provider: "salesforce",
-      action: "lookup_cases",
-      label: "Cases abiertos",
-      prompt: "Mostrame los cases abiertos del cliente",
-      priority: 30,
-    },
-  ],
-} as const satisfies Record<
-  SalesforceStarterTemplateId,
-  readonly StarterCatalogIntent<SalesforceCrmAction>[]
->;
-
-const HUBSPOT_STARTER_INTENT_CATALOG_BY_TEMPLATE = {
-  hubspot_lead_capture: [
-    {
-      provider: "hubspot",
-      action: "lookup_records",
-      label: "Verificar contacto/empresa",
-      prompt: "Busc\u00e1 si el contacto o la empresa ya existen en HubSpot",
-      priority: 10,
-    },
-    {
-      provider: "hubspot",
-      action: "lookup_deals",
-      label: "Revisar deals",
-      prompt: "Mostrame si ya hay deals abiertos",
-      priority: 20,
-    },
-  ],
-  hubspot_pipeline_follow_up: [
-    {
-      provider: "hubspot",
-      action: "lookup_deals",
-      label: "Deals abiertos",
-      prompt: "Mostrame los deals abiertos",
-      priority: 10,
-    },
-    {
-      provider: "hubspot",
-      action: "lookup_records",
-      label: "Buscar contacto/empresa",
-      prompt: "Busc\u00e1 el contacto o la empresa asociada",
-      priority: 20,
-    },
-  ],
-  hubspot_meeting_booking: [
-    {
-      provider: "hubspot",
-      action: "lookup_records",
-      label: "Verificar contacto/empresa",
-      prompt: "Busc\u00e1 el contacto o la empresa antes de coordinar la reuni\u00f3n",
-      priority: 10,
-    },
-    {
-      provider: "hubspot",
-      action: "lookup_deals",
-      label: "Deals relacionados",
-      prompt: "Mostrame los deals abiertos relacionados",
-      priority: 20,
-    },
-  ],
-  hubspot_reactivation_follow_up: [
-    {
-      provider: "hubspot",
-      action: "lookup_deals",
-      label: "Deals recientes",
-      prompt: "Mostrame los deals abiertos o m\u00e1s recientes",
-      priority: 10,
-    },
-    {
-      provider: "hubspot",
-      action: "lookup_records",
-      label: "Buscar contacto/empresa",
-      prompt: "Busc\u00e1 el contacto o la empresa a reactivar",
-      priority: 20,
-    },
-  ],
-} as const satisfies Record<
-  HubSpotStarterTemplateId,
-  readonly StarterCatalogIntent<HubSpotCrmAction>[]
->;
+const STARTER_INTENTS_BY_SCOPE: Record<
+  AgentScope,
+  Partial<Record<ChatQuickActionProvider, StarterCatalogEntry[]>>
+> = {
+  support: {
+    salesforce: [
+      {
+        provider: "salesforce",
+        action: "lookup_cases",
+        label: "Cases abiertos",
+        prompt: "Mostrame los cases abiertos y priorizame los urgentes",
+        priority: 10,
+      },
+      {
+        provider: "salesforce",
+        action: "lookup_records",
+        label: "Buscar cliente",
+        prompt: "Busca el cliente o contacto para revisar su contexto de soporte",
+        priority: 20,
+      },
+    ],
+    gmail: [
+      {
+        provider: "gmail",
+        action: "search_threads",
+        label: "Casos sin responder",
+        prompt: "Buscame los emails de soporte sin responder de los ultimos 7 dias",
+        priority: 10,
+      },
+      {
+        provider: "gmail",
+        action: "search_threads",
+        label: "Inbox de soporte",
+        prompt: "Resumime los emails de clientes que requieren respuesta hoy",
+        priority: 20,
+      },
+    ],
+    google_calendar: [
+      {
+        provider: "google_calendar",
+        action: "list_events",
+        label: "Agenda de soporte",
+        prompt: "Mostrame las reuniones o handoffs de soporte de hoy",
+        priority: 10,
+      },
+    ],
+  },
+  sales: {
+    salesforce: [
+      {
+        provider: "salesforce",
+        action: "list_leads_recent",
+        label: "Leads recientes",
+        prompt: "Dame los leads recientes",
+        priority: 10,
+      },
+      {
+        provider: "salesforce",
+        action: "lookup_records",
+        label: "Buscar lead/contacto",
+        prompt: "Busca un lead o contacto por nombre",
+        priority: 20,
+      },
+      {
+        provider: "salesforce",
+        action: "lookup_opportunities",
+        label: "Oportunidades abiertas",
+        prompt: "Mostrame las oportunidades abiertas",
+        priority: 30,
+      },
+    ],
+    gmail: [
+      {
+        provider: "gmail",
+        action: "search_threads",
+        label: "Prospectos sin responder",
+        prompt: "Buscame los emails comerciales sin responder de los ultimos 7 dias",
+        priority: 10,
+      },
+      {
+        provider: "gmail",
+        action: "search_threads",
+        label: "Follow-ups de hoy",
+        prompt: "Resumime los follow-ups comerciales pendientes de hoy en Gmail",
+        priority: 20,
+      },
+    ],
+    google_calendar: [
+      {
+        provider: "google_calendar",
+        action: "list_events",
+        label: "Agenda comercial",
+        prompt: "Mostrame la agenda comercial de hoy en Google Calendar",
+        priority: 10,
+      },
+      {
+        provider: "google_calendar",
+        action: "check_availability",
+        label: "Huecos para demos",
+        prompt: "Verifica mi disponibilidad para demos esta semana",
+        priority: 20,
+      },
+    ],
+  },
+  operations: {
+    salesforce: [
+      {
+        provider: "salesforce",
+        action: "summarize_pipeline",
+        label: "Resumen operativo CRM",
+        prompt: "Resumi el estado operativo actual del CRM",
+        priority: 10,
+      },
+      {
+        provider: "salesforce",
+        action: "lookup_accounts",
+        label: "Buscar cuenta",
+        prompt: "Busca una cuenta y resumime el contexto operativo relevante",
+        priority: 20,
+      },
+    ],
+    gmail: [
+      {
+        provider: "gmail",
+        action: "search_threads",
+        label: "Bandeja operativa",
+        prompt: "Resumime los emails operativos importantes de hoy en Gmail",
+        priority: 10,
+      },
+      {
+        provider: "gmail",
+        action: "search_threads",
+        label: "Pendientes internos",
+        prompt: "Buscame los emails internos pendientes de respuesta de los ultimos 7 dias",
+        priority: 20,
+      },
+    ],
+    google_calendar: [
+      {
+        provider: "google_calendar",
+        action: "list_events",
+        label: "Agenda de hoy",
+        prompt: "Mostrame los eventos operativos de hoy en Google Calendar",
+        priority: 10,
+      },
+      {
+        provider: "google_calendar",
+        action: "check_availability",
+        label: "Verificar disponibilidad",
+        prompt: "Verifica la disponibilidad operativa de esta semana",
+        priority: 20,
+      },
+    ],
+  },
+};
 
 const defaultDeps: ResolveInitialChatStarterIntentsDeps = {
   async loadSalesforceRuntime(agentId, organizationId) {
@@ -245,29 +201,25 @@ const defaultDeps: ResolveInitialChatStarterIntentsDeps = {
     const runtimeModule = await import("../integrations/salesforce-agent-runtime");
     return runtimeModule.assertSalesforceRuntimeUsable(runtime as never);
   },
-  async loadHubSpotRuntime(agentId, organizationId) {
-    const runtimeModule = await import("../integrations/hubspot-agent-runtime");
-    return runtimeModule.getHubSpotAgentToolRuntime(agentId, organizationId);
-  },
-  async assertHubSpotRuntimeUsable(runtime) {
-    const runtimeModule = await import("../integrations/hubspot-agent-runtime");
-    return runtimeModule.assertHubSpotRuntimeUsable(runtime as never);
-  },
 };
 
-function buildStarterIntents<TAction extends ChatStarterIntentAction>(
-  templateId: string,
-  catalog: readonly StarterCatalogIntent<TAction>[],
-  allowedActions: readonly TAction[]
-): ChatStarterIntent[] {
-  const allowedActionSet = new Set(allowedActions);
+async function resolveSalesforceStarterIntents(
+  agentId: string,
+  organizationId: string,
+  catalog: StarterCatalogEntry[],
+  deps: ResolveInitialChatStarterIntentsDeps
+): Promise<ChatStarterIntent[]> {
+  const runtimeResult = await deps.loadSalesforceRuntime(agentId, organizationId);
+  if (runtimeResult.error || !runtimeResult.data) return [];
+
+  const usableRuntime = await deps.assertSalesforceRuntimeUsable(runtimeResult.data);
+  if (usableRuntime.error || !usableRuntime.data) return [];
+
+  const allowedSet = new Set<string>(usableRuntime.data.config.allowed_actions);
 
   return catalog
-    .filter((intent) => allowedActionSet.has(intent.action))
-    .map((intent) => ({
-      ...intent,
-      id: `${templateId}:${intent.action}`,
-    }));
+    .filter((entry) => !entry.action || allowedSet.has(entry.action))
+    .map((entry, index) => ({ ...entry, id: `salesforce:${entry.action ?? entry.label}:${index}` }));
 }
 
 export async function resolveInitialChatStarterIntents(
@@ -276,77 +228,27 @@ export async function resolveInitialChatStarterIntents(
 ): Promise<ChatStarterIntent[]> {
   const setupState = readAgentSetupState(agent);
 
-  if (!setupState) {
+  if (!setupState || setupState.integrations.length === 0) {
     return [];
   }
 
-  const templateId = setupState.template_id;
+  const starterCatalog = STARTER_INTENTS_BY_SCOPE[setupState.agentScope];
 
-  if (templateId && isSalesforceTemplateId(templateId)) {
-    const catalog =
-      SALESFORCE_STARTER_INTENT_CATALOG_BY_TEMPLATE[
-        templateId as SalesforceStarterTemplateId
-      ];
-    if (!catalog) {
-      return [];
-    }
+  const results: ChatStarterIntent[][] = await Promise.all(
+    setupState.integrations.map(async (integration) => {
+      const catalog = starterCatalog[integration as ChatQuickActionProvider];
+      if (!catalog) return [];
 
-    const runtimeResult = await deps.loadSalesforceRuntime(
-      agent.id,
-      agent.organization_id
-    );
+      if (integration === "salesforce") {
+        return resolveSalesforceStarterIntents(agent.id, agent.organization_id, catalog, deps);
+      }
 
-    if (runtimeResult.error || !runtimeResult.data) {
-      return [];
-    }
+      return catalog.map((entry, index) => ({
+        ...entry,
+        id: `${integration}:${entry.action ?? entry.label}:${index}`,
+      }));
+    })
+  );
 
-    const usableRuntime = await deps.assertSalesforceRuntimeUsable(
-      runtimeResult.data
-    );
-    if (usableRuntime.error || !usableRuntime.data) {
-      return [];
-    }
-
-    return buildStarterIntents(
-      templateId,
-      catalog,
-      usableRuntime.data.config.allowed_actions
-    );
-  }
-
-  if (templateId && isHubSpotTemplateId(templateId)) {
-    const catalog =
-      HUBSPOT_STARTER_INTENT_CATALOG_BY_TEMPLATE[
-        templateId as HubSpotStarterTemplateId
-      ];
-    if (!catalog) {
-      return [];
-    }
-
-    const runtimeResult = await deps.loadHubSpotRuntime(
-      agent.id,
-      agent.organization_id
-    );
-
-    if (runtimeResult.error || !runtimeResult.data) {
-      return [];
-    }
-
-    const usableRuntime = await deps.assertHubSpotRuntimeUsable(
-      runtimeResult.data
-    );
-    if (usableRuntime.error || !usableRuntime.data) {
-      return [];
-    }
-
-    return buildStarterIntents(
-      templateId,
-      catalog,
-      usableRuntime.data.config.allowed_actions
-    );
-  }
-
-  return [];
+  return results.flat();
 }
-
-

@@ -2,6 +2,7 @@ import type { Conversation } from "@/types/app";
 import type { PendingCrmAction } from "@/lib/chat/conversation-metadata";
 import { createPendingCrmAction } from "@/lib/chat/crm-pending-action";
 import {
+  CHAT_CONFIRMATION_PROVIDERS,
   formatChatConfirmationMarker,
   type ChatConfirmationProvider,
 } from "@/lib/chat/inline-forms";
@@ -121,7 +122,7 @@ function isStrictConfirmation(
 function isChatConfirmationProvider(
   provider: string
 ): provider is ChatConfirmationProvider {
-  return provider === "hubspot" || provider === "salesforce";
+  return (CHAT_CONFIRMATION_PROVIDERS as readonly string[]).includes(provider);
 }
 
 function buildConfirmationResponse(action: PendingCrmAction<unknown>): string {

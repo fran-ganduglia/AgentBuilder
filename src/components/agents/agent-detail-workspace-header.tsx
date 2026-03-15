@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { TAB_LABELS, type WorkspaceTab } from "@/components/agents/agent-detail-workspace-utils";
+import { AGENT_SCOPE_LABELS, type AgentScope } from "@/lib/agents/agent-scope";
 import type { Agent } from "@/types/app";
 import type { AgentConnectionSummary } from "@/lib/agents/connection-policy";
 
@@ -9,6 +10,7 @@ type AgentDetailWorkspaceHeaderProps = {
   agentId: string;
   name: string;
   description: string | null;
+  agentScope: AgentScope | null;
   savedStatus: Agent["status"];
   connectionSummary: AgentConnectionSummary;
   canUseSandbox: boolean;
@@ -27,6 +29,7 @@ export function AgentDetailWorkspaceHeader({
   agentId,
   name,
   description,
+  agentScope,
   savedStatus,
   connectionSummary,
   canUseSandbox,
@@ -59,6 +62,11 @@ export function AgentDetailWorkspaceHeader({
             {description || "Ajusta configuracion, setup, conocimiento y QA sin salir de esta vista."}
           </p>
           <div className="mt-4 flex flex-wrap gap-2">
+            {agentScope ? (
+              <span className="rounded-full bg-sky-50 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.2em] text-sky-700">
+                Tipo: {AGENT_SCOPE_LABELS[agentScope]}
+              </span>
+            ) : null}
             <span className="rounded-full bg-slate-900 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.2em] text-white">{statusLabel}</span>
             <span className="rounded-full bg-white px-3 py-1 text-[11px] font-bold uppercase tracking-[0.2em] text-slate-600 ring-1 ring-inset ring-slate-200">{connectionSummary.label}</span>
             {qaEnabled ? (

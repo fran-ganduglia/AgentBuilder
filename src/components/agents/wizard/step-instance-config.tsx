@@ -1,40 +1,50 @@
-import type { WorkflowInstanceConfig, WorkflowTemplate } from "@/lib/agents/workflow-templates";
+import type { PromptBuilderDraft } from "@/lib/agents/agent-setup";
+import type { PublicWorkflowDefinition } from "@/lib/agents/public-workflow";
+import type { WorkflowInstanceConfig } from "@/lib/agents/workflow-templates";
 
 type StepInstanceConfigProps = {
-  workflowTemplate: WorkflowTemplate | null;
+  workflow: PublicWorkflowDefinition;
   name: string;
   description: string;
   instanceConfig: WorkflowInstanceConfig;
+  promptBuilder: Pick<PromptBuilderDraft, "objective" | "audience">;
   error?: string;
   onNameChange: (value: string) => void;
   onDescriptionChange: (value: string) => void;
   onInstanceConfigChange: (patch: Partial<WorkflowInstanceConfig>) => void;
+  onPromptBuilderChange: (
+    patch: Partial<Pick<PromptBuilderDraft, "objective" | "audience">>
+  ) => void;
 };
 
 export function StepInstanceConfig({
-  workflowTemplate,
+  workflow,
   name,
   description,
   instanceConfig,
+  promptBuilder,
   error,
   onNameChange,
   onDescriptionChange,
   onInstanceConfigChange,
+  onPromptBuilderChange,
 }: StepInstanceConfigProps) {
   return (
     <section className="space-y-8">
       <div>
         <p className="text-sm font-semibold uppercase tracking-[0.2em] text-emerald-700">Paso 2</p>
-        <h2 className="mt-2 text-2xl font-bold tracking-tight text-slate-900">Crea la workflow instance</h2>
+        <h2 className="mt-2 text-2xl font-bold tracking-tight text-slate-900">
+          Objetivo y contexto
+        </h2>
         <p className="mt-2 max-w-3xl text-sm leading-relaxed text-slate-600">
-          La organizacion puede tener varias instancias del mismo template. Cada una entra por su propio chat y puede variar owner, idioma, horarios y tono operativo.
+          Define para quién trabaja este agente, qué objetivo persigue y cómo se ubica dentro de la operación real.
         </p>
       </div>
 
       <div className="grid gap-6 lg:grid-cols-[1fr_0.9fr]">
         <article className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <label htmlFor="instance-name" className="block text-sm font-semibold text-slate-700">
-            Nombre de la instancia
+            Nombre del agente
           </label>
           <input
             id="instance-name"
@@ -42,12 +52,36 @@ export function StepInstanceConfig({
             value={name}
             onChange={(event) => onNameChange(event.target.value)}
             className="mt-2 block w-full rounded-lg border border-slate-300 bg-slate-50 px-4 py-3 text-sm text-slate-900 transition-colors hover:bg-white focus:border-slate-900 focus:bg-white focus:outline-none focus:ring-1 focus:ring-slate-900"
-            placeholder="Ej. Follow-up Latam"
+            placeholder="Ej. Operaciones Revenue Latam"
           />
           {error ? <p className="mt-2 text-xs font-medium text-rose-600">{error}</p> : null}
 
+          <label htmlFor="instance-objective" className="mt-5 block text-sm font-semibold text-slate-700">
+            Objetivo principal
+          </label>
+          <textarea
+            id="instance-objective"
+            rows={3}
+            value={promptBuilder.objective}
+            onChange={(event) => onPromptBuilderChange({ objective: event.target.value })}
+            className="mt-2 block w-full resize-none rounded-lg border border-slate-300 bg-slate-50 px-4 py-3 text-sm text-slate-900 transition-colors hover:bg-white focus:border-slate-900 focus:bg-white focus:outline-none focus:ring-1 focus:ring-slate-900"
+            placeholder="Ej. Resolver pedidos operativos y coordinar acciones con herramientas conectadas."
+          />
+
+          <label htmlFor="instance-audience" className="mt-5 block text-sm font-semibold text-slate-700">
+            Contexto / audiencia
+          </label>
+          <textarea
+            id="instance-audience"
+            rows={3}
+            value={promptBuilder.audience}
+            onChange={(event) => onPromptBuilderChange({ audience: event.target.value })}
+            className="mt-2 block w-full resize-none rounded-lg border border-slate-300 bg-slate-50 px-4 py-3 text-sm text-slate-900 transition-colors hover:bg-white focus:border-slate-900 focus:bg-white focus:outline-none focus:ring-1 focus:ring-slate-900"
+            placeholder="Ej. Equipo de operaciones y usuarios internos que necesitan resolución rápida."
+          />
+
           <label htmlFor="instance-description" className="mt-5 block text-sm font-semibold text-slate-700">
-            Descripcion interna
+            Descripción interna
           </label>
           <textarea
             id="instance-description"
@@ -55,7 +89,7 @@ export function StepInstanceConfig({
             value={description}
             onChange={(event) => onDescriptionChange(event.target.value)}
             className="mt-2 block w-full resize-none rounded-lg border border-slate-300 bg-slate-50 px-4 py-3 text-sm text-slate-900 transition-colors hover:bg-white focus:border-slate-900 focus:bg-white focus:outline-none focus:ring-1 focus:ring-slate-900"
-            placeholder="Segmento, owner o regla principal de esta instancia"
+            placeholder="Segmento, owner o regla principal de este agente"
           />
 
           <div className="mt-6 grid gap-4 sm:grid-cols-2">
@@ -88,19 +122,23 @@ export function StepInstanceConfig({
 
         <article className="rounded-2xl border border-slate-200 bg-slate-950 p-6 text-slate-100 shadow-sm">
           <p className="text-xs font-semibold uppercase tracking-widest text-emerald-300">Preview</p>
-          <p className="mt-3 text-2xl font-bold tracking-tight">{name.trim() || "Nueva workflow instance"}</p>
+          <p className="mt-3 text-2xl font-bold tracking-tight">{name.trim() || "Nuevo agente operativo"}</p>
           <p className="mt-2 text-sm leading-relaxed text-slate-300">
-            {workflowTemplate?.name ?? "Selecciona un workflow"} con chat dedicado, configuracion propia y multiples instancias por organizacion.
+            {workflow.name}. Un único runtime para pedidos, automatizaciones y entregables.
           </p>
 
           <div className="mt-6 space-y-3 text-sm">
             <div className="rounded-2xl bg-white/10 p-4">
-              <p className="text-xs font-semibold uppercase tracking-widest text-slate-300">Routing</p>
-              <p className="mt-2">{instanceConfig.routingMode || workflowTemplate?.defaultInstanceConfig.routingMode || "Define como se segmenta esta instancia."}</p>
+              <p className="text-xs font-semibold uppercase tracking-widest text-slate-300">Objetivo</p>
+              <p className="mt-2">
+                {promptBuilder.objective || "Define el objetivo operativo del agente."}
+              </p>
             </div>
             <div className="rounded-2xl bg-white/10 p-4">
-              <p className="text-xs font-semibold uppercase tracking-widest text-slate-300">Tono</p>
-              <p className="mt-2">{instanceConfig.toneSummary || workflowTemplate?.defaultInstanceConfig.toneSummary || "Define el tono operativo."}</p>
+              <p className="text-xs font-semibold uppercase tracking-widest text-slate-300">Contexto</p>
+              <p className="mt-2">
+                {promptBuilder.audience || "Aclara para quién trabaja y en qué contexto opera."}
+              </p>
             </div>
           </div>
         </article>

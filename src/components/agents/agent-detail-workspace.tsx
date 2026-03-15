@@ -63,7 +63,6 @@ type AgentDetailWorkspaceProps = {
   initialTab: WorkspaceTab;
   whatsappIntegrationId: string | null;
   salesforceIntegrationNotice: IntegrationNotice | null;
-  hubspotIntegrationNotice: IntegrationNotice | null;
   gmailIntegrationNotice: IntegrationNotice | null;
   googleCalendarIntegrationNotice: IntegrationNotice | null;
   promptEnvironment: RecommendedPromptEnvironment;
@@ -96,7 +95,6 @@ export function AgentDetailWorkspace({
   initialTab,
   whatsappIntegrationId,
   salesforceIntegrationNotice,
-  hubspotIntegrationNotice,
   gmailIntegrationNotice,
   googleCalendarIntegrationNotice,
   promptEnvironment,
@@ -169,7 +167,9 @@ export function AgentDetailWorkspace({
     Boolean(draftSetupState) &&
     promptSyncMode === "custom" &&
     fields.systemPrompt.trim() !== recommendedPrompt.trim();
-  const tabs: WorkspaceTab[] = canShowQaTab ? ["setup", "config", "knowledge", "qa"] : ["setup", "config", "knowledge"];
+  const tabs: WorkspaceTab[] = canShowQaTab
+    ? ["setup", "config", "knowledge", "qa", "automations"]
+    : ["setup", "config", "knowledge", "automations"];
 
   useEffect(() => {
     if (proposalConsumedRef.current || searchParams.get("proposal") !== "1") {
@@ -375,6 +375,7 @@ export function AgentDetailWorkspace({
         agentId={agent.id}
         name={fields.name}
         description={fields.description || agent.description}
+        agentScope={draftSetupState?.agentScope ?? null}
         savedStatus={savedFields.status}
         connectionSummary={connectionSummary}
         canUseSandbox={canUseSandbox}
@@ -405,11 +406,13 @@ export function AgentDetailWorkspace({
                 connectionSummary={connectionSummary}
                 fields={fields}
                 errors={errors}
+                setupState={draftSetupState}
+                recommendedPrompt={recommendedPrompt}
+                promptSyncMode={promptSyncMode}
                 userRole={userRole}
                 qaProposalSummary={qaProposalSummary}
                 qaRecommendations={qaRecommendations}
                 salesforceIntegrationNotice={salesforceIntegrationNotice}
-                hubspotIntegrationNotice={hubspotIntegrationNotice}
                 gmailIntegrationNotice={gmailIntegrationNotice}
                 googleCalendarIntegrationNotice={googleCalendarIntegrationNotice}
                 onChange={handleFieldChange}
@@ -461,6 +464,7 @@ export function AgentDetailWorkspace({
 
         <AgentWorkspaceSaveRail
           fields={fields}
+          agentScope={draftSetupState?.agentScope ?? null}
           connection={connection}
           connectionSummary={connectionSummary}
           selectedStatusLabel={getStatusLabel(fields.status)}
