@@ -13,7 +13,6 @@ import {
 import {
   parseChoiceChipsMarker,
   parseDynamicFormMarker,
-  buildDynamicFormSubmissionMessage,
   type DynamicFormDefinition,
 } from "@/lib/chat/interactive-markers";
 import {

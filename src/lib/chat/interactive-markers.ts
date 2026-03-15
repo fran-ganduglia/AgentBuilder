@@ -75,7 +75,7 @@ function parseFieldSpec(
   }
 
   const type = rawType as DynamicFormFieldDefinition["type"];
-  let labelPart = parts[2]?.trim() ?? "";
+  const labelPart = parts[2]?.trim() ?? "";
   let optionsPart: string | undefined;
 
   if (type === "select" && parts.length >= 4) {

@@ -126,5 +126,6 @@ export async function loadChatFormOptions(input: {
   formId: string;
   pipelineId?: string;
 }): Promise<Record<string, Array<{ label: string; value: string }>>> {
+  void input;
   return {};
 }

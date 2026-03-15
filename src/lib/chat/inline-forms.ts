@@ -59,8 +59,9 @@ export function parseChatConfirmationMarker(
 
 /** @deprecated Legacy form marker — always returns null. Kept for backward compatibility with old messages. */
 export function parseChatFormMarker(
-  _content: string
+  content: string
 ): null {
+  void content;
   return null;
 }
 

@@ -50,6 +50,27 @@
 
 ## Ultimos cambios relevantes
 
+### Sesion: Build de Vercel destrabado por errores de lint
+
+**Objetivo:** destrabar `npm run build` en Vercel corrigiendo errores puntuales de ESLint sin refactorizar fuera de alcance.
+
+**Cambios implementados:**
+- `src/components/chat/message-list.tsx`: se removio el import no usado `buildDynamicFormSubmissionMessage`.
+- `src/lib/agents/public-workflow.ts`: `getPublicWorkflowById(...)` conserva la firma compatible pero ahora marca el parametro como consumido para evitar `no-unused-vars`.
+- `src/lib/chat/chat-form-search.ts` y `src/lib/chat/inline-forms.ts`: los parametros legacy/no-op ahora se consumen explicitamente con `void ...` para mantener compatibilidad sin desactivar reglas.
+- `src/lib/chat/interactive-markers.ts`: `labelPart` pasa de `let` a `const` para cumplir `prefer-const`.
+
+**Pendientes inmediatos:**
+- Confirmar en Vercel que el siguiente `build` avance mas alla del paso de lint.
+
+**Riesgos / bloqueos:**
+- `npm run build` completo no se corro en este entorno; solo quedo verificado `npm run lint`.
+
+**Verificacion:**
+- `npm.cmd run lint`
+
+---
+
 ### Sesion: Automatizaciones ambiguas ahora fallan cerrado por scope
 
 **Objetivo:** seguir la planificacion scope-first cerrando el ultimo gris de automatizaciones, donde los casos claramente `out_of_scope` ya se bloqueaban pero las instrucciones ambiguas todavia podian guardarse o ejecutarse desde el worker schedule.

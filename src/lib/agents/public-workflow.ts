@@ -90,7 +90,8 @@ export const GENERAL_OPERATIONS_WORKFLOW: PublicWorkflowDefinition = {
 };
 
 export function getPublicWorkflowById(
-  _workflowId: PublicWorkflowId = "general_operations"
+  workflowId: PublicWorkflowId = "general_operations"
 ): PublicWorkflowDefinition {
+  void workflowId;
   return GENERAL_OPERATIONS_WORKFLOW;
 }
