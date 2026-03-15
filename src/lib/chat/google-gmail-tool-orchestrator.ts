@@ -91,6 +91,18 @@ function buildGmailConfirmationSummary(input: ExecuteGoogleGmailToolInput): stri
     return `Crear un borrador de respuesta en el hilo ${input.threadId}${input.subject ? ` (${input.subject})` : ""}.`;
   }
 
+  if (input.action === "send_reply") {
+    return `Enviar una respuesta en el hilo ${input.threadId}${input.subject ? ` (${input.subject})` : ""}.`;
+  }
+
+  if (input.action === "create_draft_email") {
+    return `Crear un borrador nuevo para ${input.to.join(", ")}.`;
+  }
+
+  if (input.action === "send_email") {
+    return `Enviar un email nuevo a ${input.to.join(", ")}.`;
+  }
+
   if (input.action === "apply_label") {
     return `Aplicar el label "${input.labelName}" al hilo ${input.threadId}${input.subject ? ` (${input.subject})` : ""}.`;
   }
@@ -117,10 +129,7 @@ function buildWriteInputFromReadResult(input: {
     { kind: "resolve_thread_for_write" }
   >["writeAction"];
   readResult: Extract<GoogleGmailReadToolExecutionResult, { action: "read_thread" }>;
-}): Extract<
-  ExecuteGoogleGmailToolInput,
-  { action: "create_draft_reply" | "apply_label" | "archive_thread" }
-> {
+}): ExecuteGoogleGmailToolInput {
   const threadReference = {
     threadId: input.readResult.data.threadId,
     messageId: input.readResult.data.latestMessageId ?? "",
@@ -142,6 +151,18 @@ function buildWriteInputFromReadResult(input: {
       action: "create_draft_reply",
       ...threadReference,
       body: input.writeAction.body,
+      ...(input.writeAction.cc?.length ? { cc: input.writeAction.cc } : {}),
+      ...(input.writeAction.bcc?.length ? { bcc: input.writeAction.bcc } : {}),
+    };
+  }
+
+  if (input.writeAction.action === "send_reply") {
+    return {
+      action: "send_reply",
+      ...threadReference,
+      body: input.writeAction.body,
+      ...(input.writeAction.cc?.length ? { cc: input.writeAction.cc } : {}),
+      ...(input.writeAction.bcc?.length ? { bcc: input.writeAction.bcc } : {}),
     };
   }
 
@@ -330,6 +351,10 @@ export function createGoogleGmailChatOrchestrator(
       return { kind: "respond_now", content: decision.message };
     }
 
+    if (decision.kind === "denied") {
+      return { kind: "respond_now", content: decision.message };
+    }
+
     if (decision.kind === "respond") {
       return {
         kind: "continue",
@@ -416,7 +441,80 @@ export function createGoogleGmailChatOrchestrator(
         input: buildWriteInputFromReadResult({
           writeAction: decision.writeAction,
           readResult: resolution.data,
-        }),
+        }) as Extract<PlanGoogleGmailToolActionResult, { kind: "write" }>["input"],
+      };
+    }
+
+    if (decision.kind === "write_standalone") {
+      const standaloneInput = decision.input;
+      const to = "to" in standaloneInput ? standaloneInput.to.join(", ") : "";
+      const summary = standaloneInput.action === "create_draft_email"
+        ? `Crear un borrador nuevo para ${to}.`
+        : `Enviar un email nuevo a ${to}.`;
+
+      const pendingCrmAction = deps.createPendingCrmAction({
+        provider: "gmail",
+        toolName: "gmail",
+        integrationId: usableRuntime.data.integration.id,
+        initiatedBy: input.userId,
+        summary,
+        actionInput: standaloneInput as never,
+        ttlMs: 10 * 60 * 1000,
+      });
+
+      const approvalRequest = await deps.createApprovalRequest({
+        organizationId: input.organizationId,
+        agentId: input.agent.id,
+        conversationId: input.conversation.id,
+        userId: input.userId,
+        provider: "gmail",
+        action: standaloneInput.action,
+        integrationId: usableRuntime.data.integration.id,
+        toolName: "gmail",
+        summary,
+        payloadSummary: { action: standaloneInput.action, action_input: standaloneInput } as never,
+        context: {
+          source: "chat",
+        },
+        workflowTemplateId: setupState?.workflowTemplateId ?? null,
+        automationPreset: setupState?.automationPreset ?? null,
+        agentScope: setupState?.agentScope ?? "operations",
+      });
+
+      if (approvalRequest.error || !approvalRequest.data) {
+        return {
+          kind: "respond_now",
+          content:
+            approvalRequest.error ??
+            "No se pudo preparar la aprobacion para Gmail.",
+        };
+      }
+
+      await deps.updateConversationMetadata(
+        input.conversation.id,
+        input.agent.id,
+        input.organizationId,
+        {
+          pending_crm_action: pendingCrmAction,
+        },
+        {
+          initiatedBy: input.userId,
+          useServiceRole: true,
+        }
+      );
+
+      return {
+        kind: "respond_now",
+        content: [
+          `Prepare una aprobacion para Gmail: ${summary}`,
+          `Revisala en /approvals antes de ${new Date(
+            approvalRequest.data.expiresAt
+          ).toLocaleString("es-AR", {
+            dateStyle: "medium",
+            timeStyle: "short",
+          })}.`,
+          "Esta accion ya no se confirma con `confirmo` dentro del chat.",
+        ].join("\n"),
       };
     }
 
@@ -486,6 +584,10 @@ export function createGoogleGmailChatOrchestrator(
           "Esta accion ya no se confirma con `confirmo` dentro del chat.",
         ].join("\n"),
       };
+    }
+
+    if (decision.kind !== "search" && decision.kind !== "read") {
+      return { kind: "respond_now", content: "No se pudo determinar la accion de Gmail." };
     }
 
     const enabledRuntime = deps.assertGoogleGmailActionEnabled(

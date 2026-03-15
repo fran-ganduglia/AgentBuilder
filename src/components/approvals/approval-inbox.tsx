@@ -49,6 +49,9 @@ type GmailActionInput = {
   subject?: string;
   body?: string;
   labelName?: string;
+  to?: string[];
+  cc?: string[];
+  bcc?: string[];
 };
 
 function toRecord(value: unknown): JsonRecord {
@@ -129,12 +132,17 @@ function statusStyles(status: string): string {
 
 async function resolveApproval(
   approvalItemId: string,
-  action: "approve" | "reject"
+  action: "approve" | "reject",
+  editedActionInput?: Record<string, unknown>
 ): Promise<{ error?: string }> {
   const response = await fetch("/api/approvals", {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ approvalItemId, action }),
+    body: JSON.stringify({
+      approvalItemId,
+      action,
+      ...(editedActionInput ? { editedActionInput } : {}),
+    }),
   });
 
   const json = (await response.json()) as { error?: string };
@@ -256,10 +264,65 @@ function GoogleCalendarApprovalDetails({ item }: { item: ApprovalItem }) {
   );
 }
 
-function GmailApprovalDetails({ item }: { item: ApprovalItem }) {
+function getGmailActionLabel(action: string): string {
+  switch (action) {
+    case "create_draft_reply": return "Crear borrador de respuesta";
+    case "create_draft_email": return "Crear borrador nuevo";
+    case "send_reply": return "Enviar respuesta";
+    case "send_email": return "Enviar email nuevo";
+    case "archive_thread": return "Archivar thread";
+    case "apply_label": return "Aplicar label";
+    default: return action;
+  }
+}
+
+function renderEditableField(
+  label: string,
+  value: string,
+  onChange: (value: string) => void,
+  options?: { multiline?: boolean; readonly?: boolean }
+) {
+  return (
+    <div className="rounded-xl bg-white/80 px-4 py-3 ring-1 ring-slate-200">
+      <label className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">{label}</label>
+      {options?.multiline ? (
+        <textarea
+          className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-400 disabled:bg-slate-50 disabled:text-slate-500"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          disabled={options?.readonly}
+          rows={4}
+        />
+      ) : (
+        <input
+          type="text"
+          className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-400 disabled:bg-slate-50 disabled:text-slate-500"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          disabled={options?.readonly}
+        />
+      )}
+    </div>
+  );
+}
+
+function GmailApprovalDetails({
+  item,
+  isPending,
+  editState,
+  onEditChange,
+}: {
+  item: ApprovalItem;
+  isPending: boolean;
+  editState: GmailActionInput;
+  onEditChange: (state: GmailActionInput) => void;
+}) {
   const payloadSummary = toRecord(item.payload_summary);
   const actionInput = toRecord(payloadSummary.action_input) as GmailActionInput;
   const action = getString(actionInput.action) ?? item.action;
+  const isStandalone = action === "create_draft_email" || action === "send_email";
+  const isReplyLike = action === "create_draft_reply" || action === "send_reply";
+  const isEditable = isPending && (isStandalone || isReplyLike);
 
   return (
     <div className="rounded-xl border border-rose-100 bg-rose-50/80 px-4 py-4">
@@ -267,28 +330,125 @@ function GmailApprovalDetails({ item }: { item: ApprovalItem }) {
         Detalle operativo
       </p>
       <div className="mt-3 grid gap-3 md:grid-cols-2">
-        {renderKeyValue("Accion", action)}
-        {renderKeyValue("Thread", getString(actionInput.threadId))}
-        {renderKeyValue("Message", getString(actionInput.messageId))}
-        {renderKeyValue("RFC Message-Id", getString(actionInput.rfcMessageId))}
-        {renderKeyValue("Asunto", getString(actionInput.subject))}
+        {renderKeyValue("Accion", getGmailActionLabel(action))}
+        {!isStandalone ? renderKeyValue("Thread", getString(actionInput.threadId)) : null}
+        {!isStandalone ? renderKeyValue("Message", getString(actionInput.messageId)) : null}
+        {!isStandalone ? renderKeyValue("RFC Message-Id", getString(actionInput.rfcMessageId)) : null}
         {renderKeyValue("Label", getString(actionInput.labelName))}
-        {renderKeyValue("Borrador", getString(actionInput.body))}
       </div>
+      {isEditable ? (
+        <div className="mt-4 space-y-3">
+          <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">Campos editables</p>
+          {isStandalone ? (
+            renderEditableField(
+              "Destinatarios (to)",
+              (editState.to ?? []).join(", "),
+              (v) => onEditChange({ ...editState, to: v.split(",").map((e) => e.trim()).filter(Boolean) })
+            )
+          ) : null}
+          {renderEditableField(
+            "Asunto",
+            editState.subject ?? "",
+            (v) => onEditChange({ ...editState, subject: v })
+          )}
+          {renderEditableField(
+            "CC",
+            (editState.cc ?? []).join(", "),
+            (v) => onEditChange({ ...editState, cc: v.split(",").map((e) => e.trim()).filter(Boolean) })
+          )}
+          {renderEditableField(
+            "BCC",
+            (editState.bcc ?? []).join(", "),
+            (v) => onEditChange({ ...editState, bcc: v.split(",").map((e) => e.trim()).filter(Boolean) })
+          )}
+          {renderEditableField(
+            action.includes("draft") ? "Borrador" : "Contenido",
+            editState.body ?? "",
+            (v) => onEditChange({ ...editState, body: v }),
+            { multiline: true }
+          )}
+        </div>
+      ) : (
+        <div className="mt-3 grid gap-3 md:grid-cols-2">
+          {isStandalone && Array.isArray(actionInput.to)
+            ? renderKeyValue("Destinatarios", actionInput.to.join(", "))
+            : null}
+          {renderKeyValue("Asunto", getString(actionInput.subject))}
+          {Array.isArray(actionInput.cc) && actionInput.cc.length > 0
+            ? renderKeyValue("CC", actionInput.cc.join(", "))
+            : null}
+          {Array.isArray(actionInput.bcc) && actionInput.bcc.length > 0
+            ? renderKeyValue("BCC", actionInput.bcc.join(", "))
+            : null}
+          {renderKeyValue(action.includes("draft") ? "Borrador" : "Contenido", getString(actionInput.body))}
+        </div>
+      )}
     </div>
   );
 }
 
-function ApprovalDetails({ item }: { item: ApprovalItem }) {
+function ApprovalDetails({
+  item,
+  isPending,
+  gmailEditState,
+  onGmailEditChange,
+}: {
+  item: ApprovalItem;
+  isPending: boolean;
+  gmailEditState: GmailActionInput;
+  onGmailEditChange: (state: GmailActionInput) => void;
+}) {
   if (item.provider === "google_calendar") {
     return <GoogleCalendarApprovalDetails item={item} />;
   }
 
   if (item.provider === "gmail") {
-    return <GmailApprovalDetails item={item} />;
+    return (
+      <GmailApprovalDetails
+        item={item}
+        isPending={isPending}
+        editState={gmailEditState}
+        onEditChange={onGmailEditChange}
+      />
+    );
   }
 
   return null;
+}
+
+function initGmailEditState(item: ApprovalItem): GmailActionInput {
+  const payloadSummary = toRecord(item.payload_summary);
+  const actionInput = toRecord(payloadSummary.action_input) as GmailActionInput;
+  return {
+    action: actionInput.action ?? item.action,
+    subject: actionInput.subject ?? "",
+    body: actionInput.body ?? "",
+    to: Array.isArray(actionInput.to) ? actionInput.to : [],
+    cc: Array.isArray(actionInput.cc) ? actionInput.cc : [],
+    bcc: Array.isArray(actionInput.bcc) ? actionInput.bcc : [],
+  };
+}
+
+function buildGmailEditPayload(item: ApprovalItem, editState: GmailActionInput): Record<string, unknown> | undefined {
+  const action = editState.action ?? item.action;
+  const isEditable =
+    action === "create_draft_reply" ||
+    action === "send_reply" ||
+    action === "create_draft_email" ||
+    action === "send_email";
+
+  if (!isEditable) {
+    return undefined;
+  }
+
+  const payload: Record<string, unknown> = { action };
+  if (editState.body) payload.body = editState.body;
+  if (editState.subject) payload.subject = editState.subject;
+  if (editState.cc?.length) payload.cc = editState.cc;
+  if (editState.bcc?.length) payload.bcc = editState.bcc;
+  if (editState.to?.length) payload.to = editState.to;
+
+  return payload;
 }
 
 function ApprovalCard({
@@ -299,9 +459,11 @@ function ApprovalCard({
 }: {
   item: ApprovalItem;
   isMutating: boolean;
-  onApprove: (id: string) => void;
+  onApprove: (id: string, editedActionInput?: Record<string, unknown>) => void;
   onReject: (id: string) => void;
 }) {
+  const [gmailEdit, setGmailEdit] = useState<GmailActionInput>(() => initGmailEditState(item));
+
   return (
     <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
       <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
@@ -353,7 +515,12 @@ function ApprovalCard({
             </button>
             <button
               type="button"
-              onClick={() => onApprove(item.id)}
+              onClick={() => {
+                const editPayload = item.provider === "gmail"
+                  ? buildGmailEditPayload(item, gmailEdit)
+                  : undefined;
+                onApprove(item.id, editPayload);
+              }}
               disabled={isMutating}
               className="inline-flex items-center justify-center rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
             >
@@ -364,7 +531,12 @@ function ApprovalCard({
       </div>
 
       <div className="mt-4 space-y-4">
-        <ApprovalDetails item={item} />
+        <ApprovalDetails
+          item={item}
+          isPending={item.status === "pending"}
+          gmailEditState={gmailEdit}
+          onGmailEditChange={setGmailEdit}
+        />
       </div>
 
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
@@ -393,11 +565,15 @@ export function ApprovalInbox({ pendingItems, recentItems }: ApprovalInboxProps)
     error: null,
   });
 
-  function handleResolve(approvalItemId: string, action: "approve" | "reject") {
+  function handleResolve(
+    approvalItemId: string,
+    action: "approve" | "reject",
+    editedActionInput?: Record<string, unknown>
+  ) {
     setMutation({ itemId: approvalItemId, action, error: null });
 
     startTransition(async () => {
-      const result = await resolveApproval(approvalItemId, action);
+      const result = await resolveApproval(approvalItemId, action, editedActionInput);
 
       if (result.error) {
         setMutation({ itemId: approvalItemId, action, error: result.error });
@@ -458,7 +634,7 @@ export function ApprovalInbox({ pendingItems, recentItems }: ApprovalInboxProps)
                 key={item.id}
                 item={item}
                 isMutating={mutation.itemId === item.id}
-                onApprove={(id) => handleResolve(id, "approve")}
+                onApprove={(id, editPayload) => handleResolve(id, "approve", editPayload)}
                 onReject={(id) => handleResolve(id, "reject")}
               />
             ))}

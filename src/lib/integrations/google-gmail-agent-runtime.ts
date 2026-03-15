@@ -12,6 +12,7 @@ import {
   executeGoogleGmailReadToolSchema,
   executeGoogleGmailWriteToolSchema,
   isGmailReadOnlyAction,
+  dedupeEmails,
   type ExecuteGoogleGmailReadToolInput,
   type ExecuteGoogleGmailWriteToolInput,
   type GmailAgentToolConfig,
@@ -89,6 +90,13 @@ type GmailDraftCreateResponse = {
   };
 };
 
+type GmailMessageSendResponse = {
+  id?: string;
+  threadId?: string;
+  labelIds?: string[];
+  payload?: GmailMessagePayload;
+};
+
 type GmailThreadModifyResponse = {
   id?: string;
   historyId?: string;
@@ -155,6 +163,51 @@ export type GoogleGmailWriteToolExecutionResult =
         rfcMessageId: string | null;
         subject: string | null;
         status: "created" | "already_exists";
+      };
+      summary: string;
+    }
+  | {
+      action: "send_reply";
+      requestId: string | null;
+      providerObjectId: string | null;
+      providerObjectType: "message";
+      data: {
+        messageId: string | null;
+        threadId: string;
+        rfcMessageId: string | null;
+        subject: string | null;
+        status: "sent";
+      };
+      summary: string;
+    }
+  | {
+      action: "create_draft_email";
+      requestId: string | null;
+      providerObjectId: string | null;
+      providerObjectType: "draft";
+      data: {
+        draftId: string | null;
+        threadId: string | null;
+        messageId: string | null;
+        rfcMessageId: string | null;
+        subject: string | null;
+        to: string[];
+        status: "created" | "already_exists";
+      };
+      summary: string;
+    }
+  | {
+      action: "send_email";
+      requestId: string | null;
+      providerObjectId: string | null;
+      providerObjectType: "message";
+      data: {
+        messageId: string | null;
+        threadId: string | null;
+        rfcMessageId: string | null;
+        subject: string | null;
+        to: string[];
+        status: "sent";
       };
       summary: string;
     }
@@ -427,6 +480,8 @@ function findDraftForWorkflowStep(
 
 function buildDraftReplyMessage(input: {
   to: string;
+  cc?: string[];
+  bcc?: string[];
   subject: string;
   body: string;
   rfcMessageId?: string | null;
@@ -434,6 +489,8 @@ function buildDraftReplyMessage(input: {
 }): string {
   const lines = [
     `To: ${input.to}`,
+    ...(input.cc?.length ? [`Cc: ${dedupeEmails(input.cc).join(", ")}`] : []),
+    ...(input.bcc?.length ? [`Bcc: ${dedupeEmails(input.bcc).join(", ")}`] : []),
     `Subject: Re: ${input.subject}`,
     "Content-Type: text/plain; charset=UTF-8",
     "Content-Transfer-Encoding: 7bit",
@@ -449,6 +506,62 @@ function buildDraftReplyMessage(input: {
   ];
 
   return lines.join("\r\n");
+}
+
+function buildNewEmailMessage(input: {
+  to: string[];
+  cc?: string[];
+  bcc?: string[];
+  subject: string;
+  body: string;
+  workflowStepId: string;
+}): string {
+  const lines = [
+    `To: ${dedupeEmails(input.to).join(", ")}`,
+    ...(input.cc?.length ? [`Cc: ${dedupeEmails(input.cc).join(", ")}`] : []),
+    ...(input.bcc?.length ? [`Bcc: ${dedupeEmails(input.bcc).join(", ")}`] : []),
+    `Subject: ${input.subject}`,
+    "Content-Type: text/plain; charset=UTF-8",
+    "Content-Transfer-Encoding: 7bit",
+    GMAIL_STEP_HEADER + `: ${input.workflowStepId}`,
+    "",
+    input.body,
+  ];
+
+  return lines.join("\r\n");
+}
+
+async function sendGmailMessage(
+  accessToken: string,
+  organizationId: string,
+  integrationId: string,
+  input: {
+    threadId?: string;
+    raw: string;
+    workflow?: {
+      workflowRunId: string;
+      workflowStepId: string;
+    };
+  }
+): Promise<{ requestId: string | null; data: GmailMessageSendResponse }> {
+  return requestGoogleGmail<GmailMessageSendResponse>(
+    accessToken,
+    "/gmail/v1/users/me/messages/send",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        ...(input.threadId ? { threadId: input.threadId } : {}),
+        raw: input.raw,
+      }),
+    },
+    {
+      organizationId,
+      integrationId,
+      methodKey: GMAIL_WRITE_METHOD_KEY,
+      workflowRunId: input.workflow?.workflowRunId,
+      workflowStepId: input.workflow?.workflowStepId,
+    }
+  );
 }
 
 function matchesLocalQuery(thread: GmailThreadSummary, query: string | null | undefined): boolean {
@@ -539,7 +652,7 @@ async function createGmailDraft(
   organizationId: string,
   integrationId: string,
   input: {
-    threadId: string;
+    threadId?: string;
     raw: string;
     workflow?: {
       workflowRunId: string;
@@ -554,7 +667,7 @@ async function createGmailDraft(
       method: "POST",
       body: JSON.stringify({
         message: {
-          threadId: input.threadId,
+          ...(input.threadId ? { threadId: input.threadId } : {}),
           raw: input.raw,
         },
       }),
@@ -658,8 +771,12 @@ function getExecutionFallback(action: GmailReadOnlyToolAction): string {
 function getWriteExecutionFallback(
   action: ExecuteGoogleGmailWriteToolInput["action"]
 ): string {
-  if (action === "create_draft_reply") {
+  if (action === "create_draft_reply" || action === "create_draft_email") {
     return "No se pudo crear el borrador en Gmail.";
+  }
+
+  if (action === "send_reply" || action === "send_email") {
+    return "No se pudo enviar el email en Gmail.";
   }
 
   if (action === "apply_label") {
@@ -792,6 +909,93 @@ export async function runGoogleGmailWriteAction(
     workflowStepId: string;
   }
 ): Promise<GoogleGmailWriteToolExecutionResult> {
+  // --- Standalone actions (no thread required) ---
+  if (input.action === "create_draft_email") {
+    if (!workflow?.workflowStepId) {
+      throw new Error("workflowStepId requerido para idempotencia de Gmail draft.");
+    }
+
+    const to = dedupeEmails(input.to);
+    if (to.length === 0) {
+      throw new Error("Se necesita al menos un destinatario valido para crear el borrador.");
+    }
+
+    const subject = input.subject ?? "Sin asunto";
+    const draftResponse = await createGmailDraft(accessToken, organizationId, integrationId, {
+      raw: encodeDraftRaw(
+        buildNewEmailMessage({
+          to,
+          cc: input.cc,
+          bcc: input.bcc,
+          subject,
+          body: input.body,
+          workflowStepId: workflow.workflowStepId,
+        })
+      ),
+      workflow,
+    });
+
+    return {
+      action: "create_draft_email",
+      requestId: draftResponse.requestId,
+      providerObjectId: sanitizeText(draftResponse.data.id, 128),
+      providerObjectType: "draft",
+      data: {
+        draftId: sanitizeText(draftResponse.data.id, 128),
+        threadId: sanitizeText(draftResponse.data.message?.threadId, 128),
+        messageId: sanitizeText(draftResponse.data.message?.id, 128),
+        rfcMessageId: getHeaderValue(draftResponse.data.message?.payload, "Message-Id"),
+        subject,
+        to,
+        status: "created",
+      },
+      summary: `Se creo un borrador nuevo para ${to.join(", ")}${subject !== "Sin asunto" ? ` con asunto "${subject}"` : ""}.`,
+    };
+  }
+
+  if (input.action === "send_email") {
+    if (!workflow?.workflowStepId) {
+      throw new Error("workflowStepId requerido para trazabilidad de Gmail send.");
+    }
+
+    const to = dedupeEmails(input.to);
+    if (to.length === 0) {
+      throw new Error("Se necesita al menos un destinatario valido para enviar el email.");
+    }
+
+    const subject = input.subject ?? "Sin asunto";
+    const sendResponse = await sendGmailMessage(accessToken, organizationId, integrationId, {
+      raw: encodeDraftRaw(
+        buildNewEmailMessage({
+          to,
+          cc: input.cc,
+          bcc: input.bcc,
+          subject,
+          body: input.body,
+          workflowStepId: workflow.workflowStepId,
+        })
+      ),
+      workflow,
+    });
+
+    return {
+      action: "send_email",
+      requestId: sendResponse.requestId,
+      providerObjectId: sanitizeText(sendResponse.data.id, 128),
+      providerObjectType: "message",
+      data: {
+        messageId: sanitizeText(sendResponse.data.id, 128),
+        threadId: sanitizeText(sendResponse.data.threadId, 128),
+        rfcMessageId: getHeaderValue(sendResponse.data.payload, "Message-Id"),
+        subject,
+        to,
+        status: "sent",
+      },
+      summary: `Se envio un email nuevo a ${to.join(", ")}${subject !== "Sin asunto" ? ` con asunto "${subject}"` : ""}.`,
+    };
+  }
+
+  // --- Thread-scoped actions ---
   const threadResponse = await fetchGmailThread(
     accessToken,
     input.threadId,
@@ -864,6 +1068,8 @@ export async function runGoogleGmailWriteAction(
       raw: encodeDraftRaw(
         buildDraftReplyMessage({
           to: recipient,
+          cc: input.cc,
+          bcc: input.bcc,
           subject,
           body: input.body,
           rfcMessageId,
@@ -887,6 +1093,56 @@ export async function runGoogleGmailWriteAction(
         status: "created",
       },
       summary: buildDraftSummary("created", subject),
+    };
+  }
+
+  if (input.action === "send_reply") {
+    if (!workflow?.workflowStepId) {
+      throw new Error("workflowStepId requerido para trazabilidad de Gmail send.");
+    }
+
+    const recipient =
+      normalizeEmailHeader(getHeaderValue(targetMessage.payload, "Reply-To")) ??
+      normalizeEmailHeader(getHeaderValue(targetMessage.payload, "From"));
+
+    if (!recipient) {
+      throw new Error("No pude resolver el destinatario para enviar la respuesta.");
+    }
+
+    const subject =
+      normalizeSubject(getHeaderValue(targetMessage.payload, "Subject")) ??
+      normalizeSubject(input.subject) ??
+      "Sin asunto";
+    const rfcMessageId = getHeaderValue(targetMessage.payload, "Message-Id");
+    const sendResponse = await sendGmailMessage(accessToken, organizationId, integrationId, {
+      threadId: input.threadId,
+      raw: encodeDraftRaw(
+        buildDraftReplyMessage({
+          to: recipient,
+          cc: input.cc,
+          bcc: input.bcc,
+          subject,
+          body: input.body,
+          rfcMessageId,
+          workflowStepId: workflow.workflowStepId,
+        })
+      ),
+      workflow,
+    });
+
+    return {
+      action: "send_reply",
+      requestId: sendResponse.requestId,
+      providerObjectId: sanitizeText(sendResponse.data.id, 128),
+      providerObjectType: "message",
+      data: {
+        messageId: sanitizeText(sendResponse.data.id, 128),
+        threadId: sanitizeText(sendResponse.data.threadId, 128) ?? input.threadId,
+        rfcMessageId: getHeaderValue(sendResponse.data.payload, "Message-Id"),
+        subject,
+        status: "sent",
+      },
+      summary: `Se envio la respuesta para ${subject ? `"${subject}"` : "ese hilo"}.`,
     };
   }
 

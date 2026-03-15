@@ -106,8 +106,18 @@ const GMAIL_ACTION_POLICIES: Record<GmailToolAction, GoogleAgentActionPolicy> = 
     access: "write",
     requiresConfirmation: true,
   },
+  create_draft_email: {
+    action: "create_draft_email",
+    access: "write",
+    requiresConfirmation: true,
+  },
   send_reply: {
     action: "send_reply",
+    access: "write",
+    requiresConfirmation: true,
+  },
+  send_email: {
+    action: "send_email",
     access: "write",
     requiresConfirmation: true,
   },

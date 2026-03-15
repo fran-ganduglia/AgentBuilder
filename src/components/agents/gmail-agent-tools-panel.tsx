@@ -193,7 +193,7 @@ export function GmailAgentToolsPanel({
           <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-slate-500">Agent tools</p>
           <h3 className="mt-2 text-lg font-bold text-slate-900">Gmail</h3>
           <p className="mt-1 text-sm text-slate-500">
-            Gmail ya puede leer hilos reales y materializar writes asistidas en el path real `approval -&gt; worker -&gt; runtime` para borradores, labels y archivado.
+            Gmail opera con lectura de hilos, borradores, envios directos, labels y archivado. Todas las writes pasan por approval inbox antes de ejecutarse.
           </p>
         </div>
         <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-bold ${tool && enabled ? "bg-emerald-100 text-emerald-800" : "bg-slate-100 text-slate-600"}`}>
@@ -247,7 +247,7 @@ export function GmailAgentToolsPanel({
       </div>
 
       <div className="mt-6 flex flex-col gap-3 border-t border-slate-100 pt-5 sm:flex-row sm:items-center sm:justify-between">
-        <p className="text-xs text-slate-500">Chat web ejecuta lectura segura y writes asistidas con approval inbox. `send_reply`, bodies completos y adjuntos siguen fuera de alcance.</p>
+        <p className="text-xs text-slate-500">Chat web ejecuta lectura segura y writes asistidas con approval inbox. Soporta borradores, envios, labels y archivado. Adjuntos y HTML siguen fuera de alcance.</p>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
           {tool ? <button type="button" onClick={() => void removeTool()} disabled={!canEdit || saving} className="inline-flex items-center justify-center rounded-lg border border-rose-200 bg-white px-4 py-2 text-sm font-semibold text-rose-700 transition-colors hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50">{saving ? "Procesando..." : "Eliminar tool"}</button> : null}
           <button type="button" onClick={() => void saveTool()} disabled={!canSave} className="inline-flex items-center justify-center rounded-lg bg-slate-900 px-5 py-2 text-sm font-bold text-white transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50">{saving ? "Guardando..." : tool ? "Guardar tool" : "Crear tool"}</button>

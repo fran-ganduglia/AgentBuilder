@@ -6,6 +6,9 @@ export type GmailIntentAction =
   | "search_threads"
   | "read_thread"
   | "create_draft_reply"
+  | "create_draft_email"
+  | "send_reply"
+  | "send_email"
   | "apply_label"
   | "archive_thread"
   | "none";
@@ -21,10 +24,19 @@ Responde SOLO con JSON valido usando este schema exacto: {"action": "<accion>"}
 Valores validos para "action":
 - "search_threads": quiere buscar, listar, mostrar o revisar correos/hilos ESPECIFICAMENTE en Gmail
 - "read_thread": quiere leer, abrir o ver el detalle de un hilo/email concreto en Gmail
-- "create_draft_reply": quiere redactar, crear o preparar un borrador de respuesta en Gmail
+- "create_draft_reply": quiere redactar o preparar un borrador de respuesta a un hilo existente en Gmail
+- "create_draft_email": quiere crear un borrador de email nuevo (no reply) con destinatarios especificos
+- "send_reply": quiere enviar directamente una respuesta a un hilo existente en Gmail
+- "send_email": quiere enviar directamente un email nuevo (no reply) con destinatarios especificos
 - "apply_label": quiere etiquetar o aplicar un label a un hilo/email en Gmail
 - "archive_thread": quiere archivar, sacar de inbox o quitar de bandeja un hilo/email en Gmail
 - "none": no es una solicitud relacionada con Gmail
+
+Reglas para distinguir reply vs email nuevo:
+- Si menciona responder, contestar o hacer follow-up a un hilo/email existente → usa reply (draft o send)
+- Si menciona enviar/mandar/escribir un email a alguien sin referencia a un hilo previo → usa email nuevo (draft o send)
+- Si dice "borrador" o "draft" → usa create_draft (reply o email segun contexto)
+- Si dice "enviar", "mandar", "send" sin mencionar borrador → usa send (reply o email segun contexto)
 
 IMPORTANTE: Responde "none" si el usuario:
 - Pide un resumen general, resumen de estado, o resumen de la conversacion
@@ -40,6 +52,9 @@ const VALID_ACTIONS = new Set<string>([
   "search_threads",
   "read_thread",
   "create_draft_reply",
+  "create_draft_email",
+  "send_reply",
+  "send_email",
   "apply_label",
   "archive_thread",
   "none",

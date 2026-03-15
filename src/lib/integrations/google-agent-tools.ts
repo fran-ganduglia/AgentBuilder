@@ -5,7 +5,9 @@ export const GMAIL_TOOL_ACTIONS = [
   "search_threads",
   "read_thread",
   "create_draft_reply",
+  "create_draft_email",
   "send_reply",
+  "send_email",
   "archive_thread",
   "apply_label",
 ] as const;
@@ -17,6 +19,9 @@ export const GMAIL_READONLY_TOOL_ACTIONS = [
 
 export const GMAIL_WRITE_TOOL_ACTIONS = [
   "create_draft_reply",
+  "create_draft_email",
+  "send_reply",
+  "send_email",
   "archive_thread",
   "apply_label",
 ] as const;
@@ -130,9 +135,46 @@ const gmailThreadReferenceSchema = {
   subject: z.string().trim().min(1).max(160).optional(),
 };
 
+const gmailEmailSchema = z.string().trim().toLowerCase().email().max(254);
+
+const gmailRecipientsSchema = {
+  to: z.array(gmailEmailSchema).min(1).max(20),
+  cc: z.array(gmailEmailSchema).max(20).optional(),
+  bcc: z.array(gmailEmailSchema).max(20).optional(),
+};
+
+export function dedupeEmails(emails: string[]): string[] {
+  return [...new Set(emails.map((e) => e.toLowerCase().trim()))];
+}
+
+
 export const executeGoogleGmailCreateDraftReplySchema = z.object({
   action: z.literal("create_draft_reply"),
   ...gmailThreadReferenceSchema,
+  body: z.string().trim().min(1).max(8000),
+  cc: z.array(gmailEmailSchema).max(20).optional(),
+  bcc: z.array(gmailEmailSchema).max(20).optional(),
+});
+
+export const executeGoogleGmailSendReplySchema = z.object({
+  action: z.literal("send_reply"),
+  ...gmailThreadReferenceSchema,
+  body: z.string().trim().min(1).max(8000),
+  cc: z.array(gmailEmailSchema).max(20).optional(),
+  bcc: z.array(gmailEmailSchema).max(20).optional(),
+});
+
+export const executeGoogleGmailCreateDraftEmailSchema = z.object({
+  action: z.literal("create_draft_email"),
+  ...gmailRecipientsSchema,
+  subject: z.string().trim().max(160).optional(),
+  body: z.string().trim().min(1).max(8000),
+});
+
+export const executeGoogleGmailSendEmailSchema = z.object({
+  action: z.literal("send_email"),
+  ...gmailRecipientsSchema,
+  subject: z.string().trim().max(160).optional(),
   body: z.string().trim().min(1).max(8000),
 });
 
@@ -149,6 +191,9 @@ export const executeGoogleGmailApplyLabelSchema = z.object({
 
 export const executeGoogleGmailWriteToolSchema = z.discriminatedUnion("action", [
   executeGoogleGmailCreateDraftReplySchema,
+  executeGoogleGmailSendReplySchema,
+  executeGoogleGmailCreateDraftEmailSchema,
+  executeGoogleGmailSendEmailSchema,
   executeGoogleGmailArchiveThreadSchema,
   executeGoogleGmailApplyLabelSchema,
 ]);
@@ -259,8 +304,10 @@ export function getGmailActionLabel(action: GmailToolAction): string {
   const labels: Record<GmailToolAction, string> = {
     search_threads: "Buscar threads",
     read_thread: "Leer thread",
-    create_draft_reply: "Crear borrador",
+    create_draft_reply: "Crear borrador de respuesta",
+    create_draft_email: "Crear borrador nuevo",
     send_reply: "Enviar respuesta",
+    send_email: "Enviar email nuevo",
     archive_thread: "Archivar thread",
     apply_label: "Aplicar label",
   };
@@ -273,7 +320,9 @@ export function getGmailActionDescription(action: GmailToolAction): string {
     search_threads: "Busca hilos recientes con metadata segura, headers utiles y snippet truncado sin body completo.",
     read_thread: "Resume un hilo con metadata, headers, snippets y conteo de adjuntos, sin exponer body ni HTML.",
     create_draft_reply: "Crea un borrador real de respuesta en Gmail despues de pasar por approval inbox y worker async.",
-    send_reply: "Sigue fuera de alcance en esta fase. Solo se habilitan borradores, labels y archivado.",
+    create_draft_email: "Crea un borrador de email nuevo con destinatarios libres despues de aprobacion humana.",
+    send_reply: "Envia una respuesta real sobre un hilo existente despues de aprobacion humana.",
+    send_email: "Envia un email nuevo con destinatarios libres despues de aprobacion humana.",
     archive_thread: "Archiva el thread real quitandolo de Inbox despues de aprobacion humana.",
     apply_label: "Aplica un label existente al thread real despues de aprobacion humana.",
   };
@@ -292,6 +341,67 @@ export function isGmailWriteAction(
 ): action is GmailWriteToolAction {
   return GMAIL_WRITE_TOOL_ACTIONS.includes(action as GmailWriteToolAction);
 }
+
+export const GMAIL_STANDALONE_ACTIONS = [
+  "create_draft_email",
+  "send_email",
+] as const;
+
+export type GmailStandaloneAction = (typeof GMAIL_STANDALONE_ACTIONS)[number];
+
+export function isGmailStandaloneAction(
+  action: string
+): action is GmailStandaloneAction {
+  return GMAIL_STANDALONE_ACTIONS.includes(action as GmailStandaloneAction);
+}
+
+export const GMAIL_THREAD_WRITE_ACTIONS = [
+  "create_draft_reply",
+  "send_reply",
+  "archive_thread",
+  "apply_label",
+] as const;
+
+export type GmailThreadWriteAction = (typeof GMAIL_THREAD_WRITE_ACTIONS)[number];
+
+export function isGmailThreadWriteAction(
+  action: string
+): action is GmailThreadWriteAction {
+  return GMAIL_THREAD_WRITE_ACTIONS.includes(action as GmailThreadWriteAction);
+}
+
+export const gmailEditableApprovalSchema = z.discriminatedUnion("action", [
+  z.object({
+    action: z.literal("create_draft_reply"),
+    subject: z.string().trim().max(160).optional(),
+    body: z.string().trim().min(1).max(8000),
+    cc: z.array(gmailEmailSchema).max(20).optional(),
+    bcc: z.array(gmailEmailSchema).max(20).optional(),
+  }),
+  z.object({
+    action: z.literal("send_reply"),
+    subject: z.string().trim().max(160).optional(),
+    body: z.string().trim().min(1).max(8000),
+    cc: z.array(gmailEmailSchema).max(20).optional(),
+    bcc: z.array(gmailEmailSchema).max(20).optional(),
+  }),
+  z.object({
+    action: z.literal("create_draft_email"),
+    to: z.array(gmailEmailSchema).min(1).max(20),
+    cc: z.array(gmailEmailSchema).max(20).optional(),
+    bcc: z.array(gmailEmailSchema).max(20).optional(),
+    subject: z.string().trim().max(160).optional(),
+    body: z.string().trim().min(1).max(8000),
+  }),
+  z.object({
+    action: z.literal("send_email"),
+    to: z.array(gmailEmailSchema).min(1).max(20),
+    cc: z.array(gmailEmailSchema).max(20).optional(),
+    bcc: z.array(gmailEmailSchema).max(20).optional(),
+    subject: z.string().trim().max(160).optional(),
+    body: z.string().trim().min(1).max(8000),
+  }),
+]);
 
 export function getGoogleCalendarActionLabel(
   action: GoogleCalendarToolAction
