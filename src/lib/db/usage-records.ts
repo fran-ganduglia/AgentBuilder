@@ -1,6 +1,9 @@
 import "server-only";
 
 import { createServiceSupabaseClient } from "@/lib/supabase/service";
+import { resolveProviderFromModel } from "@/lib/llm/model-routing";
+
+export { resolveProviderFromModel };
 
 type IncrementMessageCountInput = {
   organizationId: string;
@@ -8,22 +11,12 @@ type IncrementMessageCountInput = {
   llmProvider: string;
 };
 
-function resolveProviderFromModel(model: string | null): string {
-  if (!model) return "unknown";
-  if (model.startsWith("gpt-")) return "openai";
-  if (model.startsWith("claude-")) return "anthropic";
-  if (model.startsWith("gemini-") || model === "gemini-pro") return "gemini";
-  return "custom";
-}
-
 function getCurrentPeriod(): { periodStart: string; periodEnd: string } {
   const now = new Date();
   const periodStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
   const periodEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString();
   return { periodStart, periodEnd };
 }
-
-export { resolveProviderFromModel };
 
 export async function incrementMessageCount(
   input: IncrementMessageCountInput

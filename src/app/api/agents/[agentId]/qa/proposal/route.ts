@@ -1,15 +1,16 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { canAccessQaPanel } from "@/lib/agents/connection-policy";
 import { assertAgentAccess } from "@/lib/auth/agent-access";
 import { getSession } from "@/lib/auth/get-session";
 import { readConversationMetadata } from "@/lib/chat/conversation-metadata";
 import { insertAuditLog } from "@/lib/db/audit";
 import { getConversationById } from "@/lib/db/conversations";
 import { listMessages } from "@/lib/db/messages";
-import { LiteLLMError, sendChatCompletion } from "@/lib/llm/litellm";
+import { LiteLLMError } from "@/lib/llm/litellm";
+import { resolveRuntimeModelRoutePolicy } from "@/lib/llm/model-routing";
+import { sendSemanticCompletion } from "@/lib/llm/semantic-generation";
 import { parseJsonRequestBody, validateJsonMutationRequest } from "@/lib/utils/request-security";
-import type { AgentStatus } from "@/types/app";
+import { getQaAvailabilityError } from "@/lib/agents/qa-access";
 
 const createQaProposalSchema = z.object({
   conversationId: z.string().uuid("conversationId invalido"),
@@ -41,21 +42,6 @@ type QaProposalPayload = {
     createdAt: string;
   }>;
 };
-
-function getQaAvailabilityError(
-  classification: "local" | "remote_managed" | "channel_connected",
-  status: string
-): string | null {
-  if (classification === "remote_managed") {
-    return "QA no disponible para agentes gestionados por OpenAI en esta fase.";
-  }
-
-  if (!canAccessQaPanel({ hasConnection: classification !== "local", providerType: null, classification, label: "" }, status as AgentStatus)) {
-    return "QA disponible solo para agentes activos o para agentes con WhatsApp conectado.";
-  }
-
-  return null;
-}
 
 function extractJsonObject(raw: string): string | null {
   const start = raw.indexOf("{");
@@ -113,30 +99,37 @@ async function repairQaProposal(
   agentId: string,
   conversationId: string
 ): Promise<z.infer<typeof qaProposalResultSchema> | null> {
-  const repairCompletion = await sendChatCompletion({
-    model,
-    systemPrompt: [
-      "Eres un normalizador de salidas para QA de prompts.",
-      "Debes devolver solo JSON valido con las claves summary, suggestedSystemPrompt y recommendations.",
-      "No inventes alcance nuevo para el agente.",
-      "Si el texto original no sirve, reconstruye la mejor propuesta posible usando el contexto recibido.",
-      "No incluyas markdown ni texto adicional.",
-    ].join("\n"),
-    messages: [
-      {
-        role: "user",
-        content: JSON.stringify({
-          originalOutput: rawOutput,
-          context: payload,
-        }),
+  const repairCompletion = (
+    await sendSemanticCompletion({
+      usageKind: "qa_prompt_proposal",
+      requestedModel: model,
+      policy: resolveRuntimeModelRoutePolicy(model),
+      chatInput: {
+        systemPrompt: [
+          "Eres un normalizador de salidas para QA de prompts.",
+          "Debes devolver solo JSON valido con las claves summary, suggestedSystemPrompt y recommendations.",
+          "No inventes alcance nuevo para el agente.",
+          "Si el texto original no sirve, reconstruye la mejor propuesta posible usando el contexto recibido.",
+          "No incluyas markdown ni texto adicional.",
+        ].join("\n"),
+        messages: [
+          {
+            role: "user",
+            content: JSON.stringify({
+              originalOutput: rawOutput,
+              context: payload,
+            }),
+          },
+        ],
+        temperature: 0,
+        maxTokens: QA_PROPOSAL_MAX_TOKENS,
+        organizationId,
+        agentId,
+        conversationId,
       },
-    ],
-    temperature: 0,
-    maxTokens: QA_PROPOSAL_MAX_TOKENS,
-    organizationId,
-    agentId,
-    conversationId,
-  });
+      evaluateStructuredOutput: (output) => ({ parseValid: parseQaProposal(output.content) !== null }),
+    })
+  ).output;
 
   return parseQaProposal(repairCompletion.content);
 }
@@ -225,30 +218,37 @@ export async function POST(request: Request, context: RouteContext): Promise<Nex
   const proposalPayload = buildProposalPayload(access.agent, qaReview, messagesResult.data);
 
   try {
-    const completion = await sendChatCompletion({
-      model: access.agent.llm_model,
-      systemPrompt: [
-        "Eres un revisor de prompts para agentes conversacionales B2B.",
-        "Debes proponer una mejora concreta del system prompt sin ampliar el alcance del agente.",
-        "Devuelve obligatoriamente un unico objeto JSON valido.",
-        "Las claves permitidas son summary, suggestedSystemPrompt y recommendations.",
-        "summary debe resumir el problema y la mejora sugerida.",
-        "suggestedSystemPrompt debe contener el prompt completo propuesto.",
-        "recommendations debe ser un array corto de cambios concretos.",
-        "No incluyas markdown ni texto fuera del JSON.",
-      ].join("\n"),
-      messages: [
-        {
-          role: "user",
-          content: JSON.stringify(proposalPayload),
+    const completion = (
+      await sendSemanticCompletion({
+        usageKind: "qa_prompt_proposal",
+        requestedModel: access.agent.llm_model,
+        policy: resolveRuntimeModelRoutePolicy(access.agent.llm_model),
+        chatInput: {
+          systemPrompt: [
+            "Eres un revisor de prompts para agentes conversacionales B2B.",
+            "Debes proponer una mejora concreta del system prompt sin ampliar el alcance del agente.",
+            "Devuelve obligatoriamente un unico objeto JSON valido.",
+            "Las claves permitidas son summary, suggestedSystemPrompt y recommendations.",
+            "summary debe resumir el problema y la mejora sugerida.",
+            "suggestedSystemPrompt debe contener el prompt completo propuesto.",
+            "recommendations debe ser un array corto de cambios concretos.",
+            "No incluyas markdown ni texto fuera del JSON.",
+          ].join("\n"),
+          messages: [
+            {
+              role: "user",
+              content: JSON.stringify(proposalPayload),
+            },
+          ],
+          temperature: 0.1,
+          maxTokens: QA_PROPOSAL_MAX_TOKENS,
+          organizationId: session.organizationId,
+          agentId: access.agent.id,
+          conversationId: parsedBody.data.conversationId,
         },
-      ],
-      temperature: 0.1,
-      maxTokens: QA_PROPOSAL_MAX_TOKENS,
-      organizationId: session.organizationId,
-      agentId: access.agent.id,
-      conversationId: parsedBody.data.conversationId,
-    });
+        evaluateStructuredOutput: (output) => ({ parseValid: parseQaProposal(output.content) !== null }),
+      })
+    ).output;
 
     let parsedProposal = parseQaProposal(completion.content);
 

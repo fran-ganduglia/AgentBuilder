@@ -52,6 +52,8 @@ type GmailActionInput = {
   to?: string[];
   cc?: string[];
   bcc?: string[];
+  links?: string[];
+  attachmentPaths?: string[];
 };
 
 function toRecord(value: unknown): JsonRecord {
@@ -367,6 +369,22 @@ function GmailApprovalDetails({
             (v) => onEditChange({ ...editState, body: v }),
             { multiline: true }
           )}
+          {editState.links && editState.links.length > 0
+            ? renderEditableField(
+                "Links",
+                editState.links.join(", "),
+                () => undefined,
+                { readonly: true }
+              )
+            : null}
+          {editState.attachmentPaths && editState.attachmentPaths.length > 0
+            ? renderEditableField(
+                "Adjuntos",
+                editState.attachmentPaths.map((p) => p.split("/").pop() ?? p).join(", "),
+                () => undefined,
+                { readonly: true }
+              )
+            : null}
         </div>
       ) : (
         <div className="mt-3 grid gap-3 md:grid-cols-2">
@@ -381,6 +399,17 @@ function GmailApprovalDetails({
             ? renderKeyValue("BCC", actionInput.bcc.join(", "))
             : null}
           {renderKeyValue(action.includes("draft") ? "Borrador" : "Contenido", getString(actionInput.body))}
+          {Array.isArray(actionInput.links) && actionInput.links.length > 0
+            ? renderKeyValue("Links", actionInput.links.join(", "))
+            : null}
+          {Array.isArray(actionInput.attachmentPaths) && actionInput.attachmentPaths.length > 0
+            ? renderKeyValue(
+                "Adjuntos",
+                actionInput.attachmentPaths
+                  .map((p: string) => p.split("/").pop() ?? p)
+                  .join(", ")
+              )
+            : null}
         </div>
       )}
     </div>
@@ -426,6 +455,8 @@ function initGmailEditState(item: ApprovalItem): GmailActionInput {
     to: Array.isArray(actionInput.to) ? actionInput.to : [],
     cc: Array.isArray(actionInput.cc) ? actionInput.cc : [],
     bcc: Array.isArray(actionInput.bcc) ? actionInput.bcc : [],
+    links: Array.isArray(actionInput.links) ? actionInput.links : [],
+    attachmentPaths: Array.isArray(actionInput.attachmentPaths) ? actionInput.attachmentPaths : [],
   };
 }
 
@@ -447,6 +478,8 @@ function buildGmailEditPayload(item: ApprovalItem, editState: GmailActionInput):
   if (editState.cc?.length) payload.cc = editState.cc;
   if (editState.bcc?.length) payload.bcc = editState.bcc;
   if (editState.to?.length) payload.to = editState.to;
+  if (editState.links?.length) payload.links = editState.links;
+  if (editState.attachmentPaths?.length) payload.attachmentPaths = editState.attachmentPaths;
 
   return payload;
 }

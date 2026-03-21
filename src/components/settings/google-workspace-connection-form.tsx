@@ -9,6 +9,7 @@ type GoogleWorkspaceConnectionFormProps = {
   integrationId: string | null;
   gmailView: GoogleSurfaceOperationalView;
   calendarView: GoogleSurfaceOperationalView;
+  sheetsView: GoogleSurfaceOperationalView;
   callbackSurface: GoogleSurface | null;
   callbackMessage: string | null;
   callbackStatus: "connected" | "error" | null;
@@ -51,6 +52,8 @@ function GoogleSurfaceCard(input: {
             <p className="mt-1 text-sm text-slate-500">
               {input.view.surface === "gmail"
                 ? "Lectura real y writes asistidas en chat web para borradores, labels y archivado. `send_reply`, adjuntos y bodies completos siguen fuera de esta etapa."
+                : input.view.surface === "google_sheets"
+                  ? "Lecturas directas en chat y operaciones completas de escritura, estructura y formato via approval inbox + worker, siempre con spreadsheet URL/ID explicito."
                 : "Configuracion de disponibilidad y agenda para lecturas reales en chat web. La API `/run` y las escrituras siguen fuera de esta etapa."}
             </p>
         </div>
@@ -130,6 +133,7 @@ export function GoogleWorkspaceConnectionForm({
   integrationId,
   gmailView,
   calendarView,
+  sheetsView,
   callbackSurface,
   callbackMessage,
   callbackStatus,
@@ -179,7 +183,7 @@ export function GoogleWorkspaceConnectionForm({
   }
 
   return (
-    <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+    <section className="rounded-xl border border-slate-200 bg-white shadow-sm">
       <div className="flex flex-col gap-2 border-b border-slate-100 bg-slate-50 px-7 py-5 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-rose-50 ring-1 ring-inset ring-rose-600/20">
@@ -190,7 +194,7 @@ export function GoogleWorkspaceConnectionForm({
           <div>
             <h2 className="text-base font-bold text-slate-900">Google Workspace</h2>
             <p className="mt-0.5 text-sm text-slate-500">
-              Una sola integracion org-level `google` para dejar Gmail y Google Calendar configurados por superficie.
+              Una sola integracion org-level `google` para dejar Gmail, Google Calendar y Google Sheets configurados por superficie.
             </p>
           </div>
         </div>
@@ -209,7 +213,7 @@ export function GoogleWorkspaceConnectionForm({
           </div>
         ) : null}
 
-        <div className="grid gap-6 xl:grid-cols-2">
+        <div className="grid gap-6 lg:grid-cols-2">
           <GoogleSurfaceCard
             view={gmailView}
             callbackMessage={callbackSurface === "gmail" ? callbackMessage : null}
@@ -220,12 +224,17 @@ export function GoogleWorkspaceConnectionForm({
             callbackMessage={callbackSurface === "google_calendar" ? callbackMessage : null}
             callbackStatus={callbackSurface === "google_calendar" ? callbackStatus : null}
           />
+          <GoogleSurfaceCard
+            view={sheetsView}
+            callbackMessage={callbackSurface === "google_sheets" ? callbackMessage : null}
+            callbackStatus={callbackSurface === "google_sheets" ? callbackStatus : null}
+          />
         </div>
       </div>
 
       <div className="flex flex-col gap-4 border-t border-slate-100 bg-slate-50 px-7 py-4 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-xs font-medium text-slate-500">
-          Desconectar revoca Gmail y Google Calendar juntos porque comparten la misma integracion `google`.
+          Desconectar revoca Gmail, Google Calendar y Google Sheets juntos porque comparten la misma integracion `google`.
         </p>
         {integrationId ? (
           <button

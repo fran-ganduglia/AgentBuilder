@@ -45,6 +45,9 @@ import {
   getGoogleCalendarActionDescription,
   getGoogleCalendarActionLabel,
   GOOGLE_CALENDAR_TOOL_ACTIONS,
+  GOOGLE_SHEETS_TOOL_ACTIONS,
+  getGoogleSheetsActionDescription,
+  getGoogleSheetsActionLabel,
 } from "@/lib/integrations/google-agent-tools";
 import {
   getSalesforceActionDescription,
@@ -140,6 +143,7 @@ export const PROVIDER_INTEGRATION_PROVIDERS = [
   "salesforce",
   "gmail",
   "google_calendar",
+  "google_sheets",
 ] as const;
 export type ProviderIntegrationProvider = (typeof PROVIDER_INTEGRATION_PROVIDERS)[number];
 
@@ -837,10 +841,16 @@ const GOOGLE_CALENDAR_TOOL_SCOPE: IntegrationToolScope = {
   full: [...GOOGLE_CALENDAR_TOOL_ACTIONS],
 };
 
+const GOOGLE_SHEETS_TOOL_SCOPE: IntegrationToolScope = {
+  conservative: ["list_sheets", "read_range"],
+  full: [...GOOGLE_SHEETS_TOOL_ACTIONS],
+};
+
 const INTEGRATION_TOOL_SCOPES: Partial<Record<WizardIntegrationId, IntegrationToolScope>> = {
   salesforce: SALESFORCE_TOOL_SCOPE,
   gmail: GMAIL_TOOL_SCOPE,
   google_calendar: GOOGLE_CALENDAR_TOOL_SCOPE,
+  google_sheets: GOOGLE_SHEETS_TOOL_SCOPE,
 };
 
 const INTEGRATION_TOOL_OPTIONS: Partial<Record<WizardIntegrationId, ToolScopeOption[]>> = {
@@ -858,6 +868,11 @@ const INTEGRATION_TOOL_OPTIONS: Partial<Record<WizardIntegrationId, ToolScopeOpt
     id: action,
     label: getGoogleCalendarActionLabel(action),
     description: getGoogleCalendarActionDescription(action),
+  })),
+  google_sheets: GOOGLE_SHEETS_TOOL_ACTIONS.map((action) => ({
+    id: action,
+    label: getGoogleSheetsActionLabel(action),
+    description: getGoogleSheetsActionDescription(action),
   })),
 };
 
@@ -907,9 +922,15 @@ export function getCustomToolScopeSelections(
 }
 
 export function getResolvedToolsForIntegration(
-  setupState: Pick<AgentSetupState, "tool_scope_preset"> & { task_data?: AgentSetupTaskData | undefined },
+  setupState: Pick<AgentSetupState, "tool_scope_preset" | "integrations"> & {
+    task_data?: AgentSetupTaskData | undefined;
+  },
   integration: WizardIntegrationId
 ): string[] {
+  if (!setupState.integrations.includes(integration)) {
+    return [];
+  }
+
   const customSelections = getCustomToolScopeSelections(setupState.task_data);
   return getToolsForScope(integration, setupState.tool_scope_preset, customSelections[integration]);
 }
@@ -1012,5 +1033,3 @@ function deriveCapabilities(input: {
 function isWriteAction(actionId: string): boolean {
   return !["search", "read", "list", "check", "get"].some((prefix) => actionId.startsWith(prefix));
 }
-
-

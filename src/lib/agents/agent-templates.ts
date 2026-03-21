@@ -18,7 +18,10 @@ import {
   createDefaultCriteriaTaskData,
   createDefaultScheduleTaskData,
 } from "@/lib/agents/agent-setup-task-data";
-import { compileLayeredSystemPrompt } from "@/lib/agents/prompt-compiler";
+import {
+  compileLayeredSystemPrompt,
+  type PromptVariant,
+} from "@/lib/agents/prompt-compiler";
 import type { WizardEcosystemId } from "@/lib/agents/wizard-ecosystems";
 
 export type AgentTemplate = {
@@ -1330,6 +1333,8 @@ export type RecommendedPromptEnvironment = {
   gmailRuntimeAvailable?: boolean;
   googleCalendarConfigured?: boolean;
   googleCalendarRuntimeAvailable?: boolean;
+  googleSheetsConfigured?: boolean;
+  googleSheetsRuntimeAvailable?: boolean;
 };
 
 export type RecommendedPromptVariant = "current" | "legacy";
@@ -1348,9 +1353,14 @@ type RecommendedPromptInput = PromptBuilderDraft | AgentSetupState;
 
 export function buildRecommendedSystemPrompt(
   input: RecommendedPromptInput,
-  environment: RecommendedPromptEnvironment = {}
+  environment: RecommendedPromptEnvironment = {},
+  options: { promptVariant?: PromptVariant } = {}
 ): string {
-  return buildCurrentRecommendedSystemPrompt(input, environment);
+  return buildCurrentRecommendedSystemPrompt(
+    input,
+    environment,
+    options.promptVariant ?? "full"
+  );
 }
 
 export function getRecommendedPromptCandidates(
@@ -1363,7 +1373,7 @@ export function getRecommendedPromptCandidates(
   if (environmentVariants.length === 0) {
     return [
       {
-        prompt: buildCurrentRecommendedSystemPrompt(setupState, environment),
+        prompt: buildCurrentRecommendedSystemPrompt(setupState, environment, "full"),
         variant: "current",
         salesforceUsable: null,
         gmailConfigured: null,
@@ -1380,7 +1390,8 @@ export function getRecommendedPromptCandidates(
     candidates.push({
       prompt: buildCurrentRecommendedSystemPrompt(
         setupState,
-        variantEnvironment
+        variantEnvironment,
+        "full"
       ),
       variant: "current",
       salesforceUsable: variantEnvironment.salesforceUsable ?? null,
@@ -1437,21 +1448,29 @@ export function syncSystemPromptWithSetup(
 
 function buildCurrentRecommendedSystemPrompt(
   input: RecommendedPromptInput,
-  environment: RecommendedPromptEnvironment
+  environment: RecommendedPromptEnvironment,
+  promptVariant: PromptVariant
 ): string {
   const draft = isSetupState(input) ? input.builder_draft : input;
-  const onboardingContext = isSetupState(input) ? buildOnboardingContext(input) : [];
+  const onboardingContext = isSetupState(input)
+    ? buildOnboardingContext(input, promptVariant)
+    : [];
   const normalizedEnvironment = normalizeRecommendedPromptEnvironment(
     input,
     environment
   );
-  const capabilityLines = resolveCapabilityLines(input, normalizedEnvironment);
+  const capabilityLines = resolveCapabilityLines(
+    input,
+    normalizedEnvironment,
+    promptVariant
+  );
 
   if (isSetupState(input)) {
     return compileLayeredSystemPrompt({
       setupState: input,
       onboardingContext,
       integrationPolicyLines: capabilityLines,
+      variant: promptVariant,
     });
   }
 
@@ -1463,7 +1482,9 @@ function buildLegacyRecommendedSystemPrompt(
   environment: RecommendedPromptEnvironment
 ): string {
   const draft = isSetupState(input) ? input.builder_draft : input;
-  const onboardingContext = isSetupState(input) ? buildOnboardingContext(input) : [];
+  const onboardingContext = isSetupState(input)
+    ? buildOnboardingContext(input, "full")
+    : [];
   const normalizedEnvironment = normalizeRecommendedPromptEnvironment(
     input,
     environment
@@ -1617,11 +1638,12 @@ function getRecommendedPromptEnvironmentVariants(
 
 function resolveCapabilityLines(
   input: RecommendedPromptInput,
-  environment: RecommendedPromptEnvironment
+  environment: RecommendedPromptEnvironment,
+  promptVariant: PromptVariant
 ): string[] {
   const lines = [
-    ...resolveCrmCapabilityLines(input, environment),
-    ...resolveGoogleCapabilityLines(input, environment),
+    ...resolveCrmCapabilityLines(input, environment, promptVariant),
+    ...resolveGoogleCapabilityLines(input, environment, promptVariant),
   ];
 
   return lines;
@@ -1629,10 +1651,17 @@ function resolveCapabilityLines(
 
 function resolveCrmCapabilityLines(
   input: RecommendedPromptInput,
-  environment: RecommendedPromptEnvironment
+  environment: RecommendedPromptEnvironment,
+  promptVariant: PromptVariant
 ): string[] {
   if (isSalesforceRecommendedPromptInput(input)) {
     if (environment.salesforceUsable === true) {
+      if (promptVariant === "compact") {
+        return [
+          "Salesforce: acceso al CRM solo cuando haya tools activas de este agente en este turno; no prometas lecturas ni cambios no ejecutados.",
+        ];
+      }
+
       return [
         "Tienes acceso operativo al CRM mediante la integracion backend de Salesforce y las tools habilitadas de este agente.",
         "Si el usuario pregunta por Salesforce o por el CRM, confirma ese acceso operativo sin prometer acciones que todavia no ejecutaste en este turno.",
@@ -1648,12 +1677,20 @@ function resolveCrmCapabilityLines(
 
 function resolveGoogleCapabilityLines(
   input: RecommendedPromptInput,
-  environment: RecommendedPromptEnvironment
+  environment: RecommendedPromptEnvironment,
+  promptVariant: PromptVariant
 ): string[] {
   const lines: string[] = [];
 
   if (isGmailRecommendedPromptInput(input) && environment.gmailConfigured === true) {
-    if (environment.gmailRuntimeAvailable === true) {
+    if (promptVariant === "compact") {
+      lines.push(
+        environment.gmailRuntimeAvailable === true
+          ? "Gmail: lectura segura por metadata, snippets y conteo de adjuntos; no bodies completos ni HTML."
+          : "Gmail: no simules busquedas, lecturas ni writes si esta superficie no tiene runtime usable aqui.",
+        "Gmail: writes reales solo por approval y solo para acciones efectivamente habilitadas."
+      );
+    } else if (environment.gmailRuntimeAvailable === true) {
       lines.push(
         "Gmail esta configurado y disponible en chat web para lectura segura basada en metadata y para writes asistidas que pasan por approval inbox.",
         "Puedes buscar hilos y leer resumentes de threads usando headers, snippets y conteo de adjuntos, pero nunca bodies completos ni HTML.",
@@ -1672,7 +1709,13 @@ function resolveGoogleCapabilityLines(
     isGoogleCalendarRecommendedPromptInput(input) &&
     environment.googleCalendarConfigured === true
   ) {
-    if (environment.googleCalendarRuntimeAvailable === true) {
+    if (promptVariant === "compact") {
+      lines.push(
+        environment.googleCalendarRuntimeAvailable === true
+          ? "Google Calendar: usa solo disponibilidad y eventos confirmados por tools reales."
+          : "Google Calendar: no simules disponibilidad ni eventos cuando esta superficie no tenga runtime usable aqui."
+      );
+    } else if (environment.googleCalendarRuntimeAvailable === true) {
       lines.push(
         "Google Calendar esta conectado y puedes consultar disponibilidad o listar eventos reales en este chat.",
         "Para consultar disponibilidad di algo como: 'estoy libre el viernes', 'tengo hueco manana', 'hay espacio esta semana'.",
@@ -1766,13 +1809,10 @@ function isGoogleCalendarRecommendedPromptInput(
   );
 }
 
-function buildOnboardingContext(setupState: AgentSetupState): string[] {
-  const areaLine = setupState.areas.length > 0
-    ? `Areas de negocio: ${setupState.areas.map((area) => AGENT_AREA_LABELS[area]).join(", ")}.`
-    : null;
-  const integrationLine = setupState.integrations.length > 0
-    ? `Integraciones previstas: ${setupState.integrations.join(", ")}.`
-    : null;
+function buildOnboardingContext(
+  setupState: AgentSetupState,
+  promptVariant: PromptVariant
+): string[] {
   const scheduleLines = setupState.checklist
     .filter((item) => item.input_kind === "schedule")
     .map((item) => summarizeScheduleItem(setupState, item.id))
@@ -1781,6 +1821,17 @@ function buildOnboardingContext(setupState: AgentSetupState): string[] {
     .filter((item) => item.input_kind === "handoff_triggers")
     .map((item) => summarizeCriteriaItem(setupState, item))
     .filter((value): value is string => Boolean(value));
+
+  if (promptVariant === "compact") {
+    return [...scheduleLines, ...criteriaLines].slice(0, 3);
+  }
+
+  const areaLine = setupState.areas.length > 0
+    ? `Areas de negocio: ${setupState.areas.map((area) => AGENT_AREA_LABELS[area]).join(", ")}.`
+    : null;
+  const integrationLine = setupState.integrations.length > 0
+    ? `Integraciones previstas: ${setupState.integrations.join(", ")}.`
+    : null;
 
   return [
     `Canal principal: ${CHANNEL_LABELS[setupState.channel]}.`,
@@ -1883,12 +1934,6 @@ function resolveToneInstruction(tone: PromptBuilderDraft["tone"]): string {
   if (tone === "direct") return "directo, agil y orientado a la accion";
   return "profesional, claro y confiable";
 }
-
-
-
-
-
-
 
 
 

@@ -551,3 +551,8 @@ Before passing uploaded documents to the RAG pipeline:
 - Log token usage per organization.
 - Trigger alerts on abnormal usage spikes.
 - Throttle or suspend usage when limits are exceeded.
+## Snapshot 2026-03-17
+
+- OpenAI Assistants remotos quedaron retirados del backend y del producto.
+- Ningun flujo operativo puede depender de planners LLM, repair loops ni sync remoto con assistants.
+- El LLM solo puede operar en modos consultivos o generativos explicitamente aislados y sin efectos.

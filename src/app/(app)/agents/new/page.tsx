@@ -51,6 +51,10 @@ export default async function NewAgentPage() {
           googleIntegration,
           "google_calendar"
         )}
+        googleSheetsOperationalView={getGoogleSurfaceOperationalView(
+          googleIntegration,
+          "google_sheets"
+        )}
         planName={planName}
       />
     </div>

@@ -3,6 +3,7 @@ import "server-only";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { createServiceSupabaseClient } from "@/lib/supabase/service";
 import { toSetupStateJson, type AgentSetupState } from "@/lib/agents/agent-setup";
+import { resolveProviderFromModel } from "@/lib/llm/model-routing";
 import type { Agent, AgentStatus } from "@/types/app";
 import type { Json, TablesInsert, TablesUpdate } from "@/types/database";
 
@@ -41,22 +42,6 @@ function validateTemperature(value: number): string | null {
   }
 
   return null;
-}
-
-function resolveLlmProvider(model: string): string {
-  if (model.startsWith("gpt-")) {
-    return "openai";
-  }
-
-  if (model.startsWith("claude-")) {
-    return "anthropic";
-  }
-
-  if (model.startsWith("gemini-") || model === "gemini-pro") {
-    return "gemini";
-  }
-
-  return "custom";
 }
 
 export async function listAgents(organizationId: string): Promise<DbResult<Agent[]>> {
@@ -200,7 +185,7 @@ export async function createAgent(
     system_prompt: input.systemPrompt,
     llm_model: input.llmModel,
     llm_temperature: input.llmTemperature,
-    llm_provider: resolveLlmProvider(input.llmModel),
+    llm_provider: resolveProviderFromModel(input.llmModel),
     status: input.status ?? "draft",
     organization_id: organizationId,
     created_by: userId,
@@ -288,7 +273,7 @@ export async function updateAgent(
   if (input.systemPrompt !== undefined) updateFields.system_prompt = input.systemPrompt;
   if (input.llmModel !== undefined) {
     updateFields.llm_model = input.llmModel;
-    updateFields.llm_provider = resolveLlmProvider(input.llmModel);
+    updateFields.llm_provider = resolveProviderFromModel(input.llmModel);
   }
   if (input.llmTemperature !== undefined) updateFields.llm_temperature = input.llmTemperature;
   if (input.status !== undefined) updateFields.status = input.status;

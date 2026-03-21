@@ -1,7 +1,9 @@
 ﻿import "server-only";
 
 import { getOrganizationPlan } from "@/lib/db/organization-plans";
+import { estimateLlmCostUsd } from "@/lib/engine/observability";
 import { createServiceSupabaseClient } from "@/lib/supabase/service";
+import { resolveProviderFromModel } from "@/lib/llm/model-routing";
 import type { Tables, TablesInsert } from "@/types/database";
 
 type RecordUsageInput = {
@@ -57,30 +59,6 @@ function getMonthPeriod(createdAt: string): { periodStart: string; periodEnd: st
   const periodStart = new Date(date.getFullYear(), date.getMonth(), 1).toISOString();
   const periodEnd = new Date(date.getFullYear(), date.getMonth() + 1, 1).toISOString();
   return { periodStart, periodEnd };
-}
-
-function estimateTokenCost(tokensInput: number, tokensOutput: number): number {
-  return (tokensInput * 0.003 + tokensOutput * 0.006) / 1000;
-}
-
-function resolveProviderFromModel(model: string | null): string {
-  if (!model) {
-    return "unknown";
-  }
-
-  if (model.startsWith("gpt-")) {
-    return "openai";
-  }
-
-  if (model.startsWith("claude-")) {
-    return "anthropic";
-  }
-
-  if (model.startsWith("gemini-") || model === "gemini-pro") {
-    return "gemini";
-  }
-
-  return "custom";
 }
 
 async function buildAggregatedUsageRecords(
@@ -289,7 +267,10 @@ export async function backfillUsageRecordsForOrganization(
     total_tokens_input: row.totalTokensInput,
     total_tokens_output: row.totalTokensOutput,
     total_conversations: row.totalConversations,
-    estimated_cost_usd: estimateTokenCost(row.totalTokensInput, row.totalTokensOutput),
+    estimated_cost_usd: estimateLlmCostUsd(
+      row.totalTokensInput,
+      row.totalTokensOutput
+    ),
   }));
 
   const { error: insertError } = await serviceClient

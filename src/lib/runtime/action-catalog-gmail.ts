@@ -1,0 +1,310 @@
+import type {
+  RuntimeActionDefinitionV1,
+} from "./action-catalog";
+
+export const GMAIL_ACTION_CATALOG: Record<string, RuntimeActionDefinitionV1> = {
+  search_email: {
+    type: "search_email",
+    approvalMode: "auto",
+    sideEffectKind: "read",
+    input: {
+      minimum: ["query"],
+      optional: ["maxResults"],
+      params: {
+        query: {
+          key: "query",
+          required: true,
+          allowedKinds: ["primitive"],
+          summary: "Consulta libre para buscar emails o threads.",
+          resourceFamily: "query",
+          criticality: "critical",
+        },
+        maxResults: {
+          key: "maxResults",
+          required: false,
+          allowedKinds: ["primitive"],
+          summary: "Cantidad maxima de resultados a devolver.",
+          resourceFamily: "limit",
+          criticality: "non_critical",
+        },
+      },
+    },
+    output: {
+      summary: "Lista de threads resumidos.",
+    },
+  },
+  summarize_thread: {
+    type: "summarize_thread",
+    approvalMode: "auto",
+    sideEffectKind: "read",
+    input: {
+      minimum: ["threadRef"],
+      optional: [],
+      params: {
+        threadRef: {
+          key: "threadRef",
+          required: true,
+          allowedKinds: ["reference"],
+          summary: "Referencia conversacional o explicita al hilo a resumir.",
+          resourceFamily: "thread",
+          criticality: "critical",
+        },
+      },
+    },
+    output: {
+      summary: "Resumen textual estructurado.",
+    },
+  },
+  send_email: {
+    type: "send_email",
+    approvalMode: "required",
+    sideEffectKind: "write",
+    input: {
+      minimum: ["to", "subject", "body"],
+      optional: ["cc", "bcc"],
+      params: {
+        to: {
+          key: "to",
+          required: true,
+          allowedKinds: ["primitive"],
+          summary: "Destinatarios email explicitos.",
+          resourceFamily: "recipient",
+          criticality: "critical",
+        },
+        subject: {
+          key: "subject",
+          required: true,
+          allowedKinds: ["primitive"],
+          summary: "Asunto del email.",
+          resourceFamily: "text",
+          criticality: "critical",
+        },
+        body: {
+          key: "body",
+          required: true,
+          allowedKinds: ["primitive", "computed"],
+          summary: "Cuerpo textual del email.",
+          resourceFamily: "body",
+          criticality: "non_critical",
+        },
+        cc: {
+          key: "cc",
+          required: false,
+          allowedKinds: ["primitive"],
+          summary: "Destinatarios en copia.",
+          resourceFamily: "recipient",
+          criticality: "non_critical",
+        },
+        bcc: {
+          key: "bcc",
+          required: false,
+          allowedKinds: ["primitive"],
+          summary: "Destinatarios en copia oculta.",
+          resourceFamily: "recipient",
+          criticality: "non_critical",
+        },
+      },
+    },
+    output: {
+      summary: "Preview deterministico y encolado de approval/workflow para envio.",
+    },
+  },
+  create_draft_email: {
+    type: "create_draft_email",
+    approvalMode: "required",
+    sideEffectKind: "write",
+    input: {
+      minimum: ["to", "subject", "body"],
+      optional: ["cc", "bcc"],
+      params: {
+        to: {
+          key: "to",
+          required: true,
+          allowedKinds: ["primitive"],
+          summary: "Destinatario del borrador.",
+          resourceFamily: "recipient",
+          criticality: "critical",
+        },
+        subject: {
+          key: "subject",
+          required: true,
+          allowedKinds: ["primitive"],
+          summary: "Asunto del borrador.",
+          resourceFamily: "text",
+          criticality: "critical",
+        },
+        body: {
+          key: "body",
+          required: true,
+          allowedKinds: ["primitive", "computed"],
+          summary: "Cuerpo del borrador.",
+          resourceFamily: "body",
+          criticality: "non_critical",
+        },
+        cc: {
+          key: "cc",
+          required: false,
+          allowedKinds: ["primitive"],
+          summary: "Destinatarios en copia.",
+          resourceFamily: "recipient",
+          criticality: "non_critical",
+        },
+        bcc: {
+          key: "bcc",
+          required: false,
+          allowedKinds: ["primitive"],
+          summary: "Destinatarios en copia oculta.",
+          resourceFamily: "recipient",
+          criticality: "non_critical",
+        },
+      },
+    },
+    output: {
+      summary: "Borrador creado en Gmail.",
+    },
+  },
+  create_draft_reply: {
+    type: "create_draft_reply",
+    approvalMode: "required",
+    sideEffectKind: "write",
+    input: {
+      minimum: ["threadRef", "body"],
+      optional: ["cc", "bcc"],
+      params: {
+        threadRef: {
+          key: "threadRef",
+          required: true,
+          allowedKinds: ["reference"],
+          summary: "Hilo al que se responde con el borrador.",
+          resourceFamily: "thread",
+          criticality: "critical",
+        },
+        body: {
+          key: "body",
+          required: true,
+          allowedKinds: ["primitive", "computed"],
+          summary: "Cuerpo del borrador de respuesta.",
+          resourceFamily: "body",
+          criticality: "non_critical",
+        },
+        cc: {
+          key: "cc",
+          required: false,
+          allowedKinds: ["primitive"],
+          summary: "Destinatarios en copia.",
+          resourceFamily: "recipient",
+          criticality: "non_critical",
+        },
+        bcc: {
+          key: "bcc",
+          required: false,
+          allowedKinds: ["primitive"],
+          summary: "Destinatarios en copia oculta.",
+          resourceFamily: "recipient",
+          criticality: "non_critical",
+        },
+      },
+    },
+    output: {
+      summary: "Borrador de respuesta creado en Gmail.",
+    },
+  },
+  send_reply: {
+    type: "send_reply",
+    approvalMode: "required",
+    sideEffectKind: "write",
+    input: {
+      minimum: ["threadRef", "body"],
+      optional: ["cc", "bcc"],
+      params: {
+        threadRef: {
+          key: "threadRef",
+          required: true,
+          allowedKinds: ["reference"],
+          summary: "Hilo al que se responde.",
+          resourceFamily: "thread",
+          criticality: "critical",
+        },
+        body: {
+          key: "body",
+          required: true,
+          allowedKinds: ["primitive", "computed"],
+          summary: "Cuerpo de la respuesta.",
+          resourceFamily: "body",
+          criticality: "non_critical",
+        },
+        cc: {
+          key: "cc",
+          required: false,
+          allowedKinds: ["primitive"],
+          summary: "Destinatarios en copia.",
+          resourceFamily: "recipient",
+          criticality: "non_critical",
+        },
+        bcc: {
+          key: "bcc",
+          required: false,
+          allowedKinds: ["primitive"],
+          summary: "Destinatarios en copia oculta.",
+          resourceFamily: "recipient",
+          criticality: "non_critical",
+        },
+      },
+    },
+    output: {
+      summary: "Respuesta enviada en el hilo de Gmail.",
+    },
+  },
+  archive_thread: {
+    type: "archive_thread",
+    approvalMode: "required",
+    sideEffectKind: "destructive",
+    input: {
+      minimum: ["threadRef"],
+      optional: [],
+      params: {
+        threadRef: {
+          key: "threadRef",
+          required: true,
+          allowedKinds: ["reference"],
+          summary: "Thread a archivar.",
+          resourceFamily: "thread",
+          criticality: "critical",
+        },
+      },
+    },
+    output: {
+      summary: "Preview y encolado de approval/workflow para archivar thread.",
+    },
+  },
+  apply_label: {
+    type: "apply_label",
+    approvalMode: "required",
+    sideEffectKind: "write",
+    input: {
+      minimum: ["threadRef", "label"],
+      optional: [],
+      params: {
+        threadRef: {
+          key: "threadRef",
+          required: true,
+          allowedKinds: ["reference"],
+          summary: "Thread a etiquetar.",
+          resourceFamily: "thread",
+          criticality: "critical",
+        },
+        label: {
+          key: "label",
+          required: true,
+          allowedKinds: ["primitive", "entity"],
+          summary: "Label existente a aplicar.",
+          resourceFamily: "label",
+          criticality: "critical",
+        },
+      },
+    },
+    output: {
+      summary: "Preview y encolado de approval/workflow para aplicar label.",
+    },
+  },
+};

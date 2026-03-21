@@ -12,31 +12,20 @@ import { isSalesforceTemplateId } from "@/lib/agents/agent-templates";
 import { normalizeSetupState } from "@/lib/agents/agent-setup-state";
 import { buildRecommendedSystemPrompt } from "@/lib/agents/agent-templates";
 import { getSession } from "@/lib/auth/get-session";
-import { createAgent, softDeleteAgent, updateAgentSetupState } from "@/lib/db/agents";
-import { createAgentConnection } from "@/lib/db/agent-connections";
-import { upsertAgentTool } from "@/lib/db/agent-tools";
+import { createAgent, updateAgentSetupState } from "@/lib/db/agents";
+import { upsertAgentTool } from "@/lib/db/agent-tools-service";
 import { enqueueEvent } from "@/lib/db/event-queue";
 import { getPrimaryGoogleIntegration } from "@/lib/db/google-integrations";
 import { getOrganizationPlan } from "@/lib/db/organization-plans";
-import {
-  getOpenAIIntegrationApiKey,
-  getOpenAIIntegrationById,
-} from "@/lib/db/integrations";
 import { getPrimarySalesforceIntegration } from "@/lib/db/salesforce-integrations";
 import { assertUsableIntegration } from "@/lib/integrations/access";
-import { insertProviderActionAudit } from "@/lib/integrations/audit";
 import { resolveGoogleCalendarIntegrationTimezone } from "@/lib/integrations/google-calendar-timezone";
-import { getSafeProviderErrorMessage } from "@/lib/integrations/provider-gateway";
-import { buildAssistantConnectionMetadata } from "@/lib/llm/openai-assistant-mapper";
 import {
   gmailAgentToolConfigSchema,
   googleCalendarAgentToolConfigSchema,
+  googleSheetsAgentToolConfigSchema,
 } from "@/lib/integrations/google-agent-tools";
 import { hasAllGoogleScopesForSurface } from "@/lib/integrations/google-scopes";
-import {
-  createOpenAIAssistant,
-  deleteOpenAIAssistant,
-} from "@/lib/llm/openai-assistants";
 import {
   parseJsonRequestBody,
   validateJsonMutationRequest,
@@ -54,7 +43,6 @@ const createAgentSchema = z.object({
   systemPrompt: z.string().min(1, "El system prompt es requerido").optional(),
   llmModel: agentModelSchema,
   llmTemperature: z.number().min(0, "La temperatura minima es 0.0").max(1, "La temperatura maxima es 1.0"),
-  integrationId: z.string().uuid("integrationId debe ser un UUID valido").optional(),
   setupState: agentSetupStateSchema.optional(),
   workflowId: z.enum(PUBLIC_WORKFLOW_IDS).optional(),
   agentScope: z.enum(AGENT_SCOPES).optional(),
@@ -81,6 +69,7 @@ async function resolveAutoLinkIntegrations(organizationId: string, input: {
   expectsSalesforceIntegration: boolean;
   expectsGmailIntegration: boolean;
   expectsGoogleCalendarIntegration: boolean;
+  expectsGoogleSheetsIntegration: boolean;
 }): Promise<{
   salesforceIntegrationId: string | null;
   googleIntegrationId: string | null;
@@ -111,7 +100,11 @@ async function resolveAutoLinkIntegrations(organizationId: string, input: {
     }
   }
 
-  if (input.expectsGmailIntegration || input.expectsGoogleCalendarIntegration) {
+  if (
+    input.expectsGmailIntegration ||
+    input.expectsGoogleCalendarIntegration ||
+    input.expectsGoogleSheetsIntegration
+  ) {
     const googleIntegrationResult = await getPrimaryGoogleIntegration(organizationId);
 
     if (googleIntegrationResult.error) {
@@ -167,6 +160,10 @@ async function autoLinkLocalCrmTools(input: {
   const googleCalendarAllowedActions = getResolvedToolsForIntegration(
     input.setupState,
     "google_calendar"
+  );
+  const googleSheetsAllowedActions = getResolvedToolsForIntegration(
+    input.setupState,
+    "google_sheets"
   );
 
   if (input.salesforceIntegrationId && salesforceAllowedActions.length > 0) {
@@ -260,6 +257,32 @@ async function autoLinkLocalCrmTools(input: {
     }
   }
 
+  if (
+    input.googleIntegrationId &&
+    googleSheetsAllowedActions.length > 0 &&
+    hasAllGoogleScopesForSurface(input.googleGrantedScopes, "google_sheets")
+  ) {
+    const toolResult = await upsertAgentTool({
+      agentId: input.agentId,
+      organizationId: input.organizationId,
+      integrationId: input.googleIntegrationId,
+      toolType: "google_sheets",
+      isEnabled: true,
+      config: googleSheetsAgentToolConfigSchema.parse({
+        provider: "google",
+        surface: "google_sheets",
+        allowed_actions: googleSheetsAllowedActions,
+      }) as unknown as Json,
+    });
+
+    if (toolResult.error || !toolResult.data) {
+      return {
+        error: toolResult.error ?? "No se pudo configurar Google Sheets en el agente",
+        source,
+      };
+    }
+  }
+
   return { error: null, source };
 }
 
@@ -344,11 +367,15 @@ export async function POST(request: Request): Promise<NextResponse> {
       initialSetupState.template_id === "calendar_reschedule_assistant" ||
       initialSetupState.integrations.includes("google_calendar"))
     : false;
+  const expectsGoogleSheetsIntegration = initialSetupState
+    ? initialSetupState.integrations.includes("google_sheets")
+    : false;
 
   const autoLinkIntegrations = await resolveAutoLinkIntegrations(session.organizationId, {
     expectsSalesforceIntegration,
     expectsGmailIntegration,
     expectsGoogleCalendarIntegration,
+    expectsGoogleSheetsIntegration,
   });
 
   if (autoLinkIntegrations.error) {
@@ -371,173 +398,6 @@ export async function POST(request: Request): Promise<NextResponse> {
   const resolvedSystemPrompt = normalizedSetupState
     ? buildRecommendedSystemPrompt(normalizedSetupState, {})
     : parsed.data.systemPrompt ?? "";
-
-  if (parsed.data.integrationId && session.role !== "admin") {
-    return NextResponse.json(
-      { error: "Solo los administradores pueden crear agentes conectados a OpenAI" },
-      { status: 403 }
-    );
-  }
-
-  if (parsed.data.integrationId) {
-    const integrationResult = await getOpenAIIntegrationById(
-      parsed.data.integrationId,
-      session.organizationId
-    );
-
-    if (integrationResult.error) {
-      return NextResponse.json(
-        { error: "No se pudo validar la integracion de OpenAI" },
-        { status: 500 }
-      );
-    }
-
-    if (!integrationResult.data) {
-      return NextResponse.json({ error: "Integracion no encontrada" }, { status: 404 });
-    }
-
-    const integrationAccess = assertUsableIntegration(integrationResult.data);
-    if (!integrationAccess.ok) {
-      return NextResponse.json({ error: integrationAccess.message }, { status: integrationAccess.status });
-    }
-
-    const apiKeyResult = await getOpenAIIntegrationApiKey(
-      integrationResult.data.id,
-      session.organizationId
-    );
-
-    if (apiKeyResult.error || !apiKeyResult.data) {
-      return NextResponse.json(
-        { error: "No se pudo leer la API key de OpenAI" },
-        { status: 500 }
-      );
-    }
-
-    try {
-      const remoteAssistant = await createOpenAIAssistant(
-        apiKeyResult.data,
-        {
-          name: parsed.data.name,
-          description: parsed.data.description,
-          instructions: resolvedSystemPrompt,
-          model: parsed.data.llmModel,
-          temperature: parsed.data.llmTemperature,
-        },
-        {
-          organizationId: session.organizationId,
-          integrationId: integrationResult.data.id,
-          methodKey: "openai.assistants.create",
-        }
-      );
-
-      const localAgentResult = await createAgent(
-        {
-          name: parsed.data.name,
-          description: parsed.data.description,
-          systemPrompt: resolvedSystemPrompt,
-          llmModel: parsed.data.llmModel,
-          llmTemperature: parsed.data.llmTemperature,
-          status: "draft",
-          setupState: normalizedSetupState,
-        },
-        session.organizationId,
-        session.user.id
-      );
-
-      if (localAgentResult.error || !localAgentResult.data) {
-        try {
-          await deleteOpenAIAssistant(apiKeyResult.data, remoteAssistant.id, {
-            organizationId: session.organizationId,
-            integrationId: integrationResult.data.id,
-            methodKey: "openai.assistants.delete",
-          });
-        } catch {
-          // Best effort cleanup for remote assistant when local persistence fails.
-        }
-
-        return NextResponse.json(
-          { error: localAgentResult.error ?? "No se pudo crear el agente conectado" },
-          { status: 500 }
-        );
-      }
-
-      const connectionResult = await createAgentConnection({
-        organization_id: session.organizationId,
-        agent_id: localAgentResult.data.id,
-        integration_id: integrationResult.data.id,
-        provider_agent_id: remoteAssistant.id,
-        provider_type: "openai",
-        sync_status: "connected",
-        last_synced_at: new Date().toISOString(),
-        last_sync_error: null,
-        remote_updated_at: remoteAssistant.remoteUpdatedAt,
-        metadata: buildAssistantConnectionMetadata(remoteAssistant),
-      });
-
-      if (connectionResult.error) {
-        try {
-          await deleteOpenAIAssistant(apiKeyResult.data, remoteAssistant.id, {
-            organizationId: session.organizationId,
-            integrationId: integrationResult.data.id,
-            methodKey: "openai.assistants.delete",
-          });
-        } catch {
-          // Best effort cleanup for remote assistant when connection persistence fails.
-        }
-
-        await softDeleteAgent(localAgentResult.data.id, session.organizationId);
-
-        return NextResponse.json(
-          { error: "No se pudo vincular el agente con OpenAI" },
-          { status: 500 }
-        );
-      }
-
-      void insertProviderActionAudit({
-        organizationId: session.organizationId,
-        userId: session.user.id,
-        integrationId: integrationResult.data.id,
-        agentId: localAgentResult.data.id,
-        provider: "openai",
-        providerObjectType: "assistant",
-        providerObjectId: remoteAssistant.id,
-        action: "provider.openai.assistant.created",
-        requestId: remoteAssistant.providerRequestId,
-        status: "success",
-      });
-
-      void enqueueEvent({
-        organizationId: session.organizationId,
-        eventType: "agent.created",
-        entityType: "agent",
-        entityId: localAgentResult.data.id,
-        idempotencyKey: `agent.created:${localAgentResult.data.id}`,
-        payload: {
-          agent_id: localAgentResult.data.id,
-          name: localAgentResult.data.name,
-          status: localAgentResult.data.status,
-          llm_model: localAgentResult.data.llm_model,
-          llm_temperature: localAgentResult.data.llm_temperature ?? null,
-          created_at: localAgentResult.data.created_at ?? null,
-          source: "openai",
-          provider_agent_id: remoteAssistant.id,
-        },
-      });
-
-      return NextResponse.json({ data: localAgentResult.data }, { status: 201 });
-    } catch (error) {
-      console.error("agents.create_connected.remote_error", {
-        organizationId: session.organizationId,
-        integrationId: parsed.data.integrationId,
-        error: error instanceof Error ? error.message : "unknown",
-      });
-
-      return NextResponse.json(
-        { error: getSafeProviderErrorMessage(error, "No se pudo crear el assistant en OpenAI") },
-        { status: 502 }
-      );
-    }
-  }
 
   const { data: agent, error } = await createAgent(
         {

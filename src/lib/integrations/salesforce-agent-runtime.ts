@@ -18,6 +18,9 @@ import {
   createSalesforceContact,
   createSalesforceLead,
   createSalesforceTask,
+  createSalesforceOpportunity,
+  createSalesforceAccount,
+  createSalesforceOpportunityContactRole,
   deleteSalesforceObject,
   listSalesforceLeadsByStatus,
   listSalesforceLeadsRecent,
@@ -29,6 +32,8 @@ import {
   updateSalesforceCase,
   updateSalesforceLead,
   updateSalesforceOpportunity,
+  updateSalesforceContact,
+  updateSalesforceAccount,
   type SalesforceLeadListResult,
   type SalesforceLookupResult,
   type SalesforceMutationResult,
@@ -70,7 +75,10 @@ export type SalesforceToolExecutionResult = {
 
 export type SalesforceCompensationAction =
   | "delete_created_contact"
-  | "delete_created_task";
+  | "delete_created_task"
+  | "delete_created_opportunity"
+  | "delete_created_account"
+  | "delete_created_opportunity_contact_role";
 
 function isAuthFailure(error: unknown): error is ProviderRequestError {
   return isProviderRequestError(error) && (error.statusCode === 401 || error.statusCode === 403);
@@ -164,7 +172,32 @@ async function runSalesforceAction(
     return { action: input.action, isWrite: true, requestId: data.requestId, providerObjectId: data.id, providerObjectType: audit.providerObjectType, data };
   }
 
-  const data = await updateSalesforceOpportunity(credentials, input, context);
+  if (input.action === "update_opportunity") {
+    const data = await updateSalesforceOpportunity(credentials, input, context);
+    return { action: input.action, isWrite: true, requestId: data.requestId, providerObjectId: data.id, providerObjectType: audit.providerObjectType, data };
+  }
+
+  if (input.action === "update_contact") {
+    const data = await updateSalesforceContact(credentials, input, context);
+    return { action: input.action, isWrite: true, requestId: data.requestId, providerObjectId: data.id, providerObjectType: audit.providerObjectType, data };
+  }
+
+  if (input.action === "update_account") {
+    const data = await updateSalesforceAccount(credentials, input, context);
+    return { action: input.action, isWrite: true, requestId: data.requestId, providerObjectId: data.id, providerObjectType: audit.providerObjectType, data };
+  }
+
+  if (input.action === "create_opportunity") {
+    const data = await createSalesforceOpportunity(credentials, input, context);
+    return { action: input.action, isWrite: true, requestId: data.requestId, providerObjectId: data.id, providerObjectType: audit.providerObjectType, data };
+  }
+
+  if (input.action === "create_account") {
+    const data = await createSalesforceAccount(credentials, input, context);
+    return { action: input.action, isWrite: true, requestId: data.requestId, providerObjectId: data.id, providerObjectType: audit.providerObjectType, data };
+  }
+
+  const data = await createSalesforceOpportunityContactRole(credentials, input, context);
   return { action: input.action, isWrite: true, requestId: data.requestId, providerObjectId: data.id, providerObjectType: audit.providerObjectType, data };
 }
 
@@ -190,24 +223,22 @@ async function runSalesforceCompensation(
   };
 
   if (input.compensationAction === "delete_created_contact") {
-    return deleteSalesforceObject(
-      credentials,
-      {
-        objectType: "Contact",
-        recordId: input.providerObjectId,
-      },
-      context
-    );
+    return deleteSalesforceObject(credentials, { objectType: "Contact", recordId: input.providerObjectId }, context);
   }
 
-  return deleteSalesforceObject(
-    credentials,
-    {
-      objectType: "Task",
-      recordId: input.providerObjectId,
-    },
-    context
-  );
+  if (input.compensationAction === "delete_created_opportunity") {
+    return deleteSalesforceObject(credentials, { objectType: "Opportunity", recordId: input.providerObjectId }, context);
+  }
+
+  if (input.compensationAction === "delete_created_account") {
+    return deleteSalesforceObject(credentials, { objectType: "Account", recordId: input.providerObjectId }, context);
+  }
+
+  if (input.compensationAction === "delete_created_opportunity_contact_role") {
+    return deleteSalesforceObject(credentials, { objectType: "OpportunityContactRole", recordId: input.providerObjectId }, context);
+  }
+
+  return deleteSalesforceObject(credentials, { objectType: "Task", recordId: input.providerObjectId }, context);
 }
 
 async function refreshSalesforceCredentials(input: {

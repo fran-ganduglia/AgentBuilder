@@ -65,6 +65,7 @@ type AgentDetailWorkspaceProps = {
   salesforceIntegrationNotice: IntegrationNotice | null;
   gmailIntegrationNotice: IntegrationNotice | null;
   googleCalendarIntegrationNotice: IntegrationNotice | null;
+  googleSheetsIntegrationNotice: IntegrationNotice | null;
   promptEnvironment: RecommendedPromptEnvironment;
 };
 
@@ -97,6 +98,7 @@ export function AgentDetailWorkspace({
   salesforceIntegrationNotice,
   gmailIntegrationNotice,
   googleCalendarIntegrationNotice,
+  googleSheetsIntegrationNotice,
   promptEnvironment,
 }: AgentDetailWorkspaceProps) {
   const router = useRouter();
@@ -159,9 +161,7 @@ export function AgentDetailWorkspace({
     : canUseSandbox
       ? "Abrir sandbox"
       : null;
-  const canShowQaTab =
-    connectionSummary.classification !== "remote_managed" &&
-    canAccessQaPanel(connectionSummary, savedFields.status);
+  const canShowQaTab = canAccessQaPanel(connectionSummary, savedFields.status);
   const canOpenQa = isChannelConnectedAgent(connectionSummary) && canShowQaTab;
   const hasRecommendedPromptUpdate =
     Boolean(draftSetupState) &&
@@ -415,6 +415,7 @@ export function AgentDetailWorkspace({
                 salesforceIntegrationNotice={salesforceIntegrationNotice}
                 gmailIntegrationNotice={gmailIntegrationNotice}
                 googleCalendarIntegrationNotice={googleCalendarIntegrationNotice}
+                googleSheetsIntegrationNotice={googleSheetsIntegrationNotice}
                 onChange={handleFieldChange}
               />
             }

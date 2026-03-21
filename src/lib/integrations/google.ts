@@ -14,6 +14,10 @@ const GOOGLE_REVOKE_URL = "https://oauth2.googleapis.com/revoke";
 const GOOGLE_USERINFO_URL = "https://openidconnect.googleapis.com/v1/userinfo";
 const GOOGLE_API_BASE_URL = "https://gmail.googleapis.com";
 const GOOGLE_CALENDAR_API_BASE_URL = "https://www.googleapis.com/calendar/v3";
+const GOOGLE_SHEETS_API_BASE_URL = "https://sheets.googleapis.com/v4";
+const GOOGLE_DRIVE_API_BASE_URL = "https://www.googleapis.com/drive/v3";
+const GOOGLE_DRIVE_UPLOAD_API_BASE_URL = "https://www.googleapis.com/upload/drive/v3";
+const GOOGLE_PEOPLE_API_BASE_URL = "https://people.googleapis.com/v1";
 
 type GoogleTokenResponse = {
   access_token: string;
@@ -254,6 +258,93 @@ export async function requestGoogleCalendar<T>(
 
   return executeGoogleRequest<T>(
     `${GOOGLE_CALENDAR_API_BASE_URL}${nextPath}`,
+    {
+      ...init,
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+        ...(init?.headers ?? {}),
+      },
+    },
+    context
+  );
+}
+
+export async function requestGoogleSheets<T>(
+  accessToken: string,
+  path: string,
+  init?: RequestInit,
+  context?: GoogleProviderContext
+): Promise<GoogleApiEnvelope<T>> {
+  const nextPath = path.startsWith("/") ? path : `/${path}`;
+
+  return executeGoogleRequest<T>(
+    `${GOOGLE_SHEETS_API_BASE_URL}${nextPath}`,
+    {
+      ...init,
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+        ...(init?.headers ?? {}),
+      },
+    },
+    context
+  );
+}
+
+export async function requestGoogleDrive<T>(
+  accessToken: string,
+  path: string,
+  init?: RequestInit,
+  context?: GoogleProviderContext
+): Promise<GoogleApiEnvelope<T>> {
+  const nextPath = path.startsWith("/") ? path : `/${path}`;
+
+  return executeGoogleRequest<T>(
+    `${GOOGLE_DRIVE_API_BASE_URL}${nextPath}`,
+    {
+      ...init,
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+        ...(init?.headers ?? {}),
+      },
+    },
+    context
+  );
+}
+
+export async function requestGoogleDriveUpload<T>(
+  accessToken: string,
+  path: string,
+  init?: RequestInit,
+  context?: GoogleProviderContext
+): Promise<GoogleApiEnvelope<T>> {
+  const nextPath = path.startsWith("/") ? path : `/${path}`;
+
+  return executeGoogleRequest<T>(
+    `${GOOGLE_DRIVE_UPLOAD_API_BASE_URL}${nextPath}`,
+    {
+      ...init,
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        ...(init?.headers ?? {}),
+      },
+    },
+    context
+  );
+}
+
+export async function requestGooglePeople<T>(
+  accessToken: string,
+  path: string,
+  init?: RequestInit,
+  context?: GoogleProviderContext
+): Promise<GoogleApiEnvelope<T>> {
+  const nextPath = path.startsWith("/") ? path : `/${path}`;
+
+  return executeGoogleRequest<T>(
+    `${GOOGLE_PEOPLE_API_BASE_URL}${nextPath}`,
     {
       ...init,
       headers: {

@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { canAccessQaPanel } from "@/lib/agents/connection-policy";
 import { assertAgentAccess } from "@/lib/auth/agent-access";
 import { getSession } from "@/lib/auth/get-session";
 import {
@@ -14,7 +13,7 @@ import { getConversationById, listConversations, updateConversationMetadata } fr
 import { listMessages } from "@/lib/db/messages";
 import { insertAuditLog } from "@/lib/db/audit";
 import { parseJsonRequestBody, validateJsonMutationRequest } from "@/lib/utils/request-security";
-import type { AgentStatus } from "@/types/app";
+import { getQaAvailabilityError } from "@/lib/agents/qa-access";
 
 const QA_LIST_LIMIT = 24;
 const QA_MESSAGE_LIMIT = 100;
@@ -22,21 +21,6 @@ const QA_MESSAGE_LIMIT = 100;
 type RouteContext = {
   params: Promise<{ agentId: string }>;
 };
-
-function getQaAvailabilityError(
-  classification: "local" | "remote_managed" | "channel_connected",
-  status: string
-): string | null {
-  if (classification === "remote_managed") {
-    return "QA no disponible para agentes gestionados por OpenAI en esta fase.";
-  }
-
-  if (!canAccessQaPanel({ hasConnection: classification !== "local", providerType: null, classification, label: "" }, status as AgentStatus)) {
-    return "QA disponible solo para agentes activos o para agentes con WhatsApp conectado.";
-  }
-
-  return null;
-}
 
 export async function GET(request: Request, context: RouteContext): Promise<NextResponse> {
   const session = await getSession();

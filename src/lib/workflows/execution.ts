@@ -1,19 +1,30 @@
 import "server-only";
 
+import {
+  buildWorkflowOperationalMetrics,
+  summarizeWorkflowRunOperationalMetrics,
+  type WorkflowRunOperationalSummary,
+} from "@/lib/engine/observability";
 import { enqueueEvent } from "@/lib/db/event-queue";
+import { buildRuntimeEventInsert, insertRuntimeEvents } from "@/lib/db/runtime-events";
+import { updateRuntimeRun } from "@/lib/db/runtime-runs";
 import {
-  assertGoogleGmailRuntimeUsable,
-  executeGoogleGmailWriteToolAction,
-} from "@/lib/integrations/google-gmail-agent-runtime";
+  executeWorkflowAction,
+  isWorkflowActionExecutionError,
+} from "@/lib/engine/workflow-action-runtime";
 import {
-  assertGoogleCalendarRuntimeUsable,
-  executeGoogleCalendarWriteToolAction,
-} from "@/lib/integrations/google-calendar-agent-runtime";
-import { getGoogleAgentToolRuntimeWithServiceRole } from "@/lib/integrations/google-agent-runtime";
-import { executeGoogleGmailWriteToolSchema } from "@/lib/integrations/google-agent-tools";
-import { executeGoogleCalendarWriteToolSchema } from "@/lib/integrations/google-agent-tools";
-import { executeSalesforceToolAction } from "@/lib/integrations/salesforce-agent-runtime";
-import { executeSalesforceCrmToolSchema } from "@/lib/integrations/salesforce-tools";
+  appendRuntimeWorkflowTraceEvent,
+  executeApprovedRuntimeAction,
+  getRuntimeRunIdFromWorkflowMetadata,
+  getRuntimeActionFromWorkflowPayload,
+  persistRuntimeWorkflowTrace,
+  readRuntimeWorkflowTrace,
+} from "@/lib/runtime/workflow-bridge";
+import {
+  enqueueWorkflowStepRuntimeResume,
+  getRuntimeQueueDispatchPayloadFromMetadata,
+} from "@/lib/runtime/runtime-queue-dispatcher";
+import type { RuntimeActionType } from "@/lib/runtime/types";
 import { createServiceSupabaseClient } from "@/lib/supabase/service";
 import type { Json } from "@/types/database";
 import type { EventRow } from "@/lib/workers/event-queue";
@@ -34,6 +45,7 @@ type WorkflowRunRecord = {
   id: string;
   organization_id: string;
   agent_id: string;
+  conversation_id: string | null;
   created_by: string | null;
   metadata: Json;
 };
@@ -70,6 +82,41 @@ function getString(value: Json | undefined): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value : null;
 }
 
+function getWorkflowOperationalSummary(
+  metadata: Json
+): WorkflowRunOperationalSummary | null {
+  const metadataRecord = asRecord(metadata);
+  const candidate = metadataRecord.workflow_operational_observability;
+
+  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+    return null;
+  }
+
+  return candidate as unknown as WorkflowRunOperationalSummary;
+}
+
+function withWorkflowOperationalSummary(input: {
+  metadata: Json;
+  summary: WorkflowRunOperationalSummary;
+}): Json {
+  return {
+    ...asRecord(input.metadata),
+    workflow_operational_observability: input.summary as unknown as Json,
+  } as Json;
+}
+
+function withStepOperationalMetrics(input: {
+  outputPayload: Json | null;
+  operationalMetrics: unknown;
+}): Json {
+  return {
+    ...asRecord(input.outputPayload),
+    engine_observability: {
+      operational_metrics: input.operationalMetrics as Json,
+    },
+  } as Json;
+}
+
 function getActionInput(inputPayload: Json): unknown {
   return asRecord(inputPayload).action_input ?? null;
 }
@@ -91,10 +138,35 @@ async function queueWorkflowStepExecution(input: {
   organizationId: string;
   workflowRunId: string;
   workflowStepId: string;
+  runtimeRunId?: string | null;
+  runtimeActionId?: string;
+  runtimeActionType?: RuntimeActionType;
   approvalItemId?: string;
   traceId?: string | null;
   processAfter?: string | null;
 }): Promise<void> {
+  const enqueuedViaRuntime = await enqueueWorkflowStepRuntimeResume({
+    organizationId: input.organizationId,
+    runtimeRunId: input.runtimeRunId ?? null,
+    workflowRunId: input.workflowRunId,
+    workflowStepId: input.workflowStepId,
+    checkpointNode: "execute",
+    resumeReason: input.approvalItemId
+      ? "resume_after_approval"
+      : input.processAfter
+        ? "resume_after_retry_delay"
+        : "resume_post_side_effect",
+    traceId: input.traceId ?? input.runtimeRunId ?? input.workflowStepId,
+    processAfter: input.processAfter ?? null,
+    approvalItemId: input.approvalItemId,
+    actionId: input.runtimeActionId,
+    actionType: input.runtimeActionType,
+  });
+
+  if (enqueuedViaRuntime) {
+    return;
+  }
+
   await enqueueEvent({
     organizationId: input.organizationId,
     eventType: "workflow.step.execute",
@@ -200,7 +272,7 @@ export async function processWorkflowStepExecution(
       .maybeSingle(),
     supabase
       .from("workflow_runs")
-      .select("id, organization_id, agent_id, created_by, metadata")
+      .select("id, organization_id, agent_id, conversation_id, created_by, metadata")
       .eq("id", payload.workflowRunId)
       .eq("organization_id", event.organization_id)
       .maybeSingle(),
@@ -240,6 +312,7 @@ export async function processWorkflowStepExecution(
   const step = stepResult.data as WorkflowStepRecord;
   const run = runResult.data as WorkflowRunRecord;
   const runSteps = (runStepsResult.data ?? []) as WorkflowStepRecord[];
+  const runtimeResumeMetadata = getRuntimeQueueDispatchPayloadFromMetadata(run.metadata);
 
   if (step.workflow_run_id !== run.id) {
     throw new Error("workflow_step_does_not_belong_to_run");
@@ -343,228 +416,267 @@ export async function processWorkflowStepExecution(
       .eq("organization_id", event.organization_id),
   ]);
 
+  const runtimeAction = getRuntimeActionFromWorkflowPayload(step.input_payload);
+  let runtimeTrace = readRuntimeWorkflowTrace(run.metadata);
+  if (runtimeAction) {
+    runtimeTrace = appendRuntimeWorkflowTraceEvent({
+      current: runtimeTrace,
+      runtimeRunId: getRuntimeRunIdFromWorkflowMetadata(run.metadata),
+      traceId: getString(asRecord(run.metadata).runtime_trace_id),
+      requestId: getString(asRecord(step.input_payload).runtime_request_id),
+      actionId: runtimeAction.id,
+      actionType: runtimeAction.type,
+      provider: step.provider,
+      workflowRunId: run.id,
+      workflowStepId: step.id,
+      approvalItemId: payload.approvalItemId ?? null,
+      event: {
+        at: now,
+        event: "async_execution_started",
+        status: "running",
+        provider: step.provider,
+        approvalItemId: payload.approvalItemId ?? null,
+        workflowRunId: run.id,
+        workflowStepId: step.id,
+      },
+    });
+    await persistRuntimeWorkflowTrace({
+      organizationId: event.organization_id,
+      workflowRunId: run.id,
+      workflowStepId: step.id,
+      trace: runtimeTrace,
+      mirrorToStepOutput: true,
+    });
+    if (runtimeTrace.runtimeRunId) {
+      await insertRuntimeEvents([
+        buildRuntimeEventInsert({
+          organizationId: event.organization_id,
+          runtimeRunId: runtimeTrace.runtimeRunId,
+          event: {
+            type: "runtime.node.started",
+            requestId: runtimeTrace.requestId ?? run.id,
+            traceId: runtimeTrace.traceId ?? run.id,
+            runtimeRunId: runtimeTrace.runtimeRunId,
+            actionId: runtimeTrace.actionId ?? undefined,
+            actionType: (runtimeTrace.actionType as RuntimeActionType | null) ?? undefined,
+            node: "execute",
+            status: "waiting_async_execution",
+            provider: step.provider,
+            approvalItemId: payload.approvalItemId,
+            workflowRunId: run.id,
+            workflowStepId: step.id,
+          },
+          payload: {
+            workflow_trace_event: "async_execution_started",
+          },
+        }),
+      ]);
+      await updateRuntimeRun(event.organization_id, runtimeTrace.runtimeRunId, {
+        status: "waiting_async_execution",
+        checkpoint_node: "execute",
+        finished_at: null,
+      });
+    }
+  }
+
   try {
-    if (step.provider === "salesforce") {
-      const actionInput = executeSalesforceCrmToolSchema.parse(
-        getActionInput(step.input_payload)
-      );
-      const execution = await executeSalesforceToolAction({
-        organizationId: event.organization_id,
-        userId: requestedBy,
-        agentId: run.agent_id,
-        integrationId,
-        actionInput,
-        workflow: {
+    const execution = runtimeAction
+      ? {
+          operationalMetrics: buildWorkflowOperationalMetrics({
+            provider: step.provider,
+            action: runtimeAction.type,
+          }),
+          ...(await (async () => {
+            const runtimeExecution = await executeApprovedRuntimeAction({
+              ctx: {
+                requestId:
+                  getString(asRecord(step.input_payload).runtime_request_id) ??
+                  `${run.id}:${step.id}`,
+                traceId:
+                  getString(asRecord(run.metadata).runtime_trace_id) ??
+                  getString(asRecord(step.input_payload).runtime_trace_id) ??
+                  run.id,
+                organizationId: event.organization_id,
+                agentId: run.agent_id,
+                conversationId: run.conversation_id ?? run.id,
+                userId: requestedBy,
+                runtimeRunId: getRuntimeRunIdFromWorkflowMetadata(run.metadata) ?? undefined,
+                workflowRunId: run.id,
+                workflowStepId: step.id,
+                conversationMetadata: {},
+                messageMetadata: {
+                  runtime_execution_mode: "workflow_async",
+                },
+                budget: {
+                  plannerCallsMax: 0,
+                  plannerCallsUsed: 0,
+                  llmRepairCallsMaxPerAction: 0,
+                  syncRetriesMaxPerAction: step.max_attempts,
+                },
+              },
+              action: runtimeAction,
+            });
+
+            return {
+              outputPayload: runtimeExecution.output as Json,
+              providerRequestKey: runtimeExecution.providerRequestId ?? null,
+            };
+          })()),
+        }
+      : await executeWorkflowAction({
+          organizationId: event.organization_id,
+          userId: requestedBy,
+          agentId: run.agent_id,
+          integrationId,
           workflowRunId: run.id,
           workflowStepId: step.id,
-        },
-      });
+          provider: step.provider as "salesforce" | "gmail" | "google_calendar" | "google_sheets",
+          action: step.action,
+          rawActionInput: getActionInput(step.input_payload),
+        });
+    const operationalSummary = summarizeWorkflowRunOperationalMetrics({
+      current: getWorkflowOperationalSummary(run.metadata),
+      stepMetrics: execution.operationalMetrics,
+      workflowStepId: step.id,
+      provider: step.provider,
+      action: step.action,
+      status: "completed",
+    });
 
-      if (execution.error || !execution.data) {
-        throw new Error(execution.error ?? "No se pudo ejecutar la accion de Salesforce.");
-      }
-
-      const finishedAt = new Date().toISOString();
-      await supabase
+    const finishedAt = new Date().toISOString();
+    await Promise.all([
+      supabase
         .from("workflow_steps")
         .update({
           status: "completed",
-          provider_request_key: execution.data.requestId,
-          output_payload: execution.data as unknown as Json,
+          provider_request_key: execution.providerRequestKey,
+          output_payload: withStepOperationalMetrics({
+            outputPayload: execution.outputPayload,
+            operationalMetrics: execution.operationalMetrics,
+          }),
           finished_at: finishedAt,
           error_code: null,
           error_message: null,
         })
         .eq("id", step.id)
-        .eq("organization_id", event.organization_id);
+        .eq("organization_id", event.organization_id),
+      supabase
+        .from("workflow_runs")
+        .update({
+          metadata: withWorkflowOperationalSummary({
+            metadata: run.metadata,
+            summary: operationalSummary,
+          }),
+        })
+        .eq("id", run.id)
+        .eq("organization_id", event.organization_id),
+    ]);
 
-      const decision = decideRunAfterStepCompletion({
-        steps: buildUpdatedEngineSteps(runSteps, step.id, "completed"),
-        currentStepId: step.id,
-      });
-
-      await updateRunAfterDecision({
-        organizationId: event.organization_id,
+    if (runtimeAction) {
+      runtimeTrace = appendRuntimeWorkflowTraceEvent({
+        current: runtimeTrace,
+        provider: step.provider,
         workflowRunId: run.id,
-        fallbackCurrentStepId: step.step_id,
-        decision,
-      });
-
-      if (decision.nextStepToEnqueueId) {
-        await queueWorkflowStepExecution({
-          organizationId: event.organization_id,
-          workflowRunId: run.id,
-          workflowStepId: decision.nextStepToEnqueueId,
-          traceId: step.id,
-        });
-      }
-
-      return;
-    }
-
-    if (step.provider === "gmail") {
-      const runtimeResult = await getGoogleAgentToolRuntimeWithServiceRole(
-        run.agent_id,
-        event.organization_id,
-        "gmail"
-      );
-
-      if (runtimeResult.error || !runtimeResult.data) {
-        throw new Error(runtimeResult.error ?? "No se pudo cargar la runtime de Gmail.");
-      }
-
-      if (!runtimeResult.data.ok) {
-        throw new Error(runtimeResult.data.message);
-      }
-
-      const usableRuntime = assertGoogleGmailRuntimeUsable(runtimeResult.data);
-      if (usableRuntime.error || !usableRuntime.data) {
-        throw new Error(usableRuntime.error ?? "Gmail no esta disponible para este step.");
-      }
-
-      const actionInput = executeGoogleGmailWriteToolSchema.parse(
-        getActionInput(step.input_payload)
-      );
-      const execution = await executeGoogleGmailWriteToolAction({
-        organizationId: event.organization_id,
-        userId: requestedBy,
-        agentId: run.agent_id,
-        runtime: usableRuntime.data,
-        actionInput,
-        workflow: {
+        workflowStepId: step.id,
+        event: {
+          at: finishedAt,
+          event: "async_execution_completed",
+          status: "completed",
+          provider: step.provider,
+          providerRequestId: execution.providerRequestKey,
           workflowRunId: run.id,
           workflowStepId: step.id,
         },
       });
-
-      if (execution.error || !execution.data) {
-        throw new Error(execution.error ?? "No se pudo ejecutar la accion de Gmail.");
-      }
-
-      const finishedAt = new Date().toISOString();
-      await supabase
-        .from("workflow_steps")
-        .update({
-          status: "completed",
-          provider_request_key: execution.data.requestId,
-          output_payload: execution.data as unknown as Json,
-          finished_at: finishedAt,
-          error_code: null,
-          error_message: null,
-        })
-        .eq("id", step.id)
-        .eq("organization_id", event.organization_id);
-
-      const decision = decideRunAfterStepCompletion({
-        steps: buildUpdatedEngineSteps(runSteps, step.id, "completed"),
-        currentStepId: step.id,
-      });
-
-      await updateRunAfterDecision({
+      await persistRuntimeWorkflowTrace({
         organizationId: event.organization_id,
         workflowRunId: run.id,
-        fallbackCurrentStepId: step.step_id,
-        decision,
+        workflowStepId: step.id,
+        trace: runtimeTrace,
+        mirrorToStepOutput: true,
       });
-
-      if (decision.nextStepToEnqueueId) {
-        await queueWorkflowStepExecution({
-          organizationId: event.organization_id,
-          workflowRunId: run.id,
-          workflowStepId: decision.nextStepToEnqueueId,
-          traceId: step.id,
+      if (runtimeTrace.runtimeRunId) {
+        await insertRuntimeEvents([
+          buildRuntimeEventInsert({
+            organizationId: event.organization_id,
+            runtimeRunId: runtimeTrace.runtimeRunId,
+            event: {
+              type: "runtime.action.completed",
+              requestId: runtimeTrace.requestId ?? run.id,
+              traceId: runtimeTrace.traceId ?? run.id,
+              runtimeRunId: runtimeTrace.runtimeRunId,
+              actionId: runtimeTrace.actionId ?? undefined,
+              actionType: (runtimeTrace.actionType as RuntimeActionType | null) ?? undefined,
+              status: "completed",
+              provider: step.provider,
+              providerRequestId: execution.providerRequestKey ?? undefined,
+              workflowRunId: run.id,
+              workflowStepId: step.id,
+            },
+            payload: {
+              workflow_trace_event: "async_execution_completed",
+            },
+          }),
+        ]);
+        await updateRuntimeRun(event.organization_id, runtimeTrace.runtimeRunId, {
+          status: "success",
+          checkpoint_node: null,
+          finished_at: finishedAt,
         });
       }
-
-      return;
     }
 
-    if (step.provider === "google_calendar") {
-      const runtimeResult = await getGoogleAgentToolRuntimeWithServiceRole(
-        run.agent_id,
-        event.organization_id,
-        "google_calendar"
-      );
+    const decision = decideRunAfterStepCompletion({
+      steps: buildUpdatedEngineSteps(runSteps, step.id, "completed"),
+      currentStepId: step.id,
+    });
 
-      if (runtimeResult.error || !runtimeResult.data) {
-        throw new Error(
-          runtimeResult.error ?? "No se pudo cargar la runtime de Google Calendar."
-        );
-      }
+    await updateRunAfterDecision({
+      organizationId: event.organization_id,
+      workflowRunId: run.id,
+      fallbackCurrentStepId: step.step_id,
+      decision,
+    });
 
-      if (!runtimeResult.data.ok) {
-        throw new Error(runtimeResult.data.message);
-      }
-
-      const usableRuntime = assertGoogleCalendarRuntimeUsable(runtimeResult.data);
-      if (usableRuntime.error || !usableRuntime.data) {
-        throw new Error(
-          usableRuntime.error ?? "Google Calendar no esta disponible para este step."
-        );
-      }
-
-      const actionInput = executeGoogleCalendarWriteToolSchema.parse(
-        getActionInput(step.input_payload)
-      );
-      const execution = await executeGoogleCalendarWriteToolAction({
-        organizationId: event.organization_id,
-        userId: requestedBy,
-        agentId: run.agent_id,
-        runtime: usableRuntime.data,
-        actionInput,
-        workflow: {
-          workflowRunId: run.id,
-          workflowStepId: step.id,
-        },
-      });
-
-      if (execution.error || !execution.data) {
-        throw new Error(
-          execution.error ?? "No se pudo ejecutar la accion de Google Calendar."
-        );
-      }
-
-      const finishedAt = new Date().toISOString();
-      await supabase
-        .from("workflow_steps")
-        .update({
-          status: "completed",
-          provider_request_key: execution.data.requestId,
-          output_payload: execution.data as unknown as Json,
-          finished_at: finishedAt,
-          error_code: null,
-          error_message: null,
-        })
-        .eq("id", step.id)
-        .eq("organization_id", event.organization_id);
-
-      const decision = decideRunAfterStepCompletion({
-        steps: buildUpdatedEngineSteps(runSteps, step.id, "completed"),
-        currentStepId: step.id,
-      });
-
-      await updateRunAfterDecision({
+    if (decision.nextStepToEnqueueId) {
+      await queueWorkflowStepExecution({
         organizationId: event.organization_id,
         workflowRunId: run.id,
-        fallbackCurrentStepId: step.step_id,
-        decision,
+        workflowStepId: decision.nextStepToEnqueueId,
+        runtimeRunId: runtimeTrace?.runtimeRunId ?? null,
+        runtimeActionId: runtimeResumeMetadata.actionId,
+        runtimeActionType: runtimeResumeMetadata.actionType,
+        traceId: step.id,
       });
-
-      if (decision.nextStepToEnqueueId) {
-        await queueWorkflowStepExecution({
-          organizationId: event.organization_id,
-          workflowRunId: run.id,
-          workflowStepId: decision.nextStepToEnqueueId,
-          traceId: step.id,
-        });
-      }
-
-      return;
     }
 
-    throw new Error(`Proveedor no soportado todavia para workflow execution: ${step.provider}`);
+    return;
   } catch (error) {
-    const normalized = normalizeWorkflowExecutionError(error);
+    const normalized = isWorkflowActionExecutionError(error)
+      ? error.workflowError
+      : normalizeWorkflowExecutionError(error);
+    const operationalSummary = summarizeWorkflowRunOperationalMetrics({
+      current: getWorkflowOperationalSummary(run.metadata),
+      stepMetrics: {
+        actionClass: "workflow_async",
+        plannerCalls: 0,
+        fallbackCalls: 0,
+        clarifications: 0,
+        actionsExecuted: 0,
+        approvalsEnqueued: 0,
+        llmUsage: {
+          planner: { calls: 0, tokensInput: 0, tokensOutput: 0, estimatedCostUsd: 0 },
+          fallback: { calls: 0, tokensInput: 0, tokensOutput: 0, estimatedCostUsd: 0 },
+          synthesis: { calls: 0, tokensInput: 0, tokensOutput: 0, estimatedCostUsd: 0 },
+          total: { calls: 0, tokensInput: 0, tokensOutput: 0, estimatedCostUsd: 0 },
+        },
+        actionUsage: [],
+      },
+      workflowStepId: step.id,
+      provider: step.provider,
+      action: step.action,
+      status: "failed",
+    });
     console.error("workflow.step.execution_failed", {
       workflowRunId: run.id,
       workflowStepId: step.id,
@@ -581,6 +693,66 @@ export async function processWorkflowStepExecution(
       errorCode: normalized.code,
       errorMessage: normalized.message,
     });
+    await supabase
+      .from("workflow_runs")
+      .update({
+        metadata: withWorkflowOperationalSummary({
+          metadata: run.metadata,
+          summary: operationalSummary,
+        }),
+      })
+      .eq("id", run.id)
+      .eq("organization_id", event.organization_id);
+
+    if (runtimeAction) {
+      runtimeTrace = appendRuntimeWorkflowTraceEvent({
+        current: runtimeTrace,
+        provider: step.provider,
+        workflowRunId: run.id,
+        workflowStepId: step.id,
+        event: {
+          at: new Date().toISOString(),
+          event: "async_execution_failed",
+          status: "failed",
+          provider: step.provider,
+          reason: normalized.code,
+          workflowRunId: run.id,
+          workflowStepId: step.id,
+        },
+      });
+      await persistRuntimeWorkflowTrace({
+        organizationId: event.organization_id,
+        workflowRunId: run.id,
+        workflowStepId: step.id,
+        trace: runtimeTrace,
+        mirrorToStepOutput: true,
+      });
+      if (runtimeTrace.runtimeRunId) {
+        await insertRuntimeEvents([
+          buildRuntimeEventInsert({
+            organizationId: event.organization_id,
+            runtimeRunId: runtimeTrace.runtimeRunId,
+            event: {
+              type: "runtime.node.failed",
+              requestId: runtimeTrace.requestId ?? run.id,
+              traceId: runtimeTrace.traceId ?? run.id,
+              runtimeRunId: runtimeTrace.runtimeRunId,
+              actionId: runtimeTrace.actionId ?? undefined,
+              actionType: (runtimeTrace.actionType as RuntimeActionType | null) ?? undefined,
+              node: "execute",
+              status: "failed",
+              provider: step.provider,
+              reason: normalized.code,
+              workflowRunId: run.id,
+              workflowStepId: step.id,
+            },
+            payload: {
+              workflow_trace_event: "async_execution_failed",
+            },
+          }),
+        ]);
+      }
+    }
 
     if (shouldRetryWorkflowStep(toEngineStep(step), normalized)) {
       const retryAttempt = step.attempt + 1;
@@ -634,11 +806,22 @@ export async function processWorkflowStepExecution(
         organizationId: event.organization_id,
         workflowRunId: run.id,
         workflowStepId: retryResult.data.id,
+        runtimeRunId: runtimeTrace?.runtimeRunId ?? null,
+        runtimeActionId: runtimeResumeMetadata.actionId,
+        runtimeActionType: runtimeResumeMetadata.actionType,
         traceId: step.id,
         processAfter: new Date(
           Date.now() + computeWorkflowRetryDelayMs(toEngineStep(step), normalized)
         ).toISOString(),
       });
+
+      if (runtimeTrace?.runtimeRunId) {
+        await updateRuntimeRun(event.organization_id, runtimeTrace.runtimeRunId, {
+          status: "retry",
+          checkpoint_node: "execute",
+          finished_at: null,
+        });
+      }
 
       return;
     }
@@ -681,11 +864,22 @@ export async function processWorkflowStepExecution(
       failureMessage: normalized.message,
     });
 
+    if (runtimeTrace?.runtimeRunId) {
+      await updateRuntimeRun(event.organization_id, runtimeTrace.runtimeRunId, {
+        status: decision.runStatus === "manual_repair_required" ? "manual_repair_required" : "failed",
+        checkpoint_node: "execute",
+        finished_at: new Date().toISOString(),
+      });
+    }
+
     if (decision.nextStepToEnqueueId) {
       await queueWorkflowStepExecution({
         organizationId: event.organization_id,
         workflowRunId: run.id,
         workflowStepId: decision.nextStepToEnqueueId,
+        runtimeRunId: runtimeTrace?.runtimeRunId ?? null,
+        runtimeActionId: runtimeResumeMetadata.actionId,
+        runtimeActionType: runtimeResumeMetadata.actionType,
         traceId: step.id,
       });
     }

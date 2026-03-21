@@ -4,6 +4,7 @@ export type ChatQuickActionProvider =
   | "salesforce"
   | "gmail"
   | "google_calendar"
+  | "google_sheets"
   | "whatsapp";
 
 export type ChatQuickActionSection =

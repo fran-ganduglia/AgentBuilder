@@ -22,34 +22,26 @@ type AgentFormProps = {
 export function AgentForm({
   fields,
   errors,
-  connection,
-  connectionSummary,
+  connection: _connection,
+  connectionSummary: _connectionSummary,
   setupState,
   recommendedPrompt,
   promptSyncMode = "custom",
-  userRole = "admin",
+  userRole: _userRole = "admin",
   onChange,
 }: AgentFormProps) {
+  void _connection;
+  void _connectionSummary;
+  void _userRole;
   const promptWords = fields.systemPrompt.trim() ? fields.systemPrompt.trim().split(/\s+/).length : 0;
   const promptLines = fields.systemPrompt ? fields.systemPrompt.split(/\r?\n/).length : 0;
-  const isRemoteManaged = connectionSummary?.classification === "remote_managed";
-  const canEditRemoteManagedFields = !isRemoteManaged || userRole === "admin";
-
   return (
     <div className="space-y-6">
-      {connection && isRemoteManaged && !canEditRemoteManagedFields ? (
-        <div className="rounded-[1.5rem] border border-amber-200 bg-amber-50 p-4">
-          <p className="text-sm font-medium text-amber-900">
-            Este agente esta sincronizado con OpenAI. Como editor puedes cambiar el estado local, pero los campos remotos solo los puede modificar un administrador.
-          </p>
-        </div>
-      ) : null}
-
       <AgentIdentitySection
         fields={fields}
         errors={errors}
         onChange={onChange}
-        disabled={!canEditRemoteManagedFields}
+        disabled={false}
       />
       <AgentBehaviorSection
         fields={fields}
@@ -60,13 +52,13 @@ export function AgentForm({
         recommendedPrompt={recommendedPrompt ?? fields.systemPrompt}
         promptSyncMode={promptSyncMode}
         onChange={onChange}
-        disabled={!canEditRemoteManagedFields}
+        disabled={false}
       />
       <AgentEngineSection
         fields={fields}
         errors={errors}
         onChange={onChange}
-        disabled={!canEditRemoteManagedFields}
+        disabled={false}
       />
       <AgentStateSection
         fields={fields}

@@ -4,18 +4,22 @@ import { readAgentSetupState } from "@/lib/agents/agent-setup-state";
 import { resolveEffectiveAgentPrompt } from "@/lib/agents/effective-prompt";
 import { assertAgentAccess } from "@/lib/auth/agent-access";
 import { getSession } from "@/lib/auth/get-session";
+import { updateAgentSetupState } from "@/lib/db/agents";
 import { insertAuditLog } from "@/lib/db/audit";
-import { deleteAgentTool, getAgentToolById, listAgentTools, upsertAgentTool } from "@/lib/db/agent-tools";
+import { getAgentToolById, listAgentTools } from "@/lib/db/agent-tools";
+import { deleteAgentTool, upsertAgentTool } from "@/lib/db/agent-tools-service";
 import { getPrimaryGoogleIntegration } from "@/lib/db/google-integrations";
 import { getPrimarySalesforceIntegration } from "@/lib/db/salesforce-integrations";
 import { getIntegrationById } from "@/lib/db/integration-operations";
 import {
   getGmailAgentToolDiagnostics,
   getGoogleCalendarAgentToolDiagnostics,
+  getGoogleSheetsAgentToolDiagnostics,
 } from "@/lib/integrations/google-agent-tool-selection";
 import {
   gmailAgentToolConfigSchema,
   googleCalendarAgentToolConfigSchema,
+  googleSheetsAgentToolConfigSchema,
 } from "@/lib/integrations/google-agent-tools";
 import { assertUsableIntegration } from "@/lib/integrations/access";
 import {
@@ -25,15 +29,17 @@ import {
 import { getSalesforceAgentToolDiagnostics } from "@/lib/integrations/salesforce-agent-tool-selection";
 import { salesforceAgentToolConfigSchema } from "@/lib/integrations/salesforce-tools";
 import { parseJsonRequestBody, validateJsonMutationRequest } from "@/lib/utils/request-security";
+import type { Agent } from "@/types/app";
 
 const saveAgentToolSchema = z.object({
-  toolType: z.enum(["crm", "gmail", "google_calendar"]),
+  toolType: z.enum(["crm", "gmail", "google_calendar", "google_sheets"]),
   integrationId: z.string().uuid("integrationId debe ser un UUID valido"),
   isEnabled: z.boolean().optional(),
   config: z.union([
     salesforceAgentToolConfigSchema,
     gmailAgentToolConfigSchema,
     googleCalendarAgentToolConfigSchema,
+    googleSheetsAgentToolConfigSchema,
   ]),
 }).superRefine((value, ctx) => {
   if (
@@ -65,6 +71,17 @@ const saveAgentToolSchema = z.object({
       path: ["config"],
     });
   }
+
+  if (
+    value.toolType === "google_sheets" &&
+    (!("surface" in value.config) || value.config.surface !== "google_sheets")
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "La tool Google Sheets debe usar surface = google_sheets",
+      path: ["config"],
+    });
+  }
 });
 
 const deleteAgentToolSchema = z.object({
@@ -74,6 +91,84 @@ const deleteAgentToolSchema = z.object({
 type RouteContext = {
   params: Promise<{ agentId: string }>;
 };
+
+const TOOL_TYPE_TO_SETUP_INTEGRATION = {
+  crm: "salesforce",
+  gmail: "gmail",
+  google_calendar: "google_calendar",
+  google_sheets: "google_sheets",
+} as const;
+
+async function ensureSetupStateIncludesToolIntegration(input: {
+  agentId: string;
+  organizationId: string;
+  agent: Agent;
+  toolType: keyof typeof TOOL_TYPE_TO_SETUP_INTEGRATION;
+}): Promise<string | null> {
+  const setupState = readAgentSetupState(input.agent);
+  if (!setupState) {
+    return null;
+  }
+
+  const integrationId = TOOL_TYPE_TO_SETUP_INTEGRATION[input.toolType];
+  if (setupState.integrations.includes(integrationId)) {
+    return null;
+  }
+
+  const updateResult = await updateAgentSetupState(
+    input.agentId,
+    input.organizationId,
+    {
+      ...setupState,
+      integrations: [...setupState.integrations, integrationId],
+    }
+  );
+
+  return updateResult.error;
+}
+
+async function removeToolIntegrationFromSetupStateIfUnused(input: {
+  agentId: string;
+  organizationId: string;
+  agent: Agent;
+  toolType: keyof typeof TOOL_TYPE_TO_SETUP_INTEGRATION;
+}): Promise<string | null> {
+  const setupState = readAgentSetupState(input.agent);
+  if (!setupState) {
+    return null;
+  }
+
+  const integrationId = TOOL_TYPE_TO_SETUP_INTEGRATION[input.toolType];
+  if (!setupState.integrations.includes(integrationId)) {
+    return null;
+  }
+
+  const toolsResult = await listAgentTools(input.agentId, input.organizationId);
+  if (toolsResult.error || !toolsResult.data) {
+    return toolsResult.error ?? "No se pudieron cargar las tools del agente";
+  }
+
+  const stillUsesToolType = toolsResult.data.some(
+    (tool) => tool.tool_type === input.toolType
+  );
+
+  if (stillUsesToolType) {
+    return null;
+  }
+
+  const updateResult = await updateAgentSetupState(
+    input.agentId,
+    input.organizationId,
+    {
+      ...setupState,
+      integrations: setupState.integrations.filter(
+        (existingIntegrationId) => existingIntegrationId !== integrationId
+      ),
+    }
+  );
+
+  return updateResult.error;
+}
 
 export async function GET(_request: Request, context: RouteContext): Promise<NextResponse> {
   const session = await getSession();
@@ -121,6 +216,10 @@ export async function GET(_request: Request, context: RouteContext): Promise<Nex
     tools,
     googleIntegrationResult.data?.id ?? null
   );
+  const googleSheetsToolDiagnostics = getGoogleSheetsAgentToolDiagnostics(
+    tools,
+    googleIntegrationResult.data?.id ?? null
+  );
   const promptResolution = resolveEffectiveAgentPrompt({
     savedPrompt: access.agent.system_prompt,
     setupState: readAgentSetupState(access.agent),
@@ -163,6 +262,15 @@ export async function GET(_request: Request, context: RouteContext): Promise<Nex
         googleCalendarToolDiagnostics.hasDuplicateTools,
       hasMisalignedGoogleCalendarTools:
         googleCalendarToolDiagnostics.hasMisalignedTools,
+      selectedGoogleSheetsToolId: googleSheetsToolDiagnostics.selectedTool?.id ?? null,
+      selectedGoogleSheetsIntegrationId:
+        googleSheetsToolDiagnostics.selectedTool?.integration_id ?? null,
+      selectedGoogleSheetsAllowedActions:
+        googleSheetsToolDiagnostics.selectedAllowedActions,
+      hasDuplicateGoogleSheetsTools:
+        googleSheetsToolDiagnostics.hasDuplicateTools,
+      hasMisalignedGoogleSheetsTools:
+        googleSheetsToolDiagnostics.hasMisalignedTools,
     },
   });
 }
@@ -240,6 +348,20 @@ export async function POST(request: Request, context: RouteContext): Promise<Nex
 
   if (upsertResult.error || !upsertResult.data) {
     return NextResponse.json({ error: upsertResult.error ?? "No se pudo guardar la tool" }, { status: 500 });
+  }
+
+  const setupStateSyncError = await ensureSetupStateIncludesToolIntegration({
+    agentId,
+    organizationId: session.organizationId,
+    agent: access.agent,
+    toolType: parsedBody.data.toolType,
+  });
+
+  if (setupStateSyncError) {
+    return NextResponse.json(
+      { error: setupStateSyncError ?? "No se pudo sincronizar el setup del agente" },
+      { status: 500 }
+    );
   }
 
   void insertAuditLog({
@@ -320,6 +442,20 @@ export async function DELETE(request: Request, context: RouteContext): Promise<N
   const deleteResult = await deleteAgentTool(parsedBody.data.agentToolId, session.organizationId);
   if (deleteResult.error) {
     return NextResponse.json({ error: "No se pudo eliminar la tool" }, { status: 500 });
+  }
+
+  const setupStateSyncError = await removeToolIntegrationFromSetupStateIfUnused({
+    agentId,
+    organizationId: session.organizationId,
+    agent: access.agent,
+    toolType: existingToolResult.data.tool_type as keyof typeof TOOL_TYPE_TO_SETUP_INTEGRATION,
+  });
+
+  if (setupStateSyncError) {
+    return NextResponse.json(
+      { error: setupStateSyncError ?? "No se pudo sincronizar el setup del agente" },
+      { status: 500 }
+    );
   }
 
   void insertAuditLog({

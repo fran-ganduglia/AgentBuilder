@@ -66,11 +66,11 @@ function formatSyncError(connection: AgentConnection): string | null {
   }
 
   if (connection.last_sync_error === "provider_sync_failed") {
-    return "Fallo la sincronizacion con OpenAI. Reintenta o revisa la credencial configurada.";
+    return "Fallo la sincronizacion con el proveedor externo. Reintenta o revisa la integracion configurada.";
   }
 
   if (connection.last_sync_error === "local_sync_failed") {
-    return "OpenAI se actualizo, pero fallo la persistencia local. Ejecuta una resincronizacion.";
+    return "La persistencia local fallo despues del sync remoto. Revisa la integracion antes de reintentar.";
   }
 
   return "La ultima sincronizacion fallo. Revisa los logs del servidor para ver el detalle.";

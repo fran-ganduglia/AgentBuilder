@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {
+  buildDynamicFormMarker,
   buildDynamicFormSubmissionMessage,
   buildInteractiveMarkersGuidance,
   parseChoiceChipsMarker,
@@ -53,6 +54,8 @@ function runDynamicFormChecks(): void {
   assert.equal(basic.definition.fields[0]?.required, false);
   assert.equal(basic.definition.fields[1]?.required, true);
   assert.equal(basic.definition.fields[2]?.type, "email");
+  assert.deepEqual(basic.initialValues, {});
+  assert.deepEqual(basic.fieldUi, {});
 
   const withSelect = parseDynamicFormMarker(
     "Completa esto.\n[FORM:Tarea|subject:text:Asunto*|priority:select:Prioridad:Alta,Normal,Baja]"
@@ -92,6 +95,34 @@ function runDynamicFormChecks(): void {
     "Texto.\n[FORM:salesforce_create_lead]"
   );
   assert.equal(legacyMarker, null, "Legacy marker sin | no matchea");
+
+  const structured = parseDynamicFormMarker(
+    `Completa el email.\n${buildDynamicFormMarker({
+      definition: {
+        title: "Nuevo email",
+        fields: [
+          { key: "action", type: "text", label: "Action", required: true },
+          { key: "to", type: "email", label: "Destinatario", required: true },
+          { key: "body", type: "textarea", label: "Mensaje", required: true },
+        ],
+      },
+      initialValues: {
+        action: "send_email",
+        to: "ana@example.com",
+      },
+      fieldUi: {
+        action: { hidden: true, readOnly: true },
+        to: { readOnly: true },
+      },
+    })}`
+  );
+
+  assert.ok(structured);
+  assert.equal(structured.definition.title, "Nuevo email");
+  assert.equal(structured.initialValues.action, "send_email");
+  assert.equal(structured.initialValues.to, "ana@example.com");
+  assert.deepEqual(structured.fieldUi.action, { hidden: true, readOnly: true });
+  assert.deepEqual(structured.fieldUi.to, { readOnly: true });
 }
 
 function runSubmissionChecks(): void {
@@ -101,6 +132,7 @@ function runSubmissionChecks(): void {
       { key: "name", type: "text" as const, label: "Name", required: true },
       { key: "email", type: "email" as const, label: "Email", required: false },
       { key: "notes", type: "textarea" as const, label: "Notes", required: false },
+      { key: "attachments", type: "file" as const, label: "Attachments", required: false },
     ],
   };
 
@@ -113,6 +145,30 @@ function runSubmissionChecks(): void {
   assert.equal(
     message,
     "name: Juan\nemail: juan@test.com\nnotes: Linea 1\\nLinea 2"
+  );
+
+  const withUploadedPaths = buildDynamicFormSubmissionMessage(
+    definition,
+    {
+      name: "Juan",
+    },
+    {
+      attachments: [
+        {
+          name: "archivo.pdf",
+          type: "application/pdf",
+          size: 1024,
+          base64: "abc",
+        },
+      ],
+    },
+    {
+      attachments: ["org-1/batch-1/archivo.pdf"],
+    }
+  );
+  assert.equal(
+    withUploadedPaths,
+    "name: Juan\nattachments: org-1/batch-1/archivo.pdf"
   );
 
   const emptyFields = buildDynamicFormSubmissionMessage(definition, {
@@ -129,6 +185,8 @@ function runGuidanceChecks(): void {
   assert.ok(guidance.includes("salesforce, gmail"));
   assert.ok(guidance.includes("CHOICE CHIPS"));
   assert.ok(guidance.includes("DYNAMIC FORMS"));
+  assert.ok(guidance.includes("FORM_DATA"));
+  assert.ok(guidance.includes("accion concreta"));
 }
 
 function run(): void {

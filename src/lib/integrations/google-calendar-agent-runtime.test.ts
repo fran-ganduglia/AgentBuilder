@@ -158,8 +158,8 @@ async function runRefreshSuccessTest(): Promise<void> {
         data: {
           calendarId: "primary",
           timezone: "UTC",
-          startIso: actionInput.startIso,
-          endIso: actionInput.endIso,
+          startIso: (actionInput as { startIso: string }).startIso,
+          endIso: (actionInput as { endIso: string }).endIso,
           maxResults: 10,
           events: [],
         },

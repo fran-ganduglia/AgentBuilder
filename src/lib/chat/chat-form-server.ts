@@ -2,9 +2,13 @@ import "server-only";
 
 import { assertAgentAccess } from "@/lib/auth/agent-access";
 import type { Session } from "@/lib/auth/get-session";
-import type { ActiveChatUiState } from "@/lib/chat/chat-form-state";
+import {
+  parsePendingChatFormState,
+  type ActiveChatUiState,
+} from "@/lib/chat/chat-form-state";
 import {
   isPendingToolActionExpired,
+  readPendingChatForm,
   readConversationMetadata,
   type ConversationMetadata,
 } from "@/lib/chat/conversation-metadata";
@@ -50,14 +54,6 @@ export async function resolveChatFormContext(input: {
     return { ok: false, status: access.status, error: access.message };
   }
 
-  if (access.connectionSummary.classification === "remote_managed") {
-    return {
-      ok: false,
-      status: 403,
-      error: "Este agente no usa el chat local.",
-    };
-  }
-
   const conversationResult = await getConversationById(
     input.conversationId,
     input.agentId,
@@ -84,6 +80,13 @@ export function buildActiveChatUiState(
   conversation: Conversation
 ): ActiveChatUiState {
   const metadata = readConversationMetadata(conversation.metadata);
+  const pendingChatForm = parsePendingChatFormState(
+    readPendingChatForm(conversation.metadata)
+  );
+
+  if (conversation.channel === "web" && pendingChatForm) {
+    return pendingChatForm;
+  }
 
   const pendingAction = metadata.pending_crm_action;
   if (
@@ -113,14 +116,8 @@ export async function cleanupExpiredChatUiState(input: {
   const patch: ConversationMetadata = {};
   let shouldUpdate = false;
 
-  if (metadata.pending_chat_form) {
-    patch.pending_chat_form = null;
-    shouldUpdate = true;
-  }
-
   if (metadata.pending_crm_action && isPendingToolActionExpired(metadata.pending_crm_action)) {
     patch.pending_crm_action = null;
-    patch.pending_tool_action = null;
     shouldUpdate = true;
   }
 

@@ -18,7 +18,7 @@ type ScheduledJob = {
   path: string;
 };
 
-const PORT = Number(process.env.PORT || "3000");
+const PORT = Number(process.env.PORT || "3001");
 const INTERNAL_CRON_SECRET = process.env.CRON_SECRET?.trim() || "internal-worker-secret";
 const SWEEP_INTERVAL_MS = 30_000;
 const REDIS_RECONNECT_DELAY_MS = 5_000;

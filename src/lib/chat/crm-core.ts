@@ -6,6 +6,19 @@ import {
   formatChatConfirmationMarker,
   type ChatConfirmationProvider,
 } from "@/lib/chat/inline-forms";
+import { createActionPolicyEvaluator } from "@/lib/engine/policy";
+import {
+  createActionRegistry,
+  createEngineStepRegistry,
+  runAction,
+} from "@/lib/engine/runtime";
+import type {
+  ActionDefinition,
+  ActionPlan,
+  PlannedAction,
+  PlannedParam,
+  RunActionResult,
+} from "@/lib/engine/types";
 
 type DbResult<T> = { data: T | null; error: string | null };
 
@@ -18,6 +31,25 @@ type ToolResult = {
   action: string;
   result: string;
 };
+
+type CrmEngineContext<
+  TRuntime,
+  TActionInput extends { action: string },
+  TResult extends { action: string },
+> = {
+  adapter: CrmChatAdapter<TRuntime, TActionInput, TResult>;
+  runtime: TRuntime;
+  organizationId: string;
+  userId: string;
+  agentId: string;
+};
+
+type CrmEngineState<TResult extends { action: string }> = {
+  executionResult: TResult | null;
+  formattedResult: string | null;
+};
+
+class CrmActionNotAllowedError extends Error {}
 
 export type CrmChatOrchestrationResult =
   | {
@@ -104,12 +136,255 @@ const DEFAULT_STRICT_CONFIRMATIONS = new Set([
   "confirmar",
   "si confirmo",
   "si, confirmo",
-  "sï¿½ confirmo",
-  "sï¿½, confirmo",
+  "sÃ¯Â¿Â½ confirmo",
+  "sÃ¯Â¿Â½, confirmo",
 ]);
+const CRM_ENGINE_STEP_CHECK_ACTION_ALLOWED = "crm.check_action_allowed";
+const CRM_ENGINE_STEP_EXECUTE_ACTION = "crm.execute_action";
+const CRM_ENGINE_STEP_FORMAT_RESULT = "crm.format_result";
 
 function buildToolContext(toolResults: ToolResult[]): string {
   return toolResults.map((item) => item.result).join("\n\n");
+}
+
+function toPlannedParam(value: unknown): PlannedParam {
+  if (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return { kind: "primitive", value };
+  }
+
+  if (Array.isArray(value)) {
+    return {
+      kind: "collection",
+      items: value.map((item) => toPlannedParam(item)),
+    };
+  }
+
+  if (value instanceof Date) {
+    return {
+      kind: "temporal_ref",
+      value: value.toISOString(),
+      granularity: "datetime",
+    };
+  }
+
+  if (value && typeof value === "object") {
+    return {
+      kind: "generated_text",
+      value: JSON.stringify(value),
+    };
+  }
+
+  return {
+    kind: "unresolved",
+  };
+}
+
+function buildActionPlan<TActionInput extends { action: string }>(
+  provider: string,
+  plannerDecision: CrmPlannerDecision<TActionInput>
+): ActionPlan {
+  if (plannerDecision.kind !== "action") {
+    return {
+      actions: [],
+      plannerConfidence: plannerDecision.kind === "respond" ? 1 : 0,
+      missingFields: plannerDecision.kind === "missing_data" ? ["planner_missing_data"] : [],
+      candidateProviders: [provider],
+    };
+  }
+
+  const params = Object.fromEntries(
+    Object.entries(plannerDecision.input)
+      .filter(([key]) => key !== "action")
+      .map(([key, value]) => [key, toPlannedParam(value)])
+  );
+
+  return {
+    actions: [
+      {
+        type: plannerDecision.input.action,
+        provider,
+        params,
+        requiresApprovalHint: plannerDecision.requiresConfirmation,
+      },
+    ],
+    plannerConfidence: 1,
+    missingFields: [],
+    candidateProviders: [provider],
+  };
+}
+
+function buildActionDefinition<TActionInput extends { action: string }>(
+  action: PlannedAction,
+  actionInput: TActionInput,
+  requiresApproval: boolean
+): ActionDefinition<Record<string, unknown>> {
+  return {
+    type: action.type,
+    provider: action.provider,
+    steps: [
+      CRM_ENGINE_STEP_CHECK_ACTION_ALLOWED,
+      CRM_ENGINE_STEP_EXECUTE_ACTION,
+      CRM_ENGINE_STEP_FORMAT_RESULT,
+    ],
+    resolverSchema: null,
+    executionMode: requiresApproval ? "approval_async" : "sync",
+    policyKey: `${action.provider}:${action.type}`,
+    resolve: async () => ({
+      status: "ok",
+      resolvedParams: actionInput as Record<string, unknown>,
+    }),
+  };
+}
+
+function createCrmEngineRuntime<
+  TRuntime extends { integration: { id: string } },
+  TActionInput extends { action: string },
+  TResult extends { action: string },
+>(input: {
+  adapter: CrmChatAdapter<TRuntime, TActionInput, TResult>;
+  runtime: TRuntime;
+  organizationId: string;
+  userId: string;
+  agentId: string;
+  action: PlannedAction;
+  actionInput: TActionInput;
+  requiresApproval: boolean;
+}) {
+  const context: CrmEngineContext<TRuntime, TActionInput, TResult> = {
+    adapter: input.adapter,
+    runtime: input.runtime,
+    organizationId: input.organizationId,
+    userId: input.userId,
+    agentId: input.agentId,
+  };
+  const definition = buildActionDefinition(
+    input.action,
+    input.actionInput,
+    input.requiresApproval
+  );
+
+  return {
+    context,
+    initialState: {
+      executionResult: null,
+      formattedResult: null,
+    } satisfies CrmEngineState<TResult>,
+    actions: createActionRegistry<
+      CrmEngineContext<TRuntime, TActionInput, TResult>,
+      CrmEngineState<TResult>
+    >([definition as ActionDefinition<Record<string, unknown>>]),
+    engineSteps: createEngineStepRegistry<
+      CrmEngineContext<TRuntime, TActionInput, TResult>,
+      CrmEngineState<TResult>
+    >([
+      [
+        CRM_ENGINE_STEP_CHECK_ACTION_ALLOWED,
+        async ({ context, resolvedParams, state }) => {
+          const enabledRuntime = context.adapter.isActionAllowed(
+            context.runtime,
+            resolvedParams.action as TActionInput["action"]
+          );
+
+          if (enabledRuntime.error || !enabledRuntime.data) {
+            throw new CrmActionNotAllowedError(
+              enabledRuntime.error ?? "La accion CRM ya no esta disponible."
+            );
+          }
+
+          return state;
+        },
+      ],
+      [
+        CRM_ENGINE_STEP_EXECUTE_ACTION,
+        async ({ context, resolvedParams, state }) => {
+          const execution = await context.adapter.executeAction({
+            runtime: context.runtime,
+            organizationId: context.organizationId,
+            userId: context.userId,
+            agentId: context.agentId,
+            actionInput: resolvedParams as TActionInput,
+          });
+
+          if (execution.error || !execution.data) {
+            throw new Error(
+              execution.error ?? `No se pudo ejecutar la accion en ${context.adapter.provider}.`
+            );
+          }
+
+          return {
+            ...state,
+            executionResult: execution.data,
+          };
+        },
+      ],
+      [
+        CRM_ENGINE_STEP_FORMAT_RESULT,
+        async ({ context, state }) => {
+          if (!state.executionResult) {
+            throw new Error("CRM engine missing execution result.");
+          }
+
+          return {
+            ...state,
+            formattedResult: context.adapter.formatResultForPrompt(state.executionResult),
+          };
+        },
+      ],
+    ]),
+  };
+}
+
+async function executePlannedCrmAction<
+  TRuntime extends { integration: { id: string } },
+  TActionInput extends { action: string },
+  TResult extends { action: string },
+>(input: {
+  adapter: CrmChatAdapter<TRuntime, TActionInput, TResult>;
+  runtime: TRuntime;
+  organizationId: string;
+  userId: string;
+  agentId: string;
+  plannerDecision: Extract<CrmPlannerDecision<TActionInput>, { kind: "action" }>;
+  forceSyncExecution?: boolean;
+}): Promise<RunActionResult<Record<string, unknown>, CrmEngineState<TResult>>> {
+  const actionPlan = buildActionPlan(input.adapter.provider, input.plannerDecision);
+  const plannedAction = actionPlan.actions[0];
+
+  if (!plannedAction) {
+    throw new Error("CRM engine expected a planned action.");
+  }
+
+  const engineRuntime = createCrmEngineRuntime({
+    adapter: input.adapter,
+    runtime: input.runtime,
+    organizationId: input.organizationId,
+    userId: input.userId,
+    agentId: input.agentId,
+    action: plannedAction,
+    actionInput: input.plannerDecision.input,
+    requiresApproval:
+      input.forceSyncExecution === true
+        ? false
+        : input.plannerDecision.requiresConfirmation ||
+          input.adapter.isWriteAction(input.plannerDecision.input.action),
+  });
+
+  return runAction({
+    action: plannedAction,
+    context: engineRuntime.context,
+    initialState: engineRuntime.initialState,
+    actions: engineRuntime.actions,
+    engineSteps: engineRuntime.engineSteps,
+    evaluatePolicy:
+      input.forceSyncExecution === true
+        ? () => "execute"
+        : createActionPolicyEvaluator<Record<string, unknown>>(),
+  });
 }
 
 function isStrictConfirmation(
@@ -234,11 +509,6 @@ export async function orchestrateCrmForChat<
         };
       }
 
-      const enabledRuntime = input.adapter.isActionAllowed(
-        usableRuntime.data,
-        conversationState.pendingAction.actionInput.action
-      );
-
       await input.adapter.writeConversationState({
         conversationId: input.conversation.id,
         agentId: input.agentId,
@@ -247,43 +517,52 @@ export async function orchestrateCrmForChat<
         pendingAction: null,
       });
 
-      if (enabledRuntime.error || !enabledRuntime.data) {
+      try {
+        const execution = await executePlannedCrmAction({
+          adapter: input.adapter,
+          runtime: usableRuntime.data,
+          organizationId: input.organizationId,
+          userId: input.userId,
+          agentId: input.agentId,
+          plannerDecision: {
+            kind: "action",
+            requiresConfirmation: false,
+            input: conversationState.pendingAction.actionInput,
+          },
+          forceSyncExecution: true,
+        });
+
+        if (execution.status !== "executed") {
+          return {
+            kind: "respond_now",
+            content: `No se pudo ejecutar la accion en ${input.adapter.provider}.`,
+          };
+        }
+
+        const toolContext = execution.state.formattedResult ?? "";
+        await input.adapter.writeConversationState({
+          conversationId: input.conversation.id,
+          agentId: input.agentId,
+          organizationId: input.organizationId,
+          userId: input.userId,
+          recentToolContext: toolContext,
+        });
+
+        return {
+          kind: "continue",
+          toolContext,
+          hasUsableRuntime: true,
+          runtime: usableRuntime.data,
+        };
+      } catch (error) {
         return {
           kind: "respond_now",
-          content: enabledRuntime.error ?? "La accion CRM ya no esta disponible.",
+          content:
+            error instanceof Error
+              ? error.message
+              : `No se pudo ejecutar la accion en ${input.adapter.provider}.`,
         };
       }
-
-      const execution = await input.adapter.executeAction({
-        runtime: enabledRuntime.data,
-        organizationId: input.organizationId,
-        userId: input.userId,
-        agentId: input.agentId,
-        actionInput: conversationState.pendingAction.actionInput,
-      });
-
-      if (execution.error || !execution.data) {
-        return {
-          kind: "respond_now",
-          content: execution.error ?? `No se pudo ejecutar la accion en ${input.adapter.provider}.`,
-        };
-      }
-
-      const toolContext = input.adapter.formatResultForPrompt(execution.data);
-      await input.adapter.writeConversationState({
-        conversationId: input.conversation.id,
-        agentId: input.agentId,
-        organizationId: input.organizationId,
-        userId: input.userId,
-        recentToolContext: toolContext,
-      });
-
-      return {
-        kind: "continue",
-        toolContext,
-        hasUsableRuntime: true,
-        runtime: usableRuntime.data,
-      };
     } else {
       await input.adapter.writeConversationState({
         conversationId: input.conversation.id,
@@ -341,50 +620,71 @@ export async function orchestrateCrmForChat<
       };
     }
 
-    const enabledRuntime = input.adapter.isActionAllowed(
-      usableRuntime.data,
-      plannerDecision.input.action
-    );
-    if (enabledRuntime.error || !enabledRuntime.data) {
-      return {
-        kind: "continue",
-        hasUsableRuntime: true,
+    try {
+      const execution = await executePlannedCrmAction({
+        adapter: input.adapter,
         runtime: usableRuntime.data,
-      };
-    }
-
-    if (
-      plannerDecision.requiresConfirmation ||
-      input.adapter.isWriteAction(plannerDecision.input.action)
-    ) {
-      const summary = input.adapter.buildConfirmationSummary(plannerDecision.input);
-      const pendingAction = createPendingCrmAction({
-        provider: input.adapter.provider,
-        toolName: input.adapter.toolName,
-        integrationId: usableRuntime.data.integration.id,
-        initiatedBy: input.userId,
-        summary,
-        actionInput: plannerDecision.input,
-        ttlMs: pendingActionTtlMs,
+        organizationId: input.organizationId,
+        userId: input.userId,
+        agentId: input.agentId,
+        plannerDecision,
       });
 
-      if (input.adapter.createApprovalRequest) {
-        const approvalRequest = await input.adapter.createApprovalRequest({
-          runtime: usableRuntime.data,
-          conversationId: input.conversation.id,
-          organizationId: input.organizationId,
-          userId: input.userId,
-          agentId: input.agentId,
-          actionInput: plannerDecision.input,
+      if (execution.status === "policy_blocked") {
+        if (execution.policyDecision !== "enqueue_approval") {
+          return {
+            kind: "continue",
+            hasUsableRuntime: true,
+            runtime: usableRuntime.data,
+          };
+        }
+
+        const summary = input.adapter.buildConfirmationSummary(plannerDecision.input);
+        const pendingAction = createPendingCrmAction({
+          provider: input.adapter.provider,
+          toolName: input.adapter.toolName,
+          integrationId: usableRuntime.data.integration.id,
+          initiatedBy: input.userId,
           summary,
+          actionInput: plannerDecision.input,
+          ttlMs: pendingActionTtlMs,
         });
 
-        if (approvalRequest.error || !approvalRequest.data) {
+        if (input.adapter.createApprovalRequest) {
+          const approvalRequest = await input.adapter.createApprovalRequest({
+            runtime: usableRuntime.data,
+            conversationId: input.conversation.id,
+            organizationId: input.organizationId,
+            userId: input.userId,
+            agentId: input.agentId,
+            actionInput: plannerDecision.input,
+            summary,
+          });
+
+          if (approvalRequest.error || !approvalRequest.data) {
+            return {
+              kind: "respond_now",
+              content:
+                approvalRequest.error ??
+                `No se pudo preparar la aprobacion para ${input.adapter.provider}.`,
+            };
+          }
+
+          await input.adapter.writeConversationState({
+            conversationId: input.conversation.id,
+            agentId: input.agentId,
+            organizationId: input.organizationId,
+            userId: input.userId,
+            pendingAction,
+          });
+
           return {
             kind: "respond_now",
-            content:
-              approvalRequest.error ??
-              `No se pudo preparar la aprobacion para ${input.adapter.provider}.`,
+            content: buildApprovalInboxResponse({
+              provider: input.adapter.provider,
+              summary,
+              expiresAt: approvalRequest.data.expiresAt,
+            }),
           };
         }
 
@@ -398,47 +698,31 @@ export async function orchestrateCrmForChat<
 
         return {
           kind: "respond_now",
-          content: buildApprovalInboxResponse({
-            provider: input.adapter.provider,
-            summary,
-            expiresAt: approvalRequest.data.expiresAt,
-          }),
+          content: buildConfirmationResponse(pendingAction),
         };
       }
 
-      await input.adapter.writeConversationState({
-        conversationId: input.conversation.id,
-        agentId: input.agentId,
-        organizationId: input.organizationId,
-        userId: input.userId,
-        pendingAction,
+      toolResults.push({
+        action: plannerDecision.input.action,
+        result: execution.state.formattedResult ?? "",
       });
+    } catch (error) {
+      if (error instanceof CrmActionNotAllowedError) {
+        return {
+          kind: "continue",
+          hasUsableRuntime: true,
+          runtime: usableRuntime.data,
+        };
+      }
 
       return {
         kind: "respond_now",
-        content: buildConfirmationResponse(pendingAction),
+        content:
+          error instanceof Error
+            ? error.message
+            : `No se pudo consultar ${input.adapter.provider}.`,
       };
     }
-
-    const execution = await input.adapter.executeAction({
-      runtime: enabledRuntime.data,
-      organizationId: input.organizationId,
-      userId: input.userId,
-      agentId: input.agentId,
-      actionInput: plannerDecision.input,
-    });
-
-    if (execution.error || !execution.data) {
-      return {
-        kind: "respond_now",
-        content: execution.error ?? `No se pudo consultar ${input.adapter.provider}.`,
-      };
-    }
-
-    toolResults.push({
-      action: execution.data.action,
-      result: input.adapter.formatResultForPrompt(execution.data),
-    });
   }
 
   if (toolResults.length > 0) {

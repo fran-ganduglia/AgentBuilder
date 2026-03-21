@@ -247,15 +247,13 @@ Execution rules:
 ### Order
 
 1. Shared Phase 0 foundation plus approved migration
-2. HubSpot and Salesforce
+2. Salesforce
 3. Google Calendar
 4. Gmail
 5. WhatsApp cross-system
-6. Slack and Teams
-7. Notion
-8. Zapier
+6. Slack 
 
-### HubSpot and Salesforce first
+### Salesforce first
 
 These ecosystems already have the nearest thing to assisted writes, so they should be the first to migrate from chat confirmation into the common async engine, approval inbox, and step idempotency model.
 
@@ -321,26 +319,6 @@ Phases:
 - `v2`: saga with CRM, Gmail, and WhatsApp
 - `v3`: hybrid automated booking
 
-### HubSpot
-
-Current baseline:
-
-- lookup plus create/update for contacts, companies, deals, tasks, and meetings
-- assisted writes confirmed in chat
-
-Missing before workflow readiness:
-
-- move writes into the async engine
-- approval inbox
-- real create/update idempotency
-- instance-level config for pipeline, owner, and thresholds
-- triggers for new lead, stale deal, and overdue task
-- documented compensation or manual repair paths
-
-Phases:
-
-- `v1.5`: workflow-ready with approval inbox
-- `v2`: automated reactivation and follow-up
 
 ### Salesforce
 
@@ -406,62 +384,6 @@ Phases:
 - `v1`: internal channel
 - `v2`: helpdesk and secondary approval surface
 
-### Teams
-
-Current baseline:
-
-- no native integration yet
-
-Missing before workflow readiness:
-
-- Graph/app registration
-- events
-- read/write support
-- enterprise permission handling
-
-Phases:
-
-- `v1`: internal channel
-- `v2`: incident workflows and secondary approval surface
-
-### Notion
-
-Current baseline:
-
-- no native integration yet
-
-Missing before workflow readiness:
-
-- OAuth
-- structured retrieval
-- page/database row create/update
-- use as both knowledge source and result sink
-
-Phases:
-
-- `v1`: reliable read support
-- `v2`: write-back for summaries, notes, and playbooks
-
-### Zapier
-
-Decision:
-
-- remains late
-
-Role:
-
-- expansion layer once native triggers and actions are mature
-
-Missing before workflow readiness:
-
-- signed endpoints
-- trigger/action bridge
-- bridge idempotency and auditability
-
-Phases:
-
-- `v1`: expose triggers and actions
-- `v2`: bridge toward non-native ecosystems
 
 ## Ecosystem readiness targets
 

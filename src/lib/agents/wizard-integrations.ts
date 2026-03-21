@@ -1,14 +1,22 @@
-﻿export const WIZARD_INTEGRATION_IDS = [
+export const WIZARD_INTEGRATION_IDS = [
   "whatsapp",
   "salesforce",
   "gmail",
   "google_calendar",
+  "google_sheets",
   "slack",
 ] as const;
 
 export type WizardIntegrationId = (typeof WIZARD_INTEGRATION_IDS)[number];
 
-export type WizardIntegrationTheme = "emerald" | "sky" | "orange" | "rose" | "violet" | "slate" | "amber";
+export type WizardIntegrationTheme =
+  | "emerald"
+  | "sky"
+  | "orange"
+  | "rose"
+  | "violet"
+  | "slate"
+  | "amber";
 
 export type WizardIntegration = {
   id: WizardIntegrationId;
@@ -53,6 +61,14 @@ export const WIZARD_INTEGRATIONS: WizardIntegration[] = [
     requiresConnection: true,
   },
   {
+    id: "google_sheets",
+    name: "Google Sheets",
+    description: "Planillas compartidas, tablas y rangos",
+    theme: "rose",
+    available: true,
+    requiresConnection: true,
+  },
+  {
     id: "slack",
     name: "Slack",
     description: "Canales internos y helpdesk de equipo",
@@ -66,11 +82,17 @@ export const AVAILABLE_WIZARD_INTEGRATION_IDS = WIZARD_INTEGRATIONS
   .filter((integration) => integration.available)
   .map((integration) => integration.id) as WizardIntegrationId[];
 
-export function getWizardIntegrationById(integrationId: WizardIntegrationId): WizardIntegration {
-  return WIZARD_INTEGRATIONS.find((integration) => integration.id === integrationId) ?? WIZARD_INTEGRATIONS[0];
+export function getWizardIntegrationById(
+  integrationId: WizardIntegrationId
+): WizardIntegration {
+  return (
+    WIZARD_INTEGRATIONS.find((integration) => integration.id === integrationId) ??
+    WIZARD_INTEGRATIONS[0]
+  );
 }
 
-export function isWizardIntegrationAvailable(integrationId: WizardIntegrationId): boolean {
+export function isWizardIntegrationAvailable(
+  integrationId: WizardIntegrationId
+): boolean {
   return AVAILABLE_WIZARD_INTEGRATION_IDS.includes(integrationId);
 }
-

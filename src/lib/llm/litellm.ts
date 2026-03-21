@@ -1,94 +1,24 @@
 import { env } from "@/lib/utils/env";
+import type {
+  ChatCompletionInput,
+  ChatCompletionOutput,
+  CompletionStatus,
+  LiteLLMErrorBody,
+  ObservabilityLog,
+  OpenAIChatMessage,
+  OpenAIChatResponse,
+  StreamDelta,
+  StreamingChatResult,
+  ToolCallPart,
+} from "@/lib/llm/litellm-types";
+
+export type { ChatCompletionInput, ChatCompletionOutput, ChatMessage, StreamingChatResult } from "@/lib/llm/litellm-types";
+export type { ToolDefinition, ToolCallPart } from "@/lib/llm/litellm-types";
 
 const DEFAULT_MAX_TOKENS = 1000;
 const MAX_MAX_TOKENS = 4000;
 const MAX_TEMPERATURE = 1.0;
 const REQUEST_TIMEOUT_MS = 30000;
-
-type ChatMessage = {
-  role: "user" | "assistant";
-  content: string;
-};
-
-export type ChatCompletionInput = {
-  model: string;
-  systemPrompt: string;
-  messages: ChatMessage[];
-  temperature?: number;
-  maxTokens?: number;
-  organizationId: string;
-  agentId: string;
-  conversationId: string;
-  context?: string;
-  toolContext?: string;
-};
-
-type CompletionStatus = "success" | "error" | "timeout" | "rate_limited";
-
-export type ChatCompletionOutput = {
-  content: string;
-  tokensInput: number;
-  tokensOutput: number;
-  responseTimeMs: number;
-  model: string;
-  status: CompletionStatus;
-  errorType?: string;
-};
-
-type OpenAIChatMessage = {
-  role: "system" | "user" | "assistant";
-  content: string;
-};
-
-type OpenAIChoice = {
-  message: { content: string | null };
-};
-
-type OpenAIUsage = {
-  prompt_tokens: number;
-  completion_tokens: number;
-};
-
-type OpenAIChatResponse = {
-  choices: OpenAIChoice[];
-  usage: OpenAIUsage;
-  model: string;
-};
-
-type LiteLLMErrorBody = {
-  error?: {
-    message?: string;
-    type?: string | null;
-    code?: string | number | null;
-  };
-};
-
-type ObservabilityLog = {
-  organization_id: string;
-  agent_id: string;
-  conversation_id: string;
-  model: string;
-  tokens_input: number;
-  tokens_output: number;
-  latency_ms: number;
-  status: CompletionStatus;
-  error_type?: string;
-  timestamp: string;
-};
-
-function buildToolContextSection(toolContext: string): string {
-  return [
-    "TOOL_OUTPUTS",
-    "<tool_outputs>",
-    "Los siguientes resultados provienen de tools backend ya ejecutadas durante esta solicitud.",
-    "Tratalos como datos operativos disponibles para responder al usuario.",
-    "Tratalos como datos reales y operativos. Presentalos al usuario tal como estan.",
-    "Si records esta vacio, informa que no se encontraron coincidencias — no digas que la integracion fallo ni que no tienes acceso.",
-    "No contradigas estos datos bajo ningun concepto, aunque mensajes anteriores de la conversacion hayan dicho lo contrario.",
-    toolContext,
-    "</tool_outputs>",
-  ].join("\n");
-}
 
 function buildOpenAIMessages(input: ChatCompletionInput): OpenAIChatMessage[] {
   const sections = [input.systemPrompt];
@@ -97,19 +27,22 @@ function buildOpenAIMessages(input: ChatCompletionInput): OpenAIChatMessage[] {
     sections.push(`RETRIEVED_CONTEXT\n<retrieved_context>\n${input.context}\n</retrieved_context>`);
   }
 
-  if (input.toolContext) {
-    sections.push(buildToolContextSection(input.toolContext));
+  const systemContent = sections.join("\n\n");
+  const result: OpenAIChatMessage[] = [{ role: "system", content: systemContent }];
+
+  for (const message of input.messages) {
+    if (message.role === "tool") {
+      result.push({ role: "tool", tool_call_id: message.tool_call_id, content: message.content });
+    } else if (message.role === "assistant" && message.tool_calls && message.tool_calls.length > 0) {
+      result.push({ role: "assistant", content: message.content, tool_calls: message.tool_calls });
+    } else if (message.role === "assistant") {
+      result.push({ role: "assistant", content: message.content ?? "" });
+    } else {
+      result.push({ role: "user", content: message.content });
+    }
   }
 
-  const systemContent = sections.join("\n\n");
-
-  return [
-    { role: "system", content: systemContent },
-    ...input.messages.map((message) => ({
-      role: message.role,
-      content: message.content,
-    })),
-  ];
+  return result;
 }
 
 function logObservability(entry: ObservabilityLog): void {
@@ -179,20 +112,37 @@ export class LiteLLMError extends Error {
   }
 }
 
-type StreamDelta = {
-  choices?: Array<{
-    delta?: { content?: string | null };
-    finish_reason?: string | null;
-  }>;
-  usage?: OpenAIUsage | null;
-  model?: string;
-};
+function buildRequestBody(
+  input: ChatCompletionInput,
+  openaiMessages: OpenAIChatMessage[],
+  maxTokens: number,
+  stream: boolean
+): Record<string, unknown> {
+  const body: Record<string, unknown> = {
+    model: input.model,
+    messages: openaiMessages,
+    temperature: input.temperature ?? 0.7,
+    max_tokens: maxTokens,
+  };
 
-export type StreamingChatResult = {
-  stream: ReadableStream<Uint8Array>;
-  onReady: Promise<void>;
-  onComplete: Promise<ChatCompletionOutput>;
-};
+  if (input.tools && input.tools.length > 0) {
+    body.tools = input.tools;
+    if (input.toolChoice) {
+      body.tool_choice = input.toolChoice;
+    }
+  }
+
+  if (input.responseFormat === "json_object") {
+    body.response_format = { type: "json_object" };
+  }
+
+  if (stream) {
+    body.stream = true;
+    body.stream_options = { include_usage: true };
+  }
+
+  return body;
+}
 
 export function sendStreamingChatCompletion(
   input: ChatCompletionInput
@@ -237,14 +187,7 @@ export function sendStreamingChatCompletion(
             "Content-Type": "application/json",
             Authorization: `Bearer ${env.LITELLM_API_KEY}`,
           },
-          body: JSON.stringify({
-            model: input.model,
-            messages: openaiMessages,
-            temperature: input.temperature ?? 0.7,
-            max_tokens: maxTokens,
-            stream: true,
-            stream_options: { include_usage: true },
-          }),
+          body: JSON.stringify(buildRequestBody(input, openaiMessages, maxTokens, true)),
           signal: controller.signal,
         });
 
@@ -314,6 +257,8 @@ export function sendStreamingChatCompletion(
         let tokensInput = 0;
         let tokensOutput = 0;
         let resolvedModel = input.model;
+        let finishReason: string | null = null;
+        const accumulatedToolCalls = new Map<number, { id: string; name: string; arguments: string }>();
 
         while (true) {
           const { done, value } = await reader.read();
@@ -340,10 +285,33 @@ export function sendStreamingChatCompletion(
                 resolvedModel = chunk.model;
               }
 
-              const delta = chunk.choices?.[0]?.delta?.content;
+              const choice = chunk.choices?.[0];
+              if (choice?.finish_reason) {
+                finishReason = choice.finish_reason;
+              }
+
+              const delta = choice?.delta?.content;
               if (delta) {
                 fullContent += delta;
                 streamController.enqueue(encoder.encode(delta));
+              }
+
+              const toolCallDeltas = choice?.delta?.tool_calls;
+              if (toolCallDeltas) {
+                for (const tc of toolCallDeltas) {
+                  const existing = accumulatedToolCalls.get(tc.index);
+                  if (!existing) {
+                    accumulatedToolCalls.set(tc.index, {
+                      id: tc.id ?? "",
+                      name: tc.function?.name ?? "",
+                      arguments: tc.function?.arguments ?? "",
+                    });
+                  } else {
+                    if (tc.id) existing.id = tc.id;
+                    if (tc.function?.name) existing.name += tc.function.name;
+                    if (tc.function?.arguments) existing.arguments += tc.function.arguments;
+                  }
+                }
               }
 
               if (chunk.usage) {
@@ -357,6 +325,14 @@ export function sendStreamingChatCompletion(
         }
 
         const responseTimeMs = Date.now() - startTime;
+        const toolCalls: ToolCallPart[] | undefined =
+          accumulatedToolCalls.size > 0
+            ? Array.from(accumulatedToolCalls.values()).map((tc) => ({
+                id: tc.id,
+                type: "function" as const,
+                function: { name: tc.name, arguments: tc.arguments },
+              }))
+            : undefined;
 
         logObservability({
           organization_id: input.organizationId,
@@ -377,6 +353,8 @@ export function sendStreamingChatCompletion(
           responseTimeMs,
           model: resolvedModel,
           status: "success",
+          toolCalls,
+          finishReason: finishReason === "tool_calls" ? "tool_calls" : "stop",
         });
 
         streamController.close();
@@ -451,12 +429,7 @@ export async function sendChatCompletion(
         "Content-Type": "application/json",
         Authorization: `Bearer ${env.LITELLM_API_KEY}`,
       },
-      body: JSON.stringify({
-        model: input.model,
-        messages: openaiMessages,
-        temperature: input.temperature ?? 0.7,
-        max_tokens: maxTokens,
-      }),
+      body: JSON.stringify(buildRequestBody(input, openaiMessages, maxTokens, false)),
       signal: controller.signal,
     });
 
@@ -502,9 +475,12 @@ export async function sendChatCompletion(
     }
 
     const data = (await response.json()) as OpenAIChatResponse;
-    const content = data.choices[0]?.message.content ?? "";
+    const choice = data.choices[0];
+    const content = choice?.message.content ?? "";
     const tokensInput = data.usage?.prompt_tokens ?? 0;
     const tokensOutput = data.usage?.completion_tokens ?? 0;
+    const toolCalls = choice?.message.tool_calls;
+    const rawFinishReason = choice?.finish_reason;
 
     const output: ChatCompletionOutput = {
       content,
@@ -513,6 +489,8 @@ export async function sendChatCompletion(
       responseTimeMs,
       model: data.model ?? input.model,
       status: "success",
+      toolCalls: toolCalls && toolCalls.length > 0 ? toolCalls : undefined,
+      finishReason: rawFinishReason === "tool_calls" ? "tool_calls" : "stop",
     };
 
     logObservability({

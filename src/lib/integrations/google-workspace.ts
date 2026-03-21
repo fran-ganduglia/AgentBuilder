@@ -30,7 +30,15 @@ export type GoogleSurfaceOperationalView = {
 };
 
 function getSurfaceTitle(surface: GoogleSurface): string {
-  return surface === "gmail" ? "Gmail" : "Google Calendar";
+  if (surface === "gmail") {
+    return "Gmail";
+  }
+
+  if (surface === "google_sheets") {
+    return "Google Sheets";
+  }
+
+  return "Google Calendar";
 }
 
 export function getGoogleSurfaceOperationalView(
@@ -113,7 +121,9 @@ export function getGoogleSurfaceOperationalView(
     detail:
       surface === "gmail"
         ? "La conexion y los scopes de Gmail ya permiten lectura real y writes asistidas via approval inbox para borradores, labels y archivado."
-        : "La conexion y los scopes de esta superficie ya quedaron preparados. La ejecucion en chat llegara en una proxima actualizacion.",
+        : surface === "google_sheets"
+          ? "La conexion y los scopes de esta superficie ya permiten lecturas directas en chat y operaciones completas de estructura, formato y escritura mediadas por approval inbox."
+          : "La conexion y los scopes de esta superficie ya quedaron preparados. La ejecucion en chat llegara en una proxima actualizacion.",
     status: baseView.status,
     tone: baseView.tone,
     label: "Configurada",

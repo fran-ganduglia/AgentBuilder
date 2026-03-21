@@ -2,7 +2,6 @@ import type { AgentConnection, AgentStatus } from "@/types/app";
 
 export type AgentConnectionClassification =
   | "local"
-  | "remote_managed"
   | "channel_connected";
 
 export type AgentConnectionSummary = {
@@ -22,7 +21,7 @@ export function classifyAgentConnection(
   }
 
   if (connection.provider_type === "openai") {
-    return "remote_managed";
+    return "local";
   }
 
   if (connection.provider_type === "whatsapp") {
@@ -36,15 +35,6 @@ export function buildAgentConnectionSummary(
   connection: ProviderTypeCarrier
 ): AgentConnectionSummary {
   const classification = classifyAgentConnection(connection);
-
-  if (classification === "remote_managed") {
-    return {
-      hasConnection: true,
-      providerType: connection?.provider_type ?? null,
-      classification,
-      label: "OpenAI conectado",
-    };
-  }
 
   if (classification === "channel_connected") {
     return {
@@ -64,9 +54,10 @@ export function buildAgentConnectionSummary(
 }
 
 export function canUseSandboxForConnection(
-  summary: AgentConnectionSummary
+  _summary: AgentConnectionSummary
 ): boolean {
-  return summary.classification !== "remote_managed";
+  void _summary;
+  return true;
 }
 
 export function canUseLiveLocalChat(
@@ -84,9 +75,10 @@ export function canAccessQaPanel(
 }
 
 export function isRemoteManagedConnection(
-  summary: AgentConnectionSummary
+  _summary: AgentConnectionSummary
 ): boolean {
-  return summary.classification === "remote_managed";
+  void _summary;
+  return false;
 }
 
 export function isChannelConnectedAgent(

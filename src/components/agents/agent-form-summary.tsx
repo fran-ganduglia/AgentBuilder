@@ -27,10 +27,6 @@ type AgentWorkspaceSummaryProps = {
 };
 
 function getSyncDescription(summary: AgentConnectionSummary): string {
-  if (summary.classification === "remote_managed") {
-    return "Nombre, descripcion, modelo, temperatura y prompt se reflejan tambien en el assistant remoto cuando se guardan cambios autorizados.";
-  }
-
   if (summary.classification === "channel_connected") {
     return "Este agente sigue siendo local, pero el inbox QA recibe conversaciones reales del numero WhatsApp conectado en modo solo lectura.";
   }

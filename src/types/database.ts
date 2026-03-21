@@ -1,4 +1,4 @@
-export type Json =
+﻿export type Json =
   | string
   | number
   | boolean
@@ -14,6 +14,78 @@ export type Database = {
   }
   public: {
     Tables: {
+      agent_automations: {
+        Row: {
+          action_config: Json
+          action_type: string
+          agent_id: string
+          condition_config: Json
+          created_at: string
+          deleted_at: string | null
+          description: string | null
+          id: string
+          is_enabled: boolean
+          last_run_at: string | null
+          last_run_status: string | null
+          name: string
+          organization_id: string
+          trigger_config: Json
+          trigger_type: string
+          updated_at: string
+        }
+        Insert: {
+          action_config?: Json
+          action_type: string
+          agent_id: string
+          condition_config?: Json
+          created_at?: string
+          deleted_at?: string | null
+          description?: string | null
+          id?: string
+          is_enabled?: boolean
+          last_run_at?: string | null
+          last_run_status?: string | null
+          name: string
+          organization_id: string
+          trigger_config?: Json
+          trigger_type: string
+          updated_at?: string
+        }
+        Update: {
+          action_config?: Json
+          action_type?: string
+          agent_id?: string
+          condition_config?: Json
+          created_at?: string
+          deleted_at?: string | null
+          description?: string | null
+          id?: string
+          is_enabled?: boolean
+          last_run_at?: string | null
+          last_run_status?: string | null
+          name?: string
+          organization_id?: string
+          trigger_config?: Json
+          trigger_type?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "agent_automations_agent_id_organization_id_fkey"
+            columns: ["agent_id", "organization_id"]
+            isOneToOne: false
+            referencedRelation: "agents"
+            referencedColumns: ["id", "organization_id"]
+          },
+          {
+            foreignKeyName: "agent_automations_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       agent_connections: {
         Row: {
           agent_id: string
@@ -81,78 +153,6 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "organizations"
             referencedColumns: ["id"]
-          },
-        ]
-      }
-      agent_automations: {
-        Row: {
-          id: string
-          organization_id: string
-          agent_id: string
-          name: string
-          description: string | null
-          is_enabled: boolean
-          trigger_type: string
-          trigger_config: Json
-          action_type: string
-          action_config: Json
-          condition_config: Json
-          last_run_at: string | null
-          last_run_status: string | null
-          created_at: string
-          updated_at: string
-          deleted_at: string | null
-        }
-        Insert: {
-          id?: string
-          organization_id: string
-          agent_id: string
-          name: string
-          description?: string | null
-          is_enabled?: boolean
-          trigger_type: string
-          trigger_config?: Json
-          action_type: string
-          action_config?: Json
-          condition_config?: Json
-          last_run_at?: string | null
-          last_run_status?: string | null
-          created_at?: string
-          updated_at?: string
-          deleted_at?: string | null
-        }
-        Update: {
-          id?: string
-          organization_id?: string
-          agent_id?: string
-          name?: string
-          description?: string | null
-          is_enabled?: boolean
-          trigger_type?: string
-          trigger_config?: Json
-          action_type?: string
-          action_config?: Json
-          condition_config?: Json
-          last_run_at?: string | null
-          last_run_status?: string | null
-          created_at?: string
-          updated_at?: string
-          deleted_at?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "agent_automations_organization_id_fkey"
-            columns: ["organization_id"]
-            isOneToOne: false
-            referencedRelation: "organizations"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "agent_automations_agent_id_organization_id_fkey"
-            columns: ["agent_id", "organization_id"]
-            isOneToOne: false
-            referencedRelation: "agents"
-            referencedColumns: ["id", "organization_id"]
           },
         ]
       }
@@ -407,6 +407,108 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "organizations"
             referencedColumns: ["id"]
+          },
+        ]
+      }
+      approval_items: {
+        Row: {
+          action: string
+          agent_id: string
+          context: Json
+          created_at: string
+          expires_at: string
+          id: string
+          organization_id: string
+          payload_summary: Json
+          provider: string
+          requested_by: string | null
+          resolution_note: string | null
+          resolved_at: string | null
+          resolved_by: string | null
+          risk_level: string
+          status: string
+          summary: string
+          updated_at: string
+          workflow_run_id: string
+          workflow_step_id: string
+        }
+        Insert: {
+          action: string
+          agent_id: string
+          context?: Json
+          created_at?: string
+          expires_at: string
+          id?: string
+          organization_id: string
+          payload_summary?: Json
+          provider: string
+          requested_by?: string | null
+          resolution_note?: string | null
+          resolved_at?: string | null
+          resolved_by?: string | null
+          risk_level?: string
+          status?: string
+          summary: string
+          updated_at?: string
+          workflow_run_id: string
+          workflow_step_id: string
+        }
+        Update: {
+          action?: string
+          agent_id?: string
+          context?: Json
+          created_at?: string
+          expires_at?: string
+          id?: string
+          organization_id?: string
+          payload_summary?: Json
+          provider?: string
+          requested_by?: string | null
+          resolution_note?: string | null
+          resolved_at?: string | null
+          resolved_by?: string | null
+          risk_level?: string
+          status?: string
+          summary?: string
+          updated_at?: string
+          workflow_run_id?: string
+          workflow_step_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "approval_items_agent_id_organization_id_fkey"
+            columns: ["agent_id", "organization_id"]
+            isOneToOne: false
+            referencedRelation: "agents"
+            referencedColumns: ["id", "organization_id"]
+          },
+          {
+            foreignKeyName: "approval_items_requested_by_organization_id_fkey"
+            columns: ["requested_by", "organization_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id", "organization_id"]
+          },
+          {
+            foreignKeyName: "approval_items_resolved_by_organization_id_fkey"
+            columns: ["resolved_by", "organization_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id", "organization_id"]
+          },
+          {
+            foreignKeyName: "approval_items_workflow_run_id_organization_id_fkey"
+            columns: ["workflow_run_id", "organization_id"]
+            isOneToOne: false
+            referencedRelation: "workflow_runs"
+            referencedColumns: ["id", "organization_id"]
+          },
+          {
+            foreignKeyName: "approval_items_workflow_step_id_organization_id_fkey"
+            columns: ["workflow_step_id", "organization_id"]
+            isOneToOne: false
+            referencedRelation: "workflow_steps"
+            referencedColumns: ["id", "organization_id"]
           },
         ]
       }
@@ -1273,6 +1375,7 @@ export type Database = {
           created_at: string
           id: string
           llm_model: string | null
+          metadata: Json | null
           organization_id: string
           response_time_ms: number | null
           role: string
@@ -1285,6 +1388,7 @@ export type Database = {
           created_at?: string
           id?: string
           llm_model?: string | null
+          metadata?: Json | null
           organization_id: string
           response_time_ms?: number | null
           role: string
@@ -1297,6 +1401,7 @@ export type Database = {
           created_at?: string
           id?: string
           llm_model?: string | null
+          metadata?: Json | null
           organization_id?: string
           response_time_ms?: number | null
           role?: string
@@ -1320,6 +1425,7 @@ export type Database = {
           created_at: string
           id: string
           llm_model: string | null
+          metadata: Json | null
           organization_id: string
           response_time_ms: number | null
           role: string
@@ -1332,6 +1438,7 @@ export type Database = {
           created_at?: string
           id?: string
           llm_model?: string | null
+          metadata?: Json | null
           organization_id: string
           response_time_ms?: number | null
           role: string
@@ -1344,6 +1451,7 @@ export type Database = {
           created_at?: string
           id?: string
           llm_model?: string | null
+          metadata?: Json | null
           organization_id?: string
           response_time_ms?: number | null
           role?: string
@@ -1359,6 +1467,7 @@ export type Database = {
           created_at: string
           id: string
           llm_model: string | null
+          metadata: Json | null
           organization_id: string
           response_time_ms: number | null
           role: string
@@ -1371,6 +1480,7 @@ export type Database = {
           created_at?: string
           id?: string
           llm_model?: string | null
+          metadata?: Json | null
           organization_id: string
           response_time_ms?: number | null
           role: string
@@ -1383,6 +1493,7 @@ export type Database = {
           created_at?: string
           id?: string
           llm_model?: string | null
+          metadata?: Json | null
           organization_id?: string
           response_time_ms?: number | null
           role?: string
@@ -1398,6 +1509,7 @@ export type Database = {
           created_at: string
           id: string
           llm_model: string | null
+          metadata: Json | null
           organization_id: string
           response_time_ms: number | null
           role: string
@@ -1410,6 +1522,7 @@ export type Database = {
           created_at?: string
           id?: string
           llm_model?: string | null
+          metadata?: Json | null
           organization_id: string
           response_time_ms?: number | null
           role: string
@@ -1422,6 +1535,7 @@ export type Database = {
           created_at?: string
           id?: string
           llm_model?: string | null
+          metadata?: Json | null
           organization_id?: string
           response_time_ms?: number | null
           role?: string
@@ -1437,6 +1551,7 @@ export type Database = {
           created_at: string
           id: string
           llm_model: string | null
+          metadata: Json | null
           organization_id: string
           response_time_ms: number | null
           role: string
@@ -1449,6 +1564,7 @@ export type Database = {
           created_at?: string
           id?: string
           llm_model?: string | null
+          metadata?: Json | null
           organization_id: string
           response_time_ms?: number | null
           role: string
@@ -1461,6 +1577,7 @@ export type Database = {
           created_at?: string
           id?: string
           llm_model?: string | null
+          metadata?: Json | null
           organization_id?: string
           response_time_ms?: number | null
           role?: string
@@ -1476,6 +1593,7 @@ export type Database = {
           created_at: string
           id: string
           llm_model: string | null
+          metadata: Json | null
           organization_id: string
           response_time_ms: number | null
           role: string
@@ -1488,6 +1606,7 @@ export type Database = {
           created_at?: string
           id?: string
           llm_model?: string | null
+          metadata?: Json | null
           organization_id: string
           response_time_ms?: number | null
           role: string
@@ -1500,6 +1619,7 @@ export type Database = {
           created_at?: string
           id?: string
           llm_model?: string | null
+          metadata?: Json | null
           organization_id?: string
           response_time_ms?: number | null
           role?: string
@@ -1515,6 +1635,7 @@ export type Database = {
           created_at: string
           id: string
           llm_model: string | null
+          metadata: Json | null
           organization_id: string
           response_time_ms: number | null
           role: string
@@ -1527,6 +1648,7 @@ export type Database = {
           created_at?: string
           id?: string
           llm_model?: string | null
+          metadata?: Json | null
           organization_id: string
           response_time_ms?: number | null
           role: string
@@ -1539,6 +1661,7 @@ export type Database = {
           created_at?: string
           id?: string
           llm_model?: string | null
+          metadata?: Json | null
           organization_id?: string
           response_time_ms?: number | null
           role?: string
@@ -1554,6 +1677,7 @@ export type Database = {
           created_at: string
           id: string
           llm_model: string | null
+          metadata: Json | null
           organization_id: string
           response_time_ms: number | null
           role: string
@@ -1566,6 +1690,7 @@ export type Database = {
           created_at?: string
           id?: string
           llm_model?: string | null
+          metadata?: Json | null
           organization_id: string
           response_time_ms?: number | null
           role: string
@@ -1578,6 +1703,7 @@ export type Database = {
           created_at?: string
           id?: string
           llm_model?: string | null
+          metadata?: Json | null
           organization_id?: string
           response_time_ms?: number | null
           role?: string
@@ -1593,6 +1719,7 @@ export type Database = {
           created_at: string
           id: string
           llm_model: string | null
+          metadata: Json | null
           organization_id: string
           response_time_ms: number | null
           role: string
@@ -1605,6 +1732,7 @@ export type Database = {
           created_at?: string
           id?: string
           llm_model?: string | null
+          metadata?: Json | null
           organization_id: string
           response_time_ms?: number | null
           role: string
@@ -1617,6 +1745,7 @@ export type Database = {
           created_at?: string
           id?: string
           llm_model?: string | null
+          metadata?: Json | null
           organization_id?: string
           response_time_ms?: number | null
           role?: string
@@ -1632,6 +1761,7 @@ export type Database = {
           created_at: string
           id: string
           llm_model: string | null
+          metadata: Json | null
           organization_id: string
           response_time_ms: number | null
           role: string
@@ -1644,6 +1774,7 @@ export type Database = {
           created_at?: string
           id?: string
           llm_model?: string | null
+          metadata?: Json | null
           organization_id: string
           response_time_ms?: number | null
           role: string
@@ -1656,6 +1787,7 @@ export type Database = {
           created_at?: string
           id?: string
           llm_model?: string | null
+          metadata?: Json | null
           organization_id?: string
           response_time_ms?: number | null
           role?: string
@@ -1671,6 +1803,7 @@ export type Database = {
           created_at: string
           id: string
           llm_model: string | null
+          metadata: Json | null
           organization_id: string
           response_time_ms: number | null
           role: string
@@ -1683,6 +1816,7 @@ export type Database = {
           created_at?: string
           id?: string
           llm_model?: string | null
+          metadata?: Json | null
           organization_id: string
           response_time_ms?: number | null
           role: string
@@ -1695,6 +1829,7 @@ export type Database = {
           created_at?: string
           id?: string
           llm_model?: string | null
+          metadata?: Json | null
           organization_id?: string
           response_time_ms?: number | null
           role?: string
@@ -1710,6 +1845,7 @@ export type Database = {
           created_at: string
           id: string
           llm_model: string | null
+          metadata: Json | null
           organization_id: string
           response_time_ms: number | null
           role: string
@@ -1722,6 +1858,7 @@ export type Database = {
           created_at?: string
           id?: string
           llm_model?: string | null
+          metadata?: Json | null
           organization_id: string
           response_time_ms?: number | null
           role: string
@@ -1734,6 +1871,7 @@ export type Database = {
           created_at?: string
           id?: string
           llm_model?: string | null
+          metadata?: Json | null
           organization_id?: string
           response_time_ms?: number | null
           role?: string
@@ -1931,6 +2069,343 @@ export type Database = {
           updated_at?: string | null
         }
         Relationships: []
+      }
+      provider_budget_allocations: {
+        Row: {
+          consumed_at: string | null
+          created_at: string
+          decision: string
+          expires_at: string | null
+          id: string
+          metadata: Json
+          method_key: string
+          organization_id: string
+          provider: string
+          released_at: string | null
+          reserved_at: string
+          status: string
+          units: number
+          updated_at: string
+          window_key: string
+          workflow_run_id: string
+          workflow_step_id: string
+        }
+        Insert: {
+          consumed_at?: string | null
+          created_at?: string
+          decision: string
+          expires_at?: string | null
+          id?: string
+          metadata?: Json
+          method_key: string
+          organization_id: string
+          provider: string
+          released_at?: string | null
+          reserved_at?: string
+          status?: string
+          units?: number
+          updated_at?: string
+          window_key: string
+          workflow_run_id: string
+          workflow_step_id: string
+        }
+        Update: {
+          consumed_at?: string | null
+          created_at?: string
+          decision?: string
+          expires_at?: string | null
+          id?: string
+          metadata?: Json
+          method_key?: string
+          organization_id?: string
+          provider?: string
+          released_at?: string | null
+          reserved_at?: string
+          status?: string
+          units?: number
+          updated_at?: string
+          window_key?: string
+          workflow_run_id?: string
+          workflow_step_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "provider_budget_allocations_workflow_run_id_organization_i_fkey"
+            columns: ["workflow_run_id", "organization_id"]
+            isOneToOne: false
+            referencedRelation: "workflow_runs"
+            referencedColumns: ["id", "organization_id"]
+          },
+          {
+            foreignKeyName: "provider_budget_allocations_workflow_step_id_organization__fkey"
+            columns: ["workflow_step_id", "organization_id"]
+            isOneToOne: false
+            referencedRelation: "workflow_steps"
+            referencedColumns: ["id", "organization_id"]
+          },
+        ]
+      }
+      runtime_events: {
+        Row: {
+          action_id: string | null
+          approval_item_id: string | null
+          created_at: string
+          id: string
+          latency_ms: number | null
+          node: string | null
+          organization_id: string
+          payload: Json
+          provider: string | null
+          provider_request_id: string | null
+          reason: string | null
+          runtime_run_id: string
+          status: string | null
+          workflow_run_id: string | null
+          workflow_step_id: string | null
+        }
+        Insert: {
+          action_id?: string | null
+          approval_item_id?: string | null
+          created_at?: string
+          id?: string
+          latency_ms?: number | null
+          node?: string | null
+          organization_id: string
+          payload?: Json
+          provider?: string | null
+          provider_request_id?: string | null
+          reason?: string | null
+          runtime_run_id: string
+          status?: string | null
+          workflow_run_id?: string | null
+          workflow_step_id?: string | null
+        }
+        Update: {
+          action_id?: string | null
+          approval_item_id?: string | null
+          created_at?: string
+          id?: string
+          latency_ms?: number | null
+          node?: string | null
+          organization_id?: string
+          payload?: Json
+          provider?: string | null
+          provider_request_id?: string | null
+          reason?: string | null
+          runtime_run_id?: string
+          status?: string | null
+          workflow_run_id?: string | null
+          workflow_step_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "runtime_events_approval_item_id_organization_id_fkey"
+            columns: ["approval_item_id", "organization_id"]
+            isOneToOne: false
+            referencedRelation: "approval_items"
+            referencedColumns: ["id", "organization_id"]
+          },
+          {
+            foreignKeyName: "runtime_events_runtime_run_id_organization_id_fkey"
+            columns: ["runtime_run_id", "organization_id"]
+            isOneToOne: false
+            referencedRelation: "runtime_runs"
+            referencedColumns: ["id", "organization_id"]
+          },
+          {
+            foreignKeyName: "runtime_events_workflow_run_id_organization_id_fkey"
+            columns: ["workflow_run_id", "organization_id"]
+            isOneToOne: false
+            referencedRelation: "workflow_runs"
+            referencedColumns: ["id", "organization_id"]
+          },
+          {
+            foreignKeyName: "runtime_events_workflow_step_id_organization_id_fkey"
+            columns: ["workflow_step_id", "organization_id"]
+            isOneToOne: false
+            referencedRelation: "workflow_steps"
+            referencedColumns: ["id", "organization_id"]
+          },
+        ]
+      }
+      runtime_runs: {
+        Row: {
+          action_plan: Json
+          agent_id: string
+          checkpoint_node: string | null
+          conversation_id: string | null
+          created_at: string
+          current_action_index: number
+          estimated_cost_usd: number
+          finished_at: string | null
+          id: string
+          llm_calls: number
+          organization_id: string
+          planner_confidence: number | null
+          planner_model: string | null
+          request_id: string
+          started_at: string
+          status: string
+          tokens_input: number
+          tokens_output: number
+          trace_id: string
+          updated_at: string
+        }
+        Insert: {
+          action_plan?: Json
+          agent_id: string
+          checkpoint_node?: string | null
+          conversation_id?: string | null
+          created_at?: string
+          current_action_index?: number
+          estimated_cost_usd?: number
+          finished_at?: string | null
+          id?: string
+          llm_calls?: number
+          organization_id: string
+          planner_confidence?: number | null
+          planner_model?: string | null
+          request_id: string
+          started_at?: string
+          status?: string
+          tokens_input?: number
+          tokens_output?: number
+          trace_id: string
+          updated_at?: string
+        }
+        Update: {
+          action_plan?: Json
+          agent_id?: string
+          checkpoint_node?: string | null
+          conversation_id?: string | null
+          created_at?: string
+          current_action_index?: number
+          estimated_cost_usd?: number
+          finished_at?: string | null
+          id?: string
+          llm_calls?: number
+          organization_id?: string
+          planner_confidence?: number | null
+          planner_model?: string | null
+          request_id?: string
+          started_at?: string
+          status?: string
+          tokens_input?: number
+          tokens_output?: number
+          trace_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "runtime_runs_agent_id_organization_id_fkey"
+            columns: ["agent_id", "organization_id"]
+            isOneToOne: false
+            referencedRelation: "agents"
+            referencedColumns: ["id", "organization_id"]
+          },
+          {
+            foreignKeyName: "runtime_runs_conversation_id_organization_id_fkey"
+            columns: ["conversation_id", "organization_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id", "organization_id"]
+          },
+          {
+            foreignKeyName: "runtime_runs_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      runtime_usage_events: {
+        Row: {
+          action_type: string | null
+          agent_id: string
+          approval_item_id: string | null
+          created_at: string
+          estimated_cost_usd: number
+          id: string
+          metadata: Json
+          occurred_at: string
+          organization_id: string
+          provider: string | null
+          provider_request_id: string | null
+          quantity: number
+          runtime_run_id: string
+          surface: string | null
+          tokens_input: number
+          tokens_output: number
+          usage_kind: string
+          workflow_run_id: string | null
+          workflow_step_id: string | null
+        }
+        Insert: {
+          action_type?: string | null
+          agent_id: string
+          approval_item_id?: string | null
+          created_at?: string
+          estimated_cost_usd?: number
+          id?: string
+          metadata?: Json
+          occurred_at?: string
+          organization_id: string
+          provider?: string | null
+          provider_request_id?: string | null
+          quantity?: number
+          runtime_run_id: string
+          surface?: string | null
+          tokens_input?: number
+          tokens_output?: number
+          usage_kind: string
+          workflow_run_id?: string | null
+          workflow_step_id?: string | null
+        }
+        Update: {
+          action_type?: string | null
+          agent_id?: string
+          approval_item_id?: string | null
+          created_at?: string
+          estimated_cost_usd?: number
+          id?: string
+          metadata?: Json
+          occurred_at?: string
+          organization_id?: string
+          provider?: string | null
+          provider_request_id?: string | null
+          quantity?: number
+          runtime_run_id?: string
+          surface?: string | null
+          tokens_input?: number
+          tokens_output?: number
+          usage_kind?: string
+          workflow_run_id?: string | null
+          workflow_step_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "runtime_usage_events_agent_id_organization_id_fkey"
+            columns: ["agent_id", "organization_id"]
+            isOneToOne: false
+            referencedRelation: "agents"
+            referencedColumns: ["id", "organization_id"]
+          },
+          {
+            foreignKeyName: "runtime_usage_events_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "runtime_usage_events_runtime_run_id_organization_id_fkey"
+            columns: ["runtime_run_id", "organization_id"]
+            isOneToOne: false
+            referencedRelation: "runtime_runs"
+            referencedColumns: ["id", "organization_id"]
+          },
+        ]
       }
       usage_records: {
         Row: {
@@ -2609,183 +3084,6 @@ export type Database = {
           },
         ]
       }
-      approval_items: {
-        Row: {
-          action: string
-          agent_id: string
-          context: Json
-          created_at: string
-          expires_at: string
-          id: string
-          organization_id: string
-          payload_summary: Json
-          provider: string
-          requested_by: string | null
-          resolution_note: string | null
-          resolved_at: string | null
-          resolved_by: string | null
-          risk_level: string
-          status: string
-          summary: string
-          updated_at: string
-          workflow_run_id: string
-          workflow_step_id: string
-        }
-        Insert: {
-          action: string
-          agent_id: string
-          context?: Json
-          created_at?: string
-          expires_at: string
-          id?: string
-          organization_id: string
-          payload_summary?: Json
-          provider: string
-          requested_by?: string | null
-          resolution_note?: string | null
-          resolved_at?: string | null
-          resolved_by?: string | null
-          risk_level?: string
-          status?: string
-          summary: string
-          updated_at?: string
-          workflow_run_id: string
-          workflow_step_id: string
-        }
-        Update: {
-          action?: string
-          agent_id?: string
-          context?: Json
-          created_at?: string
-          expires_at?: string
-          id?: string
-          organization_id?: string
-          payload_summary?: Json
-          provider?: string
-          requested_by?: string | null
-          resolution_note?: string | null
-          resolved_at?: string | null
-          resolved_by?: string | null
-          risk_level?: string
-          status?: string
-          summary?: string
-          updated_at?: string
-          workflow_run_id?: string
-          workflow_step_id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "approval_items_agent_id_organization_id_fkey"
-            columns: ["agent_id", "organization_id"]
-            isOneToOne: false
-            referencedRelation: "agents"
-            referencedColumns: ["id", "organization_id"]
-          },
-          {
-            foreignKeyName: "approval_items_requested_by_organization_id_fkey"
-            columns: ["requested_by", "organization_id"]
-            isOneToOne: false
-            referencedRelation: "users"
-            referencedColumns: ["id", "organization_id"]
-          },
-          {
-            foreignKeyName: "approval_items_resolved_by_organization_id_fkey"
-            columns: ["resolved_by", "organization_id"]
-            isOneToOne: false
-            referencedRelation: "users"
-            referencedColumns: ["id", "organization_id"]
-          },
-          {
-            foreignKeyName: "approval_items_workflow_run_id_organization_id_fkey"
-            columns: ["workflow_run_id", "organization_id"]
-            isOneToOne: false
-            referencedRelation: "workflow_runs"
-            referencedColumns: ["id", "organization_id"]
-          },
-          {
-            foreignKeyName: "approval_items_workflow_step_id_organization_id_fkey"
-            columns: ["workflow_step_id", "organization_id"]
-            isOneToOne: false
-            referencedRelation: "workflow_steps"
-            referencedColumns: ["id", "organization_id"]
-          },
-        ]
-      }
-      provider_budget_allocations: {
-        Row: {
-          consumed_at: string | null
-          created_at: string
-          decision: string
-          expires_at: string | null
-          id: string
-          metadata: Json
-          method_key: string
-          organization_id: string
-          provider: string
-          released_at: string | null
-          reserved_at: string
-          status: string
-          units: number
-          updated_at: string
-          window_key: string
-          workflow_run_id: string
-          workflow_step_id: string
-        }
-        Insert: {
-          consumed_at?: string | null
-          created_at?: string
-          decision: string
-          expires_at?: string | null
-          id?: string
-          metadata?: Json
-          method_key: string
-          organization_id: string
-          provider: string
-          released_at?: string | null
-          reserved_at?: string
-          status?: string
-          units?: number
-          updated_at?: string
-          window_key: string
-          workflow_run_id: string
-          workflow_step_id: string
-        }
-        Update: {
-          consumed_at?: string | null
-          created_at?: string
-          decision?: string
-          expires_at?: string | null
-          id?: string
-          metadata?: Json
-          method_key?: string
-          organization_id?: string
-          provider?: string
-          released_at?: string | null
-          reserved_at?: string
-          status?: string
-          units?: number
-          updated_at?: string
-          window_key?: string
-          workflow_run_id?: string
-          workflow_step_id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "provider_budget_allocations_workflow_run_id_organization_id_fkey"
-            columns: ["workflow_run_id", "organization_id"]
-            isOneToOne: false
-            referencedRelation: "workflow_runs"
-            referencedColumns: ["id", "organization_id"]
-          },
-          {
-            foreignKeyName: "provider_budget_allocations_workflow_step_id_organization_id_fkey"
-            columns: ["workflow_step_id", "organization_id"]
-            isOneToOne: false
-            referencedRelation: "workflow_steps"
-            referencedColumns: ["id", "organization_id"]
-          },
-        ]
-      }
       webhook_deliveries: {
         Row: {
           attempts: number | null
@@ -3066,37 +3364,55 @@ export type Database = {
       }
       get_user_organization_id: { Args: never; Returns: string }
       get_user_role: { Args: never; Returns: string }
-      increment_usage_messages: {
-        Args: {
-          p_organization_id: string
-          p_agent_id: string
-          p_period_start: string
-          p_period_end: string
-          p_llm_provider: string
-        }
-        Returns: number
-      }
       increment_conversation_message_count: {
         Args: { p_id: string; p_org_id: string }
         Returns: undefined
       }
-      search_document_chunks: {
+      increment_usage_messages: {
         Args: {
           p_agent_id: string
-          p_embedding: string
-          p_match_count?: number
+          p_llm_provider: string
           p_organization_id: string
-          p_threshold?: number
+          p_period_end: string
+          p_period_start: string
         }
-        Returns: {
-          chunk_index: number
-          content: string
-          document_id: string
-          id: string
-          metadata: Json
-          similarity: number
-        }[]
+        Returns: number
       }
+      search_document_chunks:
+        | {
+            Args: {
+              p_agent_id: string
+              p_embedding: string
+              p_match_count?: number
+              p_organization_id: string
+              p_threshold?: number
+            }
+            Returns: {
+              chunk_index: number
+              content: string
+              document_id: string
+              id: string
+              metadata: Json
+              similarity: number
+            }[]
+          }
+        | {
+            Args: {
+              p_agent_id: string
+              p_embedding: string
+              p_match_count?: number
+              p_organization_id: string
+              p_threshold?: number
+            }
+            Returns: {
+              chunk_index: number
+              content: string
+              document_id: string
+              id: string
+              metadata: Json
+              similarity: number
+            }[]
+          }
     }
     Enums: {
       [_ in never]: never

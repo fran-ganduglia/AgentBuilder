@@ -116,15 +116,6 @@ export function AgentDetailWorkspaceMain({
     );
   }
 
-  if (connectionSummary.classification === "remote_managed") {
-    return (
-      <div className="rounded-[1.75rem] border border-amber-200 bg-amber-50 px-6 py-8 shadow-sm">
-        <h2 className="text-lg font-bold text-amber-900">QA local no disponible para este agente conectado</h2>
-        <p className="mt-2 text-sm text-amber-800">El panel QA de esta fase queda reservado para agentes locales y para agentes con WhatsApp conectado. Los agentes gestionados por OpenAI mantienen el comportamiento actual.</p>
-      </div>
-    );
-  }
-
   return (
     <AgentQaPanel
       agentId={agentId}

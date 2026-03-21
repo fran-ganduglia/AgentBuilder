@@ -75,6 +75,7 @@ type AgentCreationWizardProps = {
   salesforceOperationalView: IntegrationOperationalView;
   gmailOperationalView: GoogleSurfaceOperationalView;
   googleCalendarOperationalView: GoogleSurfaceOperationalView;
+  googleSheetsOperationalView: GoogleSurfaceOperationalView;
   planName: OrganizationPlanName;
 };
 
@@ -194,6 +195,7 @@ function buildConnectionStates(input: {
   salesforceOperationalView: IntegrationOperationalView;
   gmailOperationalView: GoogleSurfaceOperationalView;
   googleCalendarOperationalView: GoogleSurfaceOperationalView;
+  googleSheetsOperationalView: GoogleSurfaceOperationalView;
 }): Partial<Record<WizardIntegrationId, WizardIntegrationConnectionState>> {
   return {
     whatsapp: input.whatsappConnection.isConnected
@@ -214,6 +216,11 @@ function buildConnectionStates(input: {
       summary: input.googleCalendarOperationalView.summary,
       tone: input.googleCalendarOperationalView.isUsable ? "emerald" : input.googleCalendarOperationalView.tone,
     },
+    google_sheets: {
+      label: input.googleSheetsOperationalView.label,
+      summary: input.googleSheetsOperationalView.summary,
+      tone: input.googleSheetsOperationalView.isUsable ? "emerald" : input.googleSheetsOperationalView.tone,
+    },
   };
 }
 
@@ -231,6 +238,7 @@ export function AgentCreationWizard({
   salesforceOperationalView,
   gmailOperationalView,
   googleCalendarOperationalView,
+  googleSheetsOperationalView,
   planName,
 }: AgentCreationWizardProps) {
   const router = useRouter();
@@ -245,6 +253,7 @@ export function AgentCreationWizard({
     salesforceOperationalView,
     gmailOperationalView,
     googleCalendarOperationalView,
+    googleSheetsOperationalView,
   });
   const customSelections = getCustomToolScopeSelections(fields.setupState.task_data);
   const workflow = GENERAL_OPERATIONS_WORKFLOW;

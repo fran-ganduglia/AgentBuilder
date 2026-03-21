@@ -1297,6 +1297,102 @@ CREATE TRIGGER trigger_provider_budget_allocations_updated_at
   FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 ```
 
+### 27. runtime_runs / runtime_events / runtime_usage_events
+
+```sql
+CREATE TABLE runtime_runs (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references organizations(id) on delete cascade,
+  agent_id uuid not null,
+  conversation_id uuid,
+  request_id text not null,
+  trace_id text not null,
+  status text not null,
+  planner_model text,
+  planner_confidence numeric(5,4),
+  action_plan jsonb not null default '{}',
+  current_action_index int not null default 0,
+  checkpoint_node text,
+  llm_calls int not null default 0,
+  tokens_input int not null default 0,
+  tokens_output int not null default 0,
+  estimated_cost_usd numeric(12,6) not null default 0,
+  started_at timestamptz not null default now(),
+  finished_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (id, organization_id),
+  unique (organization_id, request_id),
+  unique (organization_id, trace_id),
+  foreign key (agent_id, organization_id)
+    references agents(id, organization_id) on delete cascade,
+  foreign key (conversation_id, organization_id)
+    references conversations(id, organization_id) on delete set null
+);
+
+CREATE TABLE runtime_events (
+  id uuid primary key default gen_random_uuid(),
+  runtime_run_id uuid not null,
+  organization_id uuid not null,
+  action_id text,
+  node text,
+  status text,
+  reason text,
+  latency_ms int,
+  provider text,
+  provider_request_id text,
+  approval_item_id uuid,
+  workflow_run_id uuid,
+  workflow_step_id uuid,
+  payload jsonb not null default '{}',
+  created_at timestamptz not null default now(),
+  foreign key (runtime_run_id, organization_id)
+    references runtime_runs(id, organization_id) on delete cascade
+);
+
+CREATE TABLE runtime_usage_events (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references organizations(id) on delete cascade,
+  agent_id uuid not null,
+  runtime_run_id uuid not null,
+  action_type text,
+  provider text,
+  usage_kind text not null,
+  quantity int not null default 1,
+  tokens_input int not null default 0,
+  tokens_output int not null default 0,
+  estimated_cost_usd numeric(12,6) not null default 0,
+  surface text,
+  approval_item_id uuid,
+  workflow_run_id uuid,
+  workflow_step_id uuid,
+  provider_request_id text,
+  metadata jsonb not null default '{}',
+  occurred_at timestamptz not null default now(),
+  created_at timestamptz not null default now(),
+  foreign key (agent_id, organization_id)
+    references agents(id, organization_id) on delete cascade,
+  foreign key (runtime_run_id, organization_id)
+    references runtime_runs(id, organization_id) on delete cascade
+);
+
+ALTER TABLE runtime_runs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE runtime_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE runtime_usage_events ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY runtime_runs_select ON runtime_runs
+  FOR SELECT USING (organization_id = public.get_user_organization_id());
+
+CREATE POLICY runtime_events_select ON runtime_events
+  FOR SELECT USING (organization_id = public.get_user_organization_id());
+
+CREATE POLICY runtime_usage_events_select ON runtime_usage_events
+  FOR SELECT USING (
+    organization_id = public.get_user_organization_id()
+    AND public.get_user_role() = 'admin'
+  );
+```
+
 
 ---
 
@@ -1320,6 +1416,7 @@ ALTER TABLE webhook_deliveries          ENABLE ROW LEVEL SECURITY;
 ALTER TABLE event_queue                 ENABLE ROW LEVEL SECURITY;
 ALTER TABLE conversations               ENABLE ROW LEVEL SECURITY;
 ALTER TABLE messages                    ENABLE ROW LEVEL SECURITY;
+ALTER TABLE runtime_usage_events        ENABLE ROW LEVEL SECURITY;
 ALTER TABLE usage_records               ENABLE ROW LEVEL SECURITY;
 ALTER TABLE notifications               ENABLE ROW LEVEL SECURITY;
 ALTER TABLE audit_logs                  ENABLE ROW LEVEL SECURITY;
@@ -1707,4 +1804,11 @@ CREATE POLICY provider_budget_allocations_select ON provider_budget_allocations
 | 24 | workflow_steps | Estado, intentos e idempotencia por step | no | Phase 0 |
 | 25 | approval_items | Inbox de aprobaciones con expiracion | no | Phase 0 |
 | 26 | provider_budget_allocations | Admisiones/reservas de budget por step | no | Phase 0 |
+| 27 | runtime_runs | Estado persistido del runtime nuevo por request | no | Phase 2 |
+| 28 | runtime_events | Trazabilidad nodo por nodo y linkage async del runtime | no | Phase 2 |
+| 29 | runtime_usage_events | Eventos atomicos de billing/usage del runtime | no | Phase 3 |
 
+## Snapshot 2026-03-17
+
+- `agent_connections` ya no admite `provider_type = 'openai'` despues de aplicar `20260317193000_retire_openai_assistants_runtime.sql`.
+- Las integraciones `type = 'openai'` quedan solo como legado revocado para limpieza historica; no forman parte del runtime operativo.

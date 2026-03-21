@@ -17,6 +17,7 @@ import {
 import { getCurrentOrganizationSessionUsage } from "@/lib/db/session-usage";
 import { assertUsableIntegration } from "@/lib/integrations/access";
 import type { AgentSetupState } from "@/lib/agents/agent-setup";
+import { buildWorkflowStepEventFromRuntimeDispatch } from "@/lib/runtime/runtime-queue-dispatcher";
 import { processWorkflowStepExecution } from "@/lib/workflows/execution";
 import type { EventRow } from "@/lib/workers/event-queue";
 import { sendWhatsAppTextMessage } from "@/lib/whatsapp-cloud";
@@ -255,4 +256,9 @@ export async function processWhatsAppInboundMessageReceived(event: EventRow): Pr
 
 export async function processWorkflowStepExecute(event: EventRow): Promise<void> {
   await processWorkflowStepExecution(event);
+}
+
+export async function processRuntimeQueueDispatch(event: EventRow): Promise<void> {
+  const workflowStepEvent = await buildWorkflowStepEventFromRuntimeDispatch(event);
+  await processWorkflowStepExecution(workflowStepEvent);
 }

@@ -66,13 +66,6 @@ export async function POST(request: Request, context: RouteContext): Promise<Nex
   }
 
   const connectionSummary = access.connectionSummary;
-  if (connectionSummary.classification === "remote_managed") {
-    return NextResponse.json(
-      { error: "Los agentes gestionados por OpenAI no admiten una fuente WhatsApp conectada en esta fase" },
-      { status: 400 }
-    );
-  }
-
   if (access.agent.status !== "active" && connectionSummary.classification !== "channel_connected") {
     return NextResponse.json(
       { error: "Primero activa el agente para conectar una fuente WhatsApp desde QA" },

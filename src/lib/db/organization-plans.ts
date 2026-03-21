@@ -6,7 +6,7 @@ import {
   type OrganizationPlanConfig,
   type OrganizationPlanName,
 } from "@/lib/agents/agent-integration-limits";
-import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { createServiceSupabaseClient } from "@/lib/supabase/service";
 import type { Tables } from "@/types/database";
 
 type DbResult<T> = { data: T | null; error: string | null };
@@ -23,7 +23,7 @@ export type OrganizationPlanDetails = {
 export async function getOrganizationPlan(
   organizationId: string
 ): Promise<DbResult<OrganizationPlanDetails>> {
-  const supabase = await createServerSupabaseClient();
+  const supabase = createServiceSupabaseClient();
 
   const { data: organizationData, error: organizationError } = await supabase
     .from("organizations")

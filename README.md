@@ -1,5 +1,13 @@
 # proyecto-amigos
 
+## Runtime estructurado
+
+El camino operativo principal ya no usa OpenAI Assistants remotos ni planners LLM para decidir acciones.
+
+- Las operaciones soportadas pasan por el runtime estructurado compartido.
+- El LLM queda reservado para redaccion, resumen, ranking, comparacion y QA proposal sin side effects.
+- La migracion `supabase/migrations/20260317193000_retire_openai_assistants_runtime.sql` desactiva y limpia las conexiones OpenAI legacy.
+
 ## Checks
 
 Usa estos comandos como referencia local y en CI:

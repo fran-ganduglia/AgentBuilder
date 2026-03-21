@@ -18,6 +18,7 @@ import {
   type GoogleCalendarAgentToolConfig,
   type GoogleCalendarToolAction,
 } from "@/lib/integrations/google-agent-tools";
+
 import { getSafeProviderErrorMessage } from "@/lib/integrations/provider-gateway";
 import { isProviderRequestError, type ProviderRequestError } from "@/lib/integrations/provider-errors";
 import { coordinateIntegrationRefresh } from "@/lib/integrations/refresh-coordination";
@@ -58,6 +59,20 @@ type GoogleCalendarEventMutationResponse = {
   location?: string;
   start?: { date?: string; dateTime?: string; timeZone?: string };
   end?: { date?: string; dateTime?: string; timeZone?: string };
+};
+
+type GoogleCalendarEventGetResponse = {
+  id?: string;
+  status?: string;
+  summary?: string;
+  htmlLink?: string;
+  location?: string;
+  description?: string;
+  organizer?: { email?: string; displayName?: string };
+  start?: { date?: string; dateTime?: string; timeZone?: string };
+  end?: { date?: string; dateTime?: string; timeZone?: string };
+  attendees?: Array<{ email?: string; displayName?: string; responseStatus?: string }>;
+  recurrence?: string[];
 };
 
 export type GoogleCalendarBusySlot = {
@@ -110,9 +125,30 @@ export type GoogleCalendarListEventsResult = {
   summary: string;
 };
 
+export type GoogleCalendarGetEventDetailsResult = {
+  action: "get_event_details";
+  requestId: string | null;
+  data: {
+    id: string | null;
+    status: string | null;
+    title: string | null;
+    startIso: string | null;
+    endIso: string | null;
+    timezone: string;
+    htmlLink: string | null;
+    location: string | null;
+    description: string | null;
+    organizer: string | null;
+    attendees: Array<{ email: string; displayName: string | null; responseStatus: string | null }>;
+    recurrence: string[];
+  };
+  summary: string;
+};
+
 export type GoogleCalendarReadToolExecutionResult =
   | GoogleCalendarCheckAvailabilityResult
-  | GoogleCalendarListEventsResult;
+  | GoogleCalendarListEventsResult
+  | GoogleCalendarGetEventDetailsResult;
 
 export type GoogleCalendarWriteToolExecutionResult =
   | {
@@ -157,6 +193,23 @@ export type GoogleCalendarWriteToolExecutionResult =
       data: {
         id: string;
         status: "cancelled";
+      };
+      summary: string;
+    }
+  | {
+      action: "update_event_details";
+      requestId: string | null;
+      providerObjectId: string | null;
+      providerObjectType: "event";
+      data: {
+        id: string | null;
+        title: string | null;
+        startIso: string | null;
+        endIso: string | null;
+        timezone: string | null;
+        htmlLink: string | null;
+        location: string | null;
+        updatedFields: string[];
       };
       summary: string;
     };
@@ -263,7 +316,7 @@ function isValidTimezone(timezone: string): boolean {
 }
 
 function validateWindow(
-  input: Pick<ExecuteGoogleCalendarReadToolInput, "startIso" | "endIso" | "timezone">
+  input: { startIso: string; endIso: string; timezone: string }
 ): string | null {
   if (!isValidTimezone(input.timezone)) {
     return "La timezone configurada para Google Calendar no es valida.";
@@ -359,9 +412,15 @@ function computeFreeSlots(input: {
 function getExecutionFallback(
   action: ExecuteGoogleCalendarReadToolInput["action"]
 ): string {
-  return action === "check_availability"
-    ? "No se pudo consultar la disponibilidad en Google Calendar."
-    : "No se pudo listar los eventos en Google Calendar.";
+  if (action === "check_availability") {
+    return "No se pudo consultar la disponibilidad en Google Calendar.";
+  }
+
+  if (action === "get_event_details") {
+    return "No se pudo obtener el detalle del evento en Google Calendar.";
+  }
+
+  return "No se pudo listar los eventos en Google Calendar.";
 }
 
 function getWriteExecutionFallback(
@@ -373,6 +432,10 @@ function getWriteExecutionFallback(
 
   if (action === "reschedule_event") {
     return "No se pudo reprogramar el evento en Google Calendar.";
+  }
+
+  if (action === "update_event_details") {
+    return "No se pudo actualizar los detalles del evento en Google Calendar.";
   }
 
   return "No se pudo cancelar el evento en Google Calendar.";
@@ -524,39 +587,77 @@ export async function runGoogleCalendarAction(
     };
   }
 
-  const maxResults = input.maxResults ?? GOOGLE_CALENDAR_DEFAULT_MAX_RESULTS;
-  const searchParams = new URLSearchParams({
-    timeMin: input.startIso,
-    timeMax: input.endIso,
-    timeZone: input.timezone,
-    singleEvents: "true",
-    orderBy: "startTime",
-    maxResults: String(maxResults),
-  });
-  const response = await requestGoogleCalendar<GoogleCalendarEventsListResponse>(
+  if (input.action === "list_events") {
+    const maxResults = input.maxResults ?? GOOGLE_CALENDAR_DEFAULT_MAX_RESULTS;
+    const searchParams = new URLSearchParams({
+      timeMin: input.startIso,
+      timeMax: input.endIso,
+      timeZone: input.timezone,
+      singleEvents: "true",
+      orderBy: "startTime",
+      maxResults: String(maxResults),
+    });
+    const response = await requestGoogleCalendar<GoogleCalendarEventsListResponse>(
+      accessToken,
+      `/calendars/primary/events?${searchParams.toString()}`,
+      { method: "GET" },
+      providerContext
+    );
+    const events = (response.data.items ?? []).map(formatEvent);
+
+    return {
+      action: "list_events",
+      requestId: response.requestId,
+      data: {
+        calendarId: "primary",
+        timezone: input.timezone,
+        startIso: input.startIso,
+        endIso: input.endIso,
+        maxResults,
+        events,
+      },
+      summary: [
+        `Eventos consultados entre ${input.startIso} y ${input.endIso} (${input.timezone}).`,
+        `Eventos devueltos: ${events.length}.`,
+        `Detalle: ${buildEventsSummary(events)}`,
+      ].join(" "),
+    };
+  }
+
+  // get_event_details
+  const getResponse = await requestGoogleCalendar<GoogleCalendarEventGetResponse>(
     accessToken,
-    `/calendars/primary/events?${searchParams.toString()}`,
+    `/calendars/primary/events/${encodeURIComponent(input.eventId)}`,
     { method: "GET" },
     providerContext
   );
-  const events = (response.data.items ?? []).map(formatEvent);
+
+  const getStart = getResponse.data.start?.dateTime ?? getResponse.data.start?.date ?? null;
+  const getEnd = getResponse.data.end?.dateTime ?? getResponse.data.end?.date ?? null;
+  const getTz = getResponse.data.start?.timeZone ?? input.timezone;
 
   return {
-    action: "list_events",
-    requestId: response.requestId,
+    action: "get_event_details",
+    requestId: getResponse.requestId,
     data: {
-      calendarId: "primary",
-      timezone: input.timezone,
-      startIso: input.startIso,
-      endIso: input.endIso,
-      maxResults,
-      events,
+      id: getResponse.data.id ?? null,
+      status: getResponse.data.status ?? null,
+      title: getResponse.data.summary?.trim() || null,
+      startIso: getStart,
+      endIso: getEnd,
+      timezone: getTz,
+      htmlLink: getResponse.data.htmlLink ?? null,
+      location: getResponse.data.location?.trim() || null,
+      description: getResponse.data.description?.trim() || null,
+      organizer: getResponse.data.organizer?.displayName ?? getResponse.data.organizer?.email ?? null,
+      attendees: (getResponse.data.attendees ?? []).map((a) => ({
+        email: a.email ?? "",
+        displayName: a.displayName ?? null,
+        responseStatus: a.responseStatus ?? null,
+      })),
+      recurrence: getResponse.data.recurrence ?? [],
     },
-    summary: [
-      `Eventos consultados entre ${input.startIso} y ${input.endIso} (${input.timezone}).`,
-      `Eventos devueltos: ${events.length}.`,
-      `Detalle: ${buildEventsSummary(events)}`,
-    ].join(" "),
+    summary: `Evento "${getResponse.data.summary ?? input.eventId}" en ${getStart ?? "fecha desconocida"} (${getTz}).`,
   };
 }
 
@@ -596,7 +697,7 @@ export async function runGoogleCalendarWriteAction(
             dateTime: input.endIso,
             timeZone: input.timezone,
           },
-          attendees: input.attendeeEmails?.map((email) => ({ email })),
+          attendees: input.attendeeEmails?.map((email: string) => ({ email })),
         }),
       },
       providerContext
@@ -636,7 +737,7 @@ export async function runGoogleCalendarWriteAction(
             dateTime: input.endIso,
             timeZone: input.timezone,
           },
-          ...(input.attendeeEmails ? { attendees: input.attendeeEmails.map((email) => ({ email })) } : {}),
+          ...(input.attendeeEmails ? { attendees: input.attendeeEmails.map((email: string) => ({ email })) } : {}),
         }),
       },
       providerContext
@@ -658,25 +759,67 @@ export async function runGoogleCalendarWriteAction(
     };
   }
 
-  await requestGoogleCalendar<Record<string, never>>(
+  if (input.action === "cancel_event") {
+    await requestGoogleCalendar<Record<string, never>>(
+      accessToken,
+      `/calendars/primary/events/${encodeURIComponent(input.eventId)}`,
+      { method: "DELETE" },
+      providerContext
+    );
+
+    return {
+      action: "cancel_event",
+      requestId: null,
+      providerObjectId: input.eventId,
+      providerObjectType: "event",
+      data: {
+        id: input.eventId,
+        status: "cancelled",
+      },
+      summary: "Evento cancelado en Google Calendar.",
+    };
+  }
+
+  // update_event_details
+  const updatedFields: string[] = [];
+  const updateBody: Record<string, unknown> = {};
+  if (input.title !== undefined) { updateBody.summary = input.title; updatedFields.push("title"); }
+  if (input.description !== undefined) { updateBody.description = input.description; updatedFields.push("description"); }
+  if (input.location !== undefined) { updateBody.location = input.location; updatedFields.push("location"); }
+  if (input.attendeeEmails !== undefined) {
+    updateBody.attendees = input.attendeeEmails.map((email: string) => ({ email }));
+    updatedFields.push("attendees");
+  }
+
+  const updateResponse = await requestGoogleCalendar<GoogleCalendarEventMutationResponse>(
     accessToken,
     `/calendars/primary/events/${encodeURIComponent(input.eventId)}`,
     {
-      method: "DELETE",
+      method: "PATCH",
+      body: JSON.stringify(updateBody),
     },
     providerContext
   );
 
+  const updStart = updateResponse.data.start?.dateTime ?? updateResponse.data.start?.date ?? null;
+  const updEnd = updateResponse.data.end?.dateTime ?? updateResponse.data.end?.date ?? null;
+
   return {
-    action: "cancel_event",
-    requestId: null,
-    providerObjectId: input.eventId,
+    action: "update_event_details",
+    requestId: updateResponse.requestId,
+    providerObjectId: updateResponse.data.id ?? input.eventId,
     providerObjectType: "event",
     data: {
-      id: input.eventId,
-      status: "cancelled",
+      id: updateResponse.data.id ?? null,
+      title: updateResponse.data.summary?.trim() || null,
+      startIso: updStart,
+      endIso: updEnd,
+      timezone: updateResponse.data.start?.timeZone ?? null,
+      htmlLink: updateResponse.data.htmlLink ?? null,
+      location: updateResponse.data.location?.trim() || null,
+      updatedFields,
     },
-    summary: "Evento cancelado en Google Calendar.",
+    summary: `Evento actualizado: ${updatedFields.join(", ")}.`,
   };
 }
 
@@ -816,19 +959,19 @@ export function assertGoogleCalendarActionEnabled(
 export function formatGoogleCalendarReadResultForPrompt(
   result: GoogleCalendarReadToolExecutionResult
 ): string {
-  const baseLines = [
+  const header = [
     "GOOGLE_CALENDAR_TOOL_RESULT",
     `provider=google_calendar`,
     `action=${result.action}`,
     `request_id=${result.requestId ?? "unknown"}`,
-    `timezone=${result.data.timezone}`,
-    `window_start=${result.data.startIso}`,
-    `window_end=${result.data.endIso}`,
   ];
 
   if (result.action === "check_availability") {
     return [
-      ...baseLines,
+      ...header,
+      `timezone=${result.data.timezone}`,
+      `window_start=${result.data.startIso}`,
+      `window_end=${result.data.endIso}`,
       `slot_minutes=${result.data.slotMinutes}`,
       `busy_count=${result.data.busy.length}`,
       `free_slot_count=${result.data.freeSlots.length}`,
@@ -836,8 +979,27 @@ export function formatGoogleCalendarReadResultForPrompt(
     ].join("\n");
   }
 
+  if (result.action === "get_event_details") {
+    return [
+      ...header,
+      `timezone=${result.data.timezone}`,
+      `event_id=${result.data.id ?? "unknown"}`,
+      `title=${result.data.title ?? ""}`,
+      `start=${result.data.startIso ?? ""}`,
+      `end=${result.data.endIso ?? ""}`,
+      `location=${result.data.location ?? ""}`,
+      `organizer=${result.data.organizer ?? ""}`,
+      `attendee_count=${result.data.attendees.length}`,
+      `recurrence_count=${result.data.recurrence.length}`,
+      `summary=${result.summary}`,
+    ].join("\n");
+  }
+
   return [
-    ...baseLines,
+    ...header,
+    `timezone=${result.data.timezone}`,
+    `window_start=${result.data.startIso}`,
+    `window_end=${result.data.endIso}`,
     `max_results=${result.data.maxResults}`,
     `event_count=${result.data.events.length}`,
     `summary=${result.summary}`,
@@ -878,9 +1040,11 @@ export function createGoogleCalendarReadToolExecutor(
       return { data: null, error: actionEnabled.error };
     }
 
-    const windowError = validateWindow(parsedInput.data);
-    if (windowError) {
-      return { data: null, error: windowError };
+    if (parsedInput.data.action !== "get_event_details") {
+      const windowError = validateWindow(parsedInput.data);
+      if (windowError) {
+        return { data: null, error: windowError };
+      }
     }
 
     const configResult = await deps.getGoogleIntegrationConfig(
@@ -1012,7 +1176,10 @@ export async function executeGoogleCalendarWriteToolAction(input: {
     };
   }
 
-  if (parsedInput.data.action !== "cancel_event") {
+  if (
+    parsedInput.data.action !== "cancel_event" &&
+    parsedInput.data.action !== "update_event_details"
+  ) {
     const windowError = validateWindow(parsedInput.data);
     if (windowError) {
       return { data: null, error: windowError };

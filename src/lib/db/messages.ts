@@ -4,13 +4,13 @@ import { enqueueEvent } from "@/lib/db/event-queue";
 import { createServiceSupabaseClient } from "@/lib/supabase/service";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import type { Message } from "@/types/app";
-import type { TablesInsert } from "@/types/database";
+import type { Json, TablesInsert } from "@/types/database";
 
 type DbResult<T> = { data: T | null; error: string | null };
 
 const MAX_MESSAGES = 20;
 
-type MessageRole = "user" | "assistant";
+type MessageRole = "user" | "assistant" | "tool";
 type MessageInsert = TablesInsert<"messages">;
 
 type FindMessageByFingerprintOptions = {
@@ -28,6 +28,7 @@ export type InsertMessageInput = {
   tokensInput?: number | null;
   tokensOutput?: number | null;
   createdAt?: string | null;
+  metadata?: Json | null;
 };
 
 function buildInsertPayload(input: InsertMessageInput): MessageInsert {
@@ -41,6 +42,7 @@ function buildInsertPayload(input: InsertMessageInput): MessageInsert {
     tokens_input: input.tokensInput ?? null,
     tokens_output: input.tokensOutput ?? null,
     ...(input.createdAt ? { created_at: input.createdAt } : {}),
+    ...(input.metadata ? { metadata: input.metadata } : {}),
   };
 }
 

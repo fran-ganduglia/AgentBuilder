@@ -19,6 +19,11 @@ export const SALESFORCE_WRITE_ACTIONS = [
   "create_case",
   "update_case",
   "update_opportunity",
+  "update_contact",
+  "update_account",
+  "create_opportunity",
+  "create_account",
+  "create_opportunity_contact_role",
 ] as const;
 
 export const SALESFORCE_CRM_ACTIONS = [
@@ -113,6 +118,57 @@ const updateOpportunitySchema = z.object({
   description: z.string().trim().max(4000).optional(),
 });
 
+const updateContactSchema = z.object({
+  action: z.literal("update_contact"),
+  contactId: salesforceRequiredIdSchema,
+  firstName: z.string().trim().max(40).optional(),
+  lastName: z.string().trim().max(80).optional(),
+  email: z.string().trim().email().max(320).optional(),
+  phone: z.string().trim().max(40).optional(),
+  title: z.string().trim().max(128).optional(),
+  accountId: salesforceOptionalIdSchema,
+});
+
+const updateAccountSchema = z.object({
+  action: z.literal("update_account"),
+  accountId: salesforceRequiredIdSchema,
+  name: z.string().trim().min(1).max(255).optional(),
+  phone: z.string().trim().max(40).optional(),
+  website: z.string().trim().max(255).optional(),
+  industry: z.string().trim().max(80).optional(),
+  description: z.string().trim().max(4000).optional(),
+});
+
+const createOpportunitySchema = z.object({
+  action: z.literal("create_opportunity"),
+  name: z.string().trim().min(1, "El nombre es requerido").max(120, "El nombre es demasiado largo"),
+  stageName: z.string().trim().min(1, "La etapa es requerida").max(120, "La etapa es demasiado larga"),
+  closeDate: salesforceDateSchema,
+  accountId: salesforceOptionalIdSchema,
+  amount: z.number().finite().nonnegative().max(999999999).optional(),
+  description: z.string().trim().max(4000).optional(),
+  type: z.string().trim().max(80).optional(),
+});
+
+const createAccountSchema = z.object({
+  action: z.literal("create_account"),
+  name: z.string().trim().min(1, "El nombre es requerido").max(255, "El nombre es demasiado largo"),
+  phone: z.string().trim().max(40).optional(),
+  website: z.string().trim().max(255).optional(),
+  industry: z.string().trim().max(80).optional(),
+  description: z.string().trim().max(4000).optional(),
+  billingCity: z.string().trim().max(40).optional(),
+  billingState: z.string().trim().max(80).optional(),
+  billingCountry: z.string().trim().max(80).optional(),
+});
+
+const createOpportunityContactRoleSchema = z.object({
+  action: z.literal("create_opportunity_contact_role"),
+  opportunityId: salesforceRequiredIdSchema,
+  contactId: salesforceRequiredIdSchema,
+  role: z.string().trim().max(80).optional(),
+});
+
 export const executeSalesforceCrmToolSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("lookup_records"), ...lookupSchema.shape }),
   listLeadsRecentSchema,
@@ -154,6 +210,11 @@ export const executeSalesforceCrmToolSchema = z.discriminatedUnion("action", [
   }),
   updateCaseSchema,
   updateOpportunitySchema,
+  updateContactSchema,
+  updateAccountSchema,
+  createOpportunitySchema,
+  createAccountSchema,
+  createOpportunityContactRoleSchema,
 ]).superRefine((value, ctx) => {
   if (
     value.action === "update_lead" &&
@@ -181,6 +242,29 @@ export const executeSalesforceCrmToolSchema = z.discriminatedUnion("action", [
     value.amount === undefined &&
     value.closeDate === undefined &&
     value.nextStep === undefined &&
+    value.description === undefined
+  ) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Debes indicar al menos un campo a actualizar" });
+  }
+
+  if (
+    value.action === "update_contact" &&
+    value.firstName === undefined &&
+    value.lastName === undefined &&
+    value.email === undefined &&
+    value.phone === undefined &&
+    value.title === undefined &&
+    value.accountId === undefined
+  ) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Debes indicar al menos un campo a actualizar" });
+  }
+
+  if (
+    value.action === "update_account" &&
+    value.name === undefined &&
+    value.phone === undefined &&
+    value.website === undefined &&
+    value.industry === undefined &&
     value.description === undefined
   ) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Debes indicar al menos un campo a actualizar" });
@@ -229,6 +313,11 @@ export function getSalesforceActionLabel(action: SalesforceCrmAction): string {
     create_case: "Crear case",
     update_case: "Actualizar case",
     update_opportunity: "Actualizar opportunity",
+    update_contact: "Actualizar contacto",
+    update_account: "Actualizar account",
+    create_opportunity: "Crear opportunity",
+    create_account: "Crear account",
+    create_opportunity_contact_role: "Vincular contacto a oportunidad",
   };
 
   return labels[action];
@@ -250,6 +339,11 @@ export function getSalesforceActionDescription(action: SalesforceCrmAction): str
     create_case: "Crea casos de soporte o escalacion.",
     update_case: "Actualiza estado, prioridad u owner de un case.",
     update_opportunity: "Actualiza etapa, monto o proximo paso de una oportunidad.",
+    update_contact: "Actualiza datos de un contacto existente en Salesforce.",
+    update_account: "Actualiza datos de una cuenta existente en Salesforce.",
+    create_opportunity: "Crea una nueva oportunidad comercial en Salesforce.",
+    create_account: "Crea una nueva cuenta en Salesforce.",
+    create_opportunity_contact_role: "Vincula un contacto existente a una oportunidad con un rol especifico.",
   };
 
   return descriptions[action];

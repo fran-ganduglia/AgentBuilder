@@ -2,6 +2,8 @@ import type { Tables } from "@/types/database";
 import {
   parseGmailAgentToolConfig,
   parseGoogleCalendarAgentToolConfig,
+  parseGoogleDriveAgentToolConfig,
+  parseGoogleSheetsAgentToolConfig,
 } from "@/lib/integrations/google-agent-tools";
 
 type AgentTool = Tables<"agent_tools">;
@@ -22,6 +24,20 @@ export function isGoogleCalendarAgentTool(tool: AgentTool): boolean {
   return (
     tool.tool_type === "google_calendar" &&
     Boolean(parseGoogleCalendarAgentToolConfig(tool.config))
+  );
+}
+
+export function isGoogleSheetsAgentTool(tool: AgentTool): boolean {
+  return (
+    tool.tool_type === "google_sheets" &&
+    Boolean(parseGoogleSheetsAgentToolConfig(tool.config))
+  );
+}
+
+export function isGoogleDriveAgentTool(tool: AgentTool): boolean {
+  return (
+    tool.tool_type === "google_drive" &&
+    Boolean(parseGoogleDriveAgentToolConfig(tool.config))
   );
 }
 
@@ -100,6 +116,70 @@ export function getGoogleCalendarAgentToolDiagnostics(
     hasMisalignedTools: Boolean(
       activeIntegrationId &&
         calendarTools.some(
+          (tool) => tool.integration_id && tool.integration_id !== activeIntegrationId
+        )
+    ),
+  };
+}
+
+export function getGoogleSheetsAgentToolDiagnostics(
+  tools: AgentTool[],
+  activeIntegrationId: string | null
+): {
+  selectedTool: AgentTool | null;
+  selectedAllowedActions: string[];
+  hasDuplicateTools: boolean;
+  hasMisalignedTools: boolean;
+} {
+  const sheetsTools = tools.filter(isGoogleSheetsAgentTool);
+  const selectedTool = selectPreferredTool(
+    tools,
+    isGoogleSheetsAgentTool,
+    activeIntegrationId
+  );
+  const config = selectedTool
+    ? parseGoogleSheetsAgentToolConfig(selectedTool.config)
+    : null;
+
+  return {
+    selectedTool,
+    selectedAllowedActions: config?.allowed_actions ?? [],
+    hasDuplicateTools: sheetsTools.length > 1,
+    hasMisalignedTools: Boolean(
+      activeIntegrationId &&
+        sheetsTools.some(
+          (tool) => tool.integration_id && tool.integration_id !== activeIntegrationId
+        )
+    ),
+  };
+}
+
+export function getGoogleDriveAgentToolDiagnostics(
+  tools: AgentTool[],
+  activeIntegrationId: string | null
+): {
+  selectedTool: AgentTool | null;
+  selectedAllowedActions: string[];
+  hasDuplicateTools: boolean;
+  hasMisalignedTools: boolean;
+} {
+  const driveTools = tools.filter(isGoogleDriveAgentTool);
+  const selectedTool = selectPreferredTool(
+    tools,
+    isGoogleDriveAgentTool,
+    activeIntegrationId
+  );
+  const config = selectedTool
+    ? parseGoogleDriveAgentToolConfig(selectedTool.config)
+    : null;
+
+  return {
+    selectedTool,
+    selectedAllowedActions: config?.allowed_actions ?? [],
+    hasDuplicateTools: driveTools.length > 1,
+    hasMisalignedTools: Boolean(
+      activeIntegrationId &&
+        driveTools.some(
           (tool) => tool.integration_id && tool.integration_id !== activeIntegrationId
         )
     ),

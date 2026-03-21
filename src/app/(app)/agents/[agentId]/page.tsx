@@ -13,6 +13,11 @@ import {
   getGoogleCalendarAgentIntegrationState,
 } from "@/lib/agents/google-calendar-agent-integration";
 import {
+  buildGoogleSheetsSetupResolutionContext,
+  getGoogleSheetsAgentIntegrationState,
+  getGoogleSheetsIntegrationCta,
+} from "@/lib/agents/google-sheets-agent-integration";
+import {
   buildSalesforceSetupResolutionContext,
   getSalesforceAgentIntegrationState,
   getSalesforceIntegrationCta,
@@ -95,7 +100,12 @@ export default async function AgentDetailPage({ params, searchParams }: AgentDet
     hasReadyDocuments: hasReadyDocumentsResult,
   });
 
-  const [salesforceIntegrationStateResult, gmailIntegrationStateResult, googleCalendarIntegrationStateResult] = await Promise.all([
+  const [
+    salesforceIntegrationStateResult,
+    gmailIntegrationStateResult,
+    googleCalendarIntegrationStateResult,
+    googleSheetsIntegrationStateResult,
+  ] = await Promise.all([
     baseSetupState
       ? getSalesforceAgentIntegrationState({
           agentId,
@@ -117,6 +127,13 @@ export default async function AgentDetailPage({ params, searchParams }: AgentDet
           setupState: baseSetupState,
         })
       : Promise.resolve({ data: null, error: null }),
+    baseSetupState
+      ? getGoogleSheetsAgentIntegrationState({
+          agentId,
+          organizationId: session.organizationId,
+          setupState: baseSetupState,
+        })
+      : Promise.resolve({ data: null, error: null }),
   ]);
 
   const salesforceIntegrationState = salesforceIntegrationStateResult.error
@@ -128,11 +145,15 @@ export default async function AgentDetailPage({ params, searchParams }: AgentDet
   const googleCalendarIntegrationState = googleCalendarIntegrationStateResult.error
     ? null
     : googleCalendarIntegrationStateResult.data;
+  const googleSheetsIntegrationState = googleSheetsIntegrationStateResult.error
+    ? null
+    : googleSheetsIntegrationStateResult.data;
 
   const providerIntegrations = {
     ...buildSalesforceSetupResolutionContext(salesforceIntegrationState),
     ...buildGmailSetupResolutionContext(gmailIntegrationState),
     ...buildGoogleCalendarSetupResolutionContext(googleCalendarIntegrationState),
+    ...buildGoogleSheetsSetupResolutionContext(googleSheetsIntegrationState),
   };
   const googleCalendarTimezoneResult =
     googleCalendarIntegrationState?.integration &&
@@ -197,6 +218,22 @@ export default async function AgentDetailPage({ params, searchParams }: AgentDet
           label: googleCalendarIntegrationCta?.label ?? "Abrir integraciones",
         }
       : null;
+  const googleSheetsIntegrationCta = googleSheetsIntegrationState
+    ? getGoogleSheetsIntegrationCta(googleSheetsIntegrationState)
+    : null;
+  const googleSheetsIntegrationNotice =
+    googleSheetsIntegrationState?.expectsGoogleSheetsIntegration &&
+    !googleSheetsIntegrationState.isLinked
+      ? {
+          title: googleSheetsIntegrationState.integration
+            ? `Google Sheets: ${googleSheetsIntegrationState.integrationView.label}`
+            : "Google Sheets pendiente",
+          message: googleSheetsIntegrationState.message,
+          tone: googleSheetsIntegrationState.integrationView.tone,
+          href: googleSheetsIntegrationCta?.href ?? "/settings/integrations",
+          label: googleSheetsIntegrationCta?.label ?? "Abrir integraciones",
+        }
+      : null;
 
   const connection = canViewConnectionDetails ? connectionResult.data : null;
   const connectionSummary = buildAgentConnectionSummary(connection ?? connectionSummaryResult.data);
@@ -224,6 +261,7 @@ export default async function AgentDetailPage({ params, searchParams }: AgentDet
       salesforceIntegrationNotice={salesforceIntegrationNotice}
       gmailIntegrationNotice={gmailIntegrationNotice}
       googleCalendarIntegrationNotice={googleCalendarIntegrationNotice}
+      googleSheetsIntegrationNotice={googleSheetsIntegrationNotice}
       promptEnvironment={{
         salesforceUsable: Boolean(
           salesforceIntegrationState?.hasUsableIntegration && salesforceIntegrationState?.hasEnabledTool

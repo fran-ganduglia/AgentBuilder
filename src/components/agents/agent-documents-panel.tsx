@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import type { Tables } from "@/types/database";
+import { formatFileSize } from "@/lib/utils/format";
 
 type AgentDocument = Tables<"agent_documents">;
 
@@ -10,22 +11,6 @@ type AgentDocumentsPanelProps = {
   initialDocuments: AgentDocument[];
   canUpload: boolean;
 };
-
-function formatFileSize(bytes: number | null): string {
-  if (!bytes || bytes <= 0) {
-    return "Tamano desconocido";
-  }
-
-  if (bytes < 1024) {
-    return `${bytes} B`;
-  }
-
-  if (bytes < 1024 * 1024) {
-    return `${(bytes / 1024).toFixed(1)} KB`;
-  }
-
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
 
 function formatDate(value: string | null): string {
   if (!value) {

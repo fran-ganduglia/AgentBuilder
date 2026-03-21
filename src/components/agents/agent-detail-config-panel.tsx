@@ -7,6 +7,7 @@ import type { AgentFormErrors, AgentFormFields } from "@/components/agents/agent
 import { AgentToolsPanel } from "@/components/agents/agent-tools-panel";
 import { GmailAgentToolsPanel } from "@/components/agents/gmail-agent-tools-panel";
 import { GoogleCalendarAgentToolsPanel } from "@/components/agents/google-calendar-agent-tools-panel";
+import { GoogleSheetsAgentToolsPanel } from "@/components/agents/google-sheets-agent-tools-panel";
 import type { AgentConnectionSummary } from "@/lib/agents/connection-policy";
 import type { AgentSetupState } from "@/lib/agents/agent-setup";
 import type { PromptSyncMode } from "@/lib/agents/agent-templates";
@@ -35,6 +36,7 @@ type AgentDetailConfigPanelProps = {
   salesforceIntegrationNotice: IntegrationNotice | null;
   gmailIntegrationNotice: IntegrationNotice | null;
   googleCalendarIntegrationNotice: IntegrationNotice | null;
+  googleSheetsIntegrationNotice: IntegrationNotice | null;
   onChange: <K extends keyof AgentFormFields>(field: K, value: AgentFormFields[K]) => void;
 };
 
@@ -90,6 +92,7 @@ export function AgentDetailConfigPanel({
   salesforceIntegrationNotice,
   gmailIntegrationNotice,
   googleCalendarIntegrationNotice,
+  googleSheetsIntegrationNotice,
   onChange,
 }: AgentDetailConfigPanelProps) {
   const canEditTools = userRole === "admin" || userRole === "editor";
@@ -117,12 +120,19 @@ export function AgentDetailConfigPanel({
         />
       ) : null}
 
+      {googleSheetsIntegrationNotice ? (
+        <IntegrationNoticeCard
+          eyebrow="Google Sheets en chat web"
+          notice={googleSheetsIntegrationNotice}
+        />
+      ) : null}
+
       {connection ? (
         <AgentConnectionPanel
           agentId={agentId}
           connection={connection}
           connectionSummary={connectionSummary}
-          canResync={userRole === "admin" && connectionSummary.classification === "remote_managed"}
+          canResync={false}
           showSensitiveDetails={userRole === "admin"}
         />
       ) : null}
@@ -130,6 +140,7 @@ export function AgentDetailConfigPanel({
       <AgentToolsPanel agentId={agentId} canEdit={canEditTools} />
       <GmailAgentToolsPanel agentId={agentId} canEdit={canEditTools} />
       <GoogleCalendarAgentToolsPanel agentId={agentId} canEdit={canEditTools} />
+      <GoogleSheetsAgentToolsPanel agentId={agentId} canEdit={canEditTools} />
 
       {qaProposalSummary ? (
         <div className="rounded-[1.75rem] border border-sky-200 bg-sky-50 p-6 shadow-sm">

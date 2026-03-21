@@ -34,6 +34,7 @@ const GMAIL_MAX_MESSAGES_PER_THREAD = 5;
 const GMAIL_METHOD_KEY = "google_workspace.gmail.user_quota";
 const GMAIL_WRITE_METHOD_KEY = "google_workspace.gmail.write_requests";
 const GMAIL_STEP_HEADER = "X-AgentBuilder-Workflow-Step-Id";
+const CHAT_ATTACHMENTS_BUCKET = "chat-attachments";
 
 type GmailMessagePart = {
   filename?: string;
@@ -162,6 +163,8 @@ export type GoogleGmailWriteToolExecutionResult =
         messageId: string | null;
         rfcMessageId: string | null;
         subject: string | null;
+        attachmentCount: number;
+        attachmentFileNames: string[];
         status: "created" | "already_exists";
       };
       summary: string;
@@ -176,6 +179,8 @@ export type GoogleGmailWriteToolExecutionResult =
         threadId: string;
         rfcMessageId: string | null;
         subject: string | null;
+        attachmentCount: number;
+        attachmentFileNames: string[];
         status: "sent";
       };
       summary: string;
@@ -192,6 +197,8 @@ export type GoogleGmailWriteToolExecutionResult =
         rfcMessageId: string | null;
         subject: string | null;
         to: string[];
+        attachmentCount: number;
+        attachmentFileNames: string[];
         status: "created" | "already_exists";
       };
       summary: string;
@@ -207,6 +214,8 @@ export type GoogleGmailWriteToolExecutionResult =
         rfcMessageId: string | null;
         subject: string | null;
         to: string[];
+        attachmentCount: number;
+        attachmentFileNames: string[];
         status: "sent";
       };
       summary: string;
@@ -234,6 +243,77 @@ export type GoogleGmailWriteToolExecutionResult =
         threadId: string;
         messageId: string;
         status: "archived" | "already_archived";
+      };
+      summary: string;
+    }
+  | {
+      action: "mark_as_read";
+      requestId: string | null;
+      providerObjectId: string;
+      providerObjectType: "thread";
+      data: {
+        threadId: string;
+        status: "read" | "already_read";
+      };
+      summary: string;
+    }
+  | {
+      action: "mark_as_unread";
+      requestId: string | null;
+      providerObjectId: string;
+      providerObjectType: "thread";
+      data: {
+        threadId: string;
+        status: "unread" | "already_unread";
+      };
+      summary: string;
+    }
+  | {
+      action: "star_thread";
+      requestId: string | null;
+      providerObjectId: string;
+      providerObjectType: "thread";
+      data: {
+        threadId: string;
+        status: "starred" | "already_starred";
+      };
+      summary: string;
+    }
+  | {
+      action: "unstar_thread";
+      requestId: string | null;
+      providerObjectId: string;
+      providerObjectType: "thread";
+      data: {
+        threadId: string;
+        status: "unstarred" | "already_unstarred";
+      };
+      summary: string;
+    }
+  | {
+      action: "remove_label";
+      requestId: string | null;
+      providerObjectId: string;
+      providerObjectType: "thread";
+      data: {
+        threadId: string;
+        labelId: string;
+        labelName: string;
+        status: "removed" | "already_absent";
+      };
+      summary: string;
+    }
+  | {
+      action: "forward_thread";
+      requestId: string | null;
+      providerObjectId: string | null;
+      providerObjectType: "message";
+      data: {
+        messageId: string | null;
+        threadId: string | null;
+        to: string[];
+        subject: string | null;
+        status: "forwarded";
       };
       summary: string;
     };
@@ -478,7 +558,165 @@ function findDraftForWorkflowStep(
   );
 }
 
-function buildDraftReplyMessage(input: {
+type StorageAttachment = {
+  fileName: string;
+  mimeType: string;
+  base64Content: string;
+};
+
+function sanitizeMimeHeaderValue(value: string, fallback: string): string {
+  const sanitized = value.replace(/[\r\n"]/g, "").trim();
+  return sanitized.length > 0 ? sanitized : fallback;
+}
+
+function wrapBase64Lines(base64Content: string): string {
+  return base64Content.match(/.{1,76}/g)?.join("\r\n") ?? base64Content;
+}
+
+function inferMimeTypeFromFileName(fileName: string): string {
+  const ext = fileName.split(".").pop()?.toLowerCase();
+  switch (ext) {
+    case "pdf": return "application/pdf";
+    case "png": return "image/png";
+    case "jpg": case "jpeg": return "image/jpeg";
+    case "gif": return "image/gif";
+    case "webp": return "image/webp";
+    case "txt": return "text/plain";
+    case "csv": return "text/csv";
+    case "docx": return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+    case "xlsx": return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+    case "pptx": return "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+    default: return "application/octet-stream";
+  }
+}
+
+async function downloadAttachmentsFromStorage(
+  attachmentPaths: string[],
+  organizationId: string
+): Promise<StorageAttachment[]> {
+  if (attachmentPaths.length === 0) return [];
+
+  const normalizedPaths = assertAttachmentPathsBelongToOrganization(
+    attachmentPaths,
+    organizationId
+  );
+
+  const { createServiceSupabaseClient } = await import("@/lib/supabase/service");
+  const serviceClient = createServiceSupabaseClient();
+  const results: StorageAttachment[] = [];
+
+  for (const storagePath of normalizedPaths) {
+    const { data, error } = await serviceClient.storage
+      .from(CHAT_ATTACHMENTS_BUCKET)
+      .download(storagePath);
+
+    if (error || !data) {
+      const normalizedMessage = error?.message?.toLowerCase() ?? "";
+      const isBucketMissing =
+        normalizedMessage.includes("bucket") &&
+        normalizedMessage.includes("not found");
+
+      throw new ProviderRequestError({
+        provider: "google_workspace",
+        message: isBucketMissing
+          ? `Falta provisionar el bucket privado "${CHAT_ATTACHMENTS_BUCKET}" en Supabase antes de enviar emails con adjuntos.`
+          : `No se pudo descargar el adjunto "${storagePath.split("/").pop() ?? storagePath}" desde storage: ${error?.message ?? "archivo no encontrado"}.`,
+        statusCode: 502,
+      });
+    }
+
+    const fileName = storagePath.split("/").pop() ?? "attachment";
+    const arrayBuffer = await data.arrayBuffer();
+    const base64Content = Buffer.from(arrayBuffer).toString("base64");
+    const mimeType = data.type && data.type !== "application/octet-stream"
+      ? data.type
+      : inferMimeTypeFromFileName(fileName);
+
+    results.push({
+      fileName,
+      mimeType,
+      base64Content,
+    });
+  }
+
+  return results;
+}
+
+export function assertAttachmentPathsBelongToOrganization(
+  attachmentPaths: string[],
+  organizationId: string
+): string[] {
+  const expectedPrefix = `${organizationId}/`;
+  const normalizedPaths = attachmentPaths.map((path) => path.trim()).filter(Boolean);
+
+  if (
+    normalizedPaths.some(
+      (path) => !path.startsWith(expectedPrefix) || path.includes("..")
+    )
+  ) {
+    throw new ProviderRequestError({
+      provider: "google_workspace",
+      message:
+        "Los adjuntos deben pertenecer a la organizacion autenticada antes de enviarse por Gmail.",
+      statusCode: 400,
+    });
+  }
+
+  return normalizedPaths;
+}
+
+function appendLinksToBody(body: string, links?: string[]): string {
+  if (!links || links.length === 0) return body;
+  return `${body}\n\n---\nLinks:\n${links.map((l) => `- ${l}`).join("\n")}`;
+}
+
+function buildMimeWithAttachments(input: {
+  headers: string[];
+  body: string;
+  attachments: StorageAttachment[];
+  workflowStepId: string;
+}): string {
+  const boundary = `boundary_${crypto.randomUUID().replace(/-/g, "")}`;
+
+  const headerLines = [
+    ...input.headers,
+    `MIME-Version: 1.0`,
+    GMAIL_STEP_HEADER + `: ${input.workflowStepId}`,
+    `Content-Type: multipart/mixed; boundary="${boundary}"`,
+  ];
+
+  const parts: string[] = [];
+
+  parts.push(
+    [
+      `--${boundary}`,
+      'Content-Type: text/plain; charset="UTF-8"',
+      "Content-Transfer-Encoding: base64",
+      "",
+      wrapBase64Lines(Buffer.from(input.body, "utf8").toString("base64")),
+    ].join("\r\n")
+  );
+
+  for (const attachment of input.attachments) {
+    const safeFileName = sanitizeMimeHeaderValue(attachment.fileName, "attachment");
+    parts.push(
+      [
+        `--${boundary}`,
+        `Content-Type: ${attachment.mimeType}; name="${safeFileName}"`,
+        "Content-Transfer-Encoding: base64",
+        `Content-Disposition: attachment; filename="${safeFileName}"`,
+        "",
+        wrapBase64Lines(attachment.base64Content),
+      ].join("\r\n")
+    );
+  }
+
+  parts.push(`--${boundary}--`);
+
+  return `${[headerLines.join("\r\n"), "", parts.join("\r\n")].join("\r\n")}\r\n`;
+}
+
+export function buildDraftReplyMessage(input: {
   to: string;
   cc?: string[];
   bcc?: string[];
@@ -486,46 +724,80 @@ function buildDraftReplyMessage(input: {
   body: string;
   rfcMessageId?: string | null;
   workflowStepId: string;
+  links?: string[];
+  attachments?: StorageAttachment[];
 }): string {
-  const lines = [
+  const body = appendLinksToBody(input.body, input.links);
+
+  const headers = [
     `To: ${input.to}`,
     ...(input.cc?.length ? [`Cc: ${dedupeEmails(input.cc).join(", ")}`] : []),
     ...(input.bcc?.length ? [`Bcc: ${dedupeEmails(input.bcc).join(", ")}`] : []),
     `Subject: Re: ${input.subject}`,
-    "Content-Type: text/plain; charset=UTF-8",
-    "Content-Transfer-Encoding: 7bit",
-    GMAIL_STEP_HEADER + `: ${input.workflowStepId}`,
     ...(input.rfcMessageId
       ? [
           `In-Reply-To: ${input.rfcMessageId}`,
           `References: ${input.rfcMessageId}`,
         ]
       : []),
+  ];
+
+  if (input.attachments && input.attachments.length > 0) {
+    return buildMimeWithAttachments({
+      headers,
+      body,
+      attachments: input.attachments,
+      workflowStepId: input.workflowStepId,
+    });
+  }
+
+  const lines = [
+    ...headers,
+    'Content-Type: text/plain; charset="UTF-8"',
+    "Content-Transfer-Encoding: 7bit",
+    GMAIL_STEP_HEADER + `: ${input.workflowStepId}`,
     "",
-    input.body,
+    body,
   ];
 
   return lines.join("\r\n");
 }
 
-function buildNewEmailMessage(input: {
+export function buildNewEmailMessage(input: {
   to: string[];
   cc?: string[];
   bcc?: string[];
   subject: string;
   body: string;
   workflowStepId: string;
+  links?: string[];
+  attachments?: StorageAttachment[];
 }): string {
-  const lines = [
+  const body = appendLinksToBody(input.body, input.links);
+
+  const headers = [
     `To: ${dedupeEmails(input.to).join(", ")}`,
     ...(input.cc?.length ? [`Cc: ${dedupeEmails(input.cc).join(", ")}`] : []),
     ...(input.bcc?.length ? [`Bcc: ${dedupeEmails(input.bcc).join(", ")}`] : []),
     `Subject: ${input.subject}`,
-    "Content-Type: text/plain; charset=UTF-8",
+  ];
+
+  if (input.attachments && input.attachments.length > 0) {
+    return buildMimeWithAttachments({
+      headers,
+      body,
+      attachments: input.attachments,
+      workflowStepId: input.workflowStepId,
+    });
+  }
+
+  const lines = [
+    ...headers,
+    'Content-Type: text/plain; charset="UTF-8"',
     "Content-Transfer-Encoding: 7bit",
     GMAIL_STEP_HEADER + `: ${input.workflowStepId}`,
     "",
-    input.body,
+    body,
   ];
 
   return lines.join("\r\n");
@@ -783,6 +1055,22 @@ function getWriteExecutionFallback(
     return "No se pudo aplicar el label en Gmail.";
   }
 
+  if (action === "mark_as_read" || action === "mark_as_unread") {
+    return "No se pudo cambiar el estado de lectura del hilo en Gmail.";
+  }
+
+  if (action === "star_thread" || action === "unstar_thread") {
+    return "No se pudo cambiar el estado de destacado del hilo en Gmail.";
+  }
+
+  if (action === "remove_label") {
+    return "No se pudo quitar el label del hilo en Gmail.";
+  }
+
+  if (action === "forward_thread") {
+    return "No se pudo reenviar el hilo en Gmail.";
+  }
+
   return "No se pudo archivar el hilo en Gmail.";
 }
 
@@ -797,7 +1085,11 @@ export async function runGoogleGmailAction(
       maxResults: String(GMAIL_SEARCH_FETCH_LIMIT),
       includeSpamTrash: "false",
     });
-    listParams.append("labelIds", "INBOX");
+    if (input.query && input.query.trim().length > 0) {
+      listParams.set("q", input.query.trim());
+    } else {
+      listParams.append("labelIds", "INBOX");
+    }
 
     const threadsResponse = await requestGoogleGmail<GmailThreadsListResponse>(
       accessToken,
@@ -822,7 +1114,11 @@ export async function runGoogleGmailAction(
     const threads = fetchedThreads
       .map((thread) => mapThreadSummary(thread.data))
       .filter((thread): thread is GmailThreadSummary => Boolean(thread))
-      .filter((thread) => matchesLocalQuery(thread, input.query))
+      .filter((thread) =>
+        input.query && input.query.trim().length > 0
+          ? true
+          : matchesLocalQuery(thread, input.query)
+      )
       .slice(0, input.maxResults ?? GMAIL_MAX_RESULTS);
 
     return {
@@ -899,6 +1195,59 @@ function buildDraftSummary(status: "created" | "already_exists", subject: string
     : `Se creo un borrador de respuesta para ${subject ? `"${subject}"` : "ese hilo"}.`;
 }
 
+type LabelToggleAction = "mark_as_read" | "mark_as_unread" | "star_thread" | "unstar_thread";
+
+type LabelToggleConfig = {
+  action: LabelToggleAction;
+  labelId: string;
+  /** When true the label must be PRESENT for the "already in desired state" early return */
+  labelShouldBePresent: boolean;
+  addLabel: boolean;
+  statusAlready: string;
+  statusChanged: string;
+  summaryAlready: string;
+  summaryChanged: string;
+};
+
+async function toggleThreadLabel(
+  threadResponse: { requestId: string | null; data: GmailThreadGetResponse },
+  threadId: string,
+  accessToken: string,
+  organizationId: string,
+  integrationId: string,
+  workflow: { workflowRunId: string; workflowStepId: string } | undefined,
+  config: LabelToggleConfig
+): Promise<Extract<GoogleGmailWriteToolExecutionResult, { action: LabelToggleAction }>> {
+  const currentLabels = getThreadLabelIds(threadResponse.data);
+  const labelPresent = currentLabels.includes(config.labelId);
+
+  if (labelPresent === config.labelShouldBePresent) {
+    return {
+      action: config.action,
+      requestId: threadResponse.requestId,
+      providerObjectId: threadId,
+      providerObjectType: "thread",
+      data: { threadId, status: config.statusAlready },
+      summary: config.summaryAlready,
+    } as Extract<GoogleGmailWriteToolExecutionResult, { action: LabelToggleAction }>;
+  }
+
+  const modifyResponse = await modifyGmailThread(accessToken, organizationId, integrationId, {
+    threadId,
+    ...(config.addLabel ? { addLabelIds: [config.labelId] } : { removeLabelIds: [config.labelId] }),
+    workflow,
+  });
+
+  return {
+    action: config.action,
+    requestId: modifyResponse.requestId,
+    providerObjectId: threadId,
+    providerObjectType: "thread",
+    data: { threadId, status: config.statusChanged },
+    summary: config.summaryChanged,
+  } as Extract<GoogleGmailWriteToolExecutionResult, { action: LabelToggleAction }>;
+}
+
 export async function runGoogleGmailWriteAction(
   input: ExecuteGoogleGmailWriteToolInput,
   accessToken: string,
@@ -921,6 +1270,17 @@ export async function runGoogleGmailWriteAction(
     }
 
     const subject = input.subject ?? "Sin asunto";
+    const storageAttachments = input.attachmentPaths?.length
+      ? await downloadAttachmentsFromStorage(input.attachmentPaths, organizationId)
+      : [];
+    console.info("gmail.write_action.attachments_ready", {
+      action: input.action,
+      organizationId,
+      integrationId,
+      attachmentCount: storageAttachments.length,
+      attachmentFileNames: storageAttachments.map((attachment) => attachment.fileName),
+      workflowStepId: workflow.workflowStepId,
+    });
     const draftResponse = await createGmailDraft(accessToken, organizationId, integrationId, {
       raw: encodeDraftRaw(
         buildNewEmailMessage({
@@ -930,6 +1290,8 @@ export async function runGoogleGmailWriteAction(
           subject,
           body: input.body,
           workflowStepId: workflow.workflowStepId,
+          links: input.links,
+          attachments: storageAttachments.length > 0 ? storageAttachments : undefined,
         })
       ),
       workflow,
@@ -947,6 +1309,8 @@ export async function runGoogleGmailWriteAction(
         rfcMessageId: getHeaderValue(draftResponse.data.message?.payload, "Message-Id"),
         subject,
         to,
+        attachmentCount: storageAttachments.length,
+        attachmentFileNames: storageAttachments.map((attachment) => attachment.fileName),
         status: "created",
       },
       summary: `Se creo un borrador nuevo para ${to.join(", ")}${subject !== "Sin asunto" ? ` con asunto "${subject}"` : ""}.`,
@@ -964,6 +1328,17 @@ export async function runGoogleGmailWriteAction(
     }
 
     const subject = input.subject ?? "Sin asunto";
+    const storageAttachments = input.attachmentPaths?.length
+      ? await downloadAttachmentsFromStorage(input.attachmentPaths, organizationId)
+      : [];
+    console.info("gmail.write_action.attachments_ready", {
+      action: input.action,
+      organizationId,
+      integrationId,
+      attachmentCount: storageAttachments.length,
+      attachmentFileNames: storageAttachments.map((attachment) => attachment.fileName),
+      workflowStepId: workflow.workflowStepId,
+    });
     const sendResponse = await sendGmailMessage(accessToken, organizationId, integrationId, {
       raw: encodeDraftRaw(
         buildNewEmailMessage({
@@ -973,6 +1348,8 @@ export async function runGoogleGmailWriteAction(
           subject,
           body: input.body,
           workflowStepId: workflow.workflowStepId,
+          links: input.links,
+          attachments: storageAttachments.length > 0 ? storageAttachments : undefined,
         })
       ),
       workflow,
@@ -989,6 +1366,8 @@ export async function runGoogleGmailWriteAction(
         rfcMessageId: getHeaderValue(sendResponse.data.payload, "Message-Id"),
         subject,
         to,
+        attachmentCount: storageAttachments.length,
+        attachmentFileNames: storageAttachments.map((attachment) => attachment.fileName),
         status: "sent",
       },
       summary: `Se envio un email nuevo a ${to.join(", ")}${subject !== "Sin asunto" ? ` con asunto "${subject}"` : ""}.`,
@@ -1041,6 +1420,8 @@ export async function runGoogleGmailWriteAction(
           messageId: sanitizeText(existingDraft.message?.id, 128),
           rfcMessageId: getHeaderValue(existingDraft.message?.payload, "Message-Id"),
           subject: normalizeSubject(getHeaderValue(existingDraft.message?.payload, "Subject")) ?? input.subject ?? null,
+          attachmentCount: input.attachmentPaths?.length ?? 0,
+          attachmentFileNames: input.attachmentPaths?.map((path) => path.split("/").pop() ?? path) ?? [],
           status: "already_exists",
         },
         summary: buildDraftSummary(
@@ -1063,6 +1444,17 @@ export async function runGoogleGmailWriteAction(
       normalizeSubject(input.subject) ??
       "Sin asunto";
     const rfcMessageId = getHeaderValue(targetMessage.payload, "Message-Id");
+    const replyAttachments = input.attachmentPaths?.length
+      ? await downloadAttachmentsFromStorage(input.attachmentPaths, organizationId)
+      : [];
+    console.info("gmail.write_action.attachments_ready", {
+      action: input.action,
+      organizationId,
+      integrationId,
+      attachmentCount: replyAttachments.length,
+      attachmentFileNames: replyAttachments.map((attachment) => attachment.fileName),
+      workflowStepId: workflow.workflowStepId,
+    });
     const draftResponse = await createGmailDraft(accessToken, organizationId, integrationId, {
       threadId: input.threadId,
       raw: encodeDraftRaw(
@@ -1074,6 +1466,8 @@ export async function runGoogleGmailWriteAction(
           body: input.body,
           rfcMessageId,
           workflowStepId: workflow.workflowStepId,
+          links: input.links,
+          attachments: replyAttachments.length > 0 ? replyAttachments : undefined,
         })
       ),
       workflow,
@@ -1090,6 +1484,8 @@ export async function runGoogleGmailWriteAction(
         messageId: sanitizeText(draftResponse.data.message?.id, 128),
         rfcMessageId: getHeaderValue(draftResponse.data.message?.payload, "Message-Id"),
         subject,
+        attachmentCount: replyAttachments.length,
+        attachmentFileNames: replyAttachments.map((attachment) => attachment.fileName),
         status: "created",
       },
       summary: buildDraftSummary("created", subject),
@@ -1114,6 +1510,17 @@ export async function runGoogleGmailWriteAction(
       normalizeSubject(input.subject) ??
       "Sin asunto";
     const rfcMessageId = getHeaderValue(targetMessage.payload, "Message-Id");
+    const sendReplyAttachments = input.attachmentPaths?.length
+      ? await downloadAttachmentsFromStorage(input.attachmentPaths, organizationId)
+      : [];
+    console.info("gmail.write_action.attachments_ready", {
+      action: input.action,
+      organizationId,
+      integrationId,
+      attachmentCount: sendReplyAttachments.length,
+      attachmentFileNames: sendReplyAttachments.map((attachment) => attachment.fileName),
+      workflowStepId: workflow.workflowStepId,
+    });
     const sendResponse = await sendGmailMessage(accessToken, organizationId, integrationId, {
       threadId: input.threadId,
       raw: encodeDraftRaw(
@@ -1125,6 +1532,8 @@ export async function runGoogleGmailWriteAction(
           body: input.body,
           rfcMessageId,
           workflowStepId: workflow.workflowStepId,
+          links: input.links,
+          attachments: sendReplyAttachments.length > 0 ? sendReplyAttachments : undefined,
         })
       ),
       workflow,
@@ -1140,6 +1549,8 @@ export async function runGoogleGmailWriteAction(
         threadId: sanitizeText(sendResponse.data.threadId, 128) ?? input.threadId,
         rfcMessageId: getHeaderValue(sendResponse.data.payload, "Message-Id"),
         subject,
+        attachmentCount: sendReplyAttachments.length,
+        attachmentFileNames: sendReplyAttachments.map((attachment) => attachment.fileName),
         status: "sent",
       },
       summary: `Se envio la respuesta para ${subject ? `"${subject}"` : "ese hilo"}.`,
@@ -1196,6 +1607,165 @@ export async function runGoogleGmailWriteAction(
         status: "applied",
       },
       summary: `Se aplico el label "${label.name}" en el hilo.`,
+    };
+  }
+
+  if (input.action === "mark_as_read") {
+    return toggleThreadLabel(threadResponse, input.threadId, accessToken, organizationId, integrationId, workflow, {
+      action: "mark_as_read",
+      labelId: "UNREAD",
+      labelShouldBePresent: false,
+      addLabel: false,
+      statusAlready: "already_read",
+      statusChanged: "read",
+      summaryAlready: "El hilo ya estaba marcado como leido.",
+      summaryChanged: "El hilo se marco como leido.",
+    });
+  }
+
+  if (input.action === "mark_as_unread") {
+    return toggleThreadLabel(threadResponse, input.threadId, accessToken, organizationId, integrationId, workflow, {
+      action: "mark_as_unread",
+      labelId: "UNREAD",
+      labelShouldBePresent: true,
+      addLabel: true,
+      statusAlready: "already_unread",
+      statusChanged: "unread",
+      summaryAlready: "El hilo ya estaba marcado como no leido.",
+      summaryChanged: "El hilo se marco como no leido.",
+    });
+  }
+
+  if (input.action === "star_thread") {
+    return toggleThreadLabel(threadResponse, input.threadId, accessToken, organizationId, integrationId, workflow, {
+      action: "star_thread",
+      labelId: "STARRED",
+      labelShouldBePresent: true,
+      addLabel: true,
+      statusAlready: "already_starred",
+      statusChanged: "starred",
+      summaryAlready: "El hilo ya tenia estrella.",
+      summaryChanged: "Se destaco el hilo con estrella.",
+    });
+  }
+
+  if (input.action === "unstar_thread") {
+    return toggleThreadLabel(threadResponse, input.threadId, accessToken, organizationId, integrationId, workflow, {
+      action: "unstar_thread",
+      labelId: "STARRED",
+      labelShouldBePresent: false,
+      addLabel: false,
+      statusAlready: "already_unstarred",
+      statusChanged: "unstarred",
+      summaryAlready: "El hilo no tenia estrella.",
+      summaryChanged: "Se quito la estrella del hilo.",
+    });
+  }
+
+  if (input.action === "remove_label") {
+    const removeLabelLabelsResponse = await listGmailLabels(accessToken, organizationId, integrationId);
+    const removeLabel = resolveLabelMatch(removeLabelLabelsResponse.data.labels ?? [], input.labelName);
+
+    if (!removeLabel) {
+      throw new Error(`No existe un label de Gmail llamado "${input.labelName}".`);
+    }
+
+    const removeLabelCurrentLabels = getThreadLabelIds(threadResponse.data);
+    if (!removeLabelCurrentLabels.includes(removeLabel.id)) {
+      return {
+        action: "remove_label",
+        requestId: removeLabelLabelsResponse.requestId,
+        providerObjectId: input.threadId,
+        providerObjectType: "thread",
+        data: {
+          threadId: input.threadId,
+          labelId: removeLabel.id,
+          labelName: removeLabel.name,
+          status: "already_absent",
+        },
+        summary: `El label "${removeLabel.name}" ya no estaba aplicado en ese hilo.`,
+      };
+    }
+
+    const removeLabelModifyResponse = await modifyGmailThread(accessToken, organizationId, integrationId, {
+      threadId: input.threadId,
+      removeLabelIds: [removeLabel.id],
+      workflow,
+    });
+    return {
+      action: "remove_label",
+      requestId: removeLabelModifyResponse.requestId ?? removeLabelLabelsResponse.requestId,
+      providerObjectId: input.threadId,
+      providerObjectType: "thread",
+      data: {
+        threadId: input.threadId,
+        labelId: removeLabel.id,
+        labelName: removeLabel.name,
+        status: "removed",
+      },
+      summary: `Se quito el label "${removeLabel.name}" del hilo.`,
+    };
+  }
+
+  if (input.action === "forward_thread") {
+    if (!workflow?.workflowStepId) {
+      throw new Error("workflowStepId requerido para trazabilidad de Gmail forward.");
+    }
+
+    const forwardTo = dedupeEmails(input.to);
+    if (forwardTo.length === 0) {
+      throw new Error("Se necesita al menos un destinatario valido para reenviar el email.");
+    }
+
+    const latestMsg = (threadResponse.data.messages ?? []).sort(
+      (a, b) => Number(b.internalDate ?? 0) - Number(a.internalDate ?? 0)
+    )[0];
+    const originalSubject = normalizeSubject(getHeaderValue(latestMsg?.payload, "Subject")) ?? "Sin asunto";
+    const originalFrom = getHeaderValue(latestMsg?.payload, "From") ?? "";
+    const originalDate = getHeaderValue(latestMsg?.payload, "Date") ?? "";
+    const originalTo = getHeaderValue(latestMsg?.payload, "To") ?? "";
+
+    const forwardHeader = [
+      "---------- Forwarded message ----------",
+      `From: ${originalFrom}`,
+      `Date: ${originalDate}`,
+      `Subject: ${originalSubject}`,
+      `To: ${originalTo}`,
+    ].join("\n");
+
+    const forwardBody = input.body
+      ? `${input.body}\n\n${forwardHeader}`
+      : forwardHeader;
+
+    const forwardSubject = input.subject ?? `Fwd: ${originalSubject}`;
+
+    const fwdSendResponse = await sendGmailMessage(accessToken, organizationId, integrationId, {
+      raw: encodeDraftRaw(
+        buildNewEmailMessage({
+          to: forwardTo,
+          cc: input.cc,
+          bcc: input.bcc,
+          subject: forwardSubject,
+          body: forwardBody,
+          workflowStepId: workflow.workflowStepId,
+        })
+      ),
+      workflow,
+    });
+
+    return {
+      action: "forward_thread",
+      requestId: fwdSendResponse.requestId,
+      providerObjectId: sanitizeText(fwdSendResponse.data.id, 128),
+      providerObjectType: "message",
+      data: {
+        messageId: sanitizeText(fwdSendResponse.data.id, 128),
+        threadId: sanitizeText(fwdSendResponse.data.threadId, 128),
+        to: forwardTo,
+        subject: forwardSubject,
+        status: "forwarded",
+      },
+      summary: `Se reenvio el hilo a ${forwardTo.join(", ")} con asunto "${forwardSubject}".`,
     };
   }
 

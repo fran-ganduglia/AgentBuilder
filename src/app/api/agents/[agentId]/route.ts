@@ -1,6 +1,5 @@
 ﻿import { NextResponse } from "next/server";
 import { z } from "zod";
-import { buildAgentConnectionSummary } from "@/lib/agents/connection-policy";
 import {
   canActivateScope,
   haveIntegrationSelectionsChanged,
@@ -24,6 +23,10 @@ import {
   getGoogleCalendarAgentIntegrationState,
 } from "@/lib/agents/google-calendar-agent-integration";
 import {
+  buildGoogleSheetsSetupResolutionContext,
+  getGoogleSheetsAgentIntegrationState,
+} from "@/lib/agents/google-sheets-agent-integration";
+import {
   buildSalesforceSetupResolutionContext,
   getSalesforceAgentIntegrationState,
 } from "@/lib/agents/salesforce-agent-integration";
@@ -39,26 +42,13 @@ import {
 } from "@/lib/db/deletion-requests";
 import {
   getAgentConnectionByAgentId,
-  markAgentConnectionError,
-  markAgentConnectionSynced,
 } from "@/lib/db/agent-connections";
 import { insertAuditLog } from "@/lib/db/audit";
 import { enqueueEvent } from "@/lib/db/event-queue";
 import { getOrganizationPlan } from "@/lib/db/organization-plans";
-import {
-  getOpenAIIntegrationApiKey,
-  getOpenAIIntegrationById,
-} from "@/lib/db/integrations";
-import { assertUsableIntegration } from "@/lib/integrations/access";
-import { insertProviderActionAudit } from "@/lib/integrations/audit";
 import { resolveGoogleCalendarIntegrationTimezone } from "@/lib/integrations/google-calendar-timezone";
-import { getSafeProviderErrorMessage } from "@/lib/integrations/provider-gateway";
 import { isSalesforceCrmAgentTool } from "@/lib/integrations/salesforce-agent-tool-selection";
 import { listAgentTools } from "@/lib/db/agent-tools";
-import {
-  buildAssistantConnectionMetadata,
-} from "@/lib/llm/openai-assistant-mapper";
-import { updateOpenAIAssistant } from "@/lib/llm/openai-assistants";
 import type { Role } from "@/types/app";
 import type { Json } from "@/types/database";
 import { AGENT_CAPABILITIES, PUBLIC_WORKFLOW_IDS } from "@/lib/agents/public-workflow";
@@ -89,23 +79,6 @@ const updateAgentSchema = z.object({
 type RouteContext = {
   params: Promise<{ agentId: string }>;
 };
-
-function hasRemoteManagedFieldChange(
-  input: Parameters<typeof updateAgent>[1],
-  existingAgent: Awaited<ReturnType<typeof getAgentById>>["data"]
-): boolean {
-  if (!existingAgent) {
-    return false;
-  }
-
-  return (
-    (input.name !== undefined && input.name !== existingAgent.name) ||
-    (input.description !== undefined && (input.description?.trim() || null) !== (existingAgent.description ?? null)) ||
-    (input.systemPrompt !== undefined && input.systemPrompt !== existingAgent.system_prompt) ||
-    (input.llmModel !== undefined && input.llmModel !== existingAgent.llm_model) ||
-    (input.llmTemperature !== undefined && input.llmTemperature !== existingAgent.llm_temperature)
-  );
-}
 
 function buildActivationErrorMessage(readiness: ReturnType<typeof getActivationReadiness>): string {
   const parts: string[] = [];
@@ -159,7 +132,12 @@ export async function PATCH(request: Request, context: RouteContext): Promise<Ne
   let googleCalendarDetectedTimezone: string | null = null;
 
   if (baseSetupState) {
-    const [salesforceIntegrationStateResult, gmailIntegrationStateResult, googleCalendarIntegrationStateResult] = await Promise.all([
+    const [
+      salesforceIntegrationStateResult,
+      gmailIntegrationStateResult,
+      googleCalendarIntegrationStateResult,
+      googleSheetsIntegrationStateResult,
+    ] = await Promise.all([
       getSalesforceAgentIntegrationState({
         agentId,
         organizationId: session.organizationId,
@@ -171,6 +149,11 @@ export async function PATCH(request: Request, context: RouteContext): Promise<Ne
         setupState: baseSetupState,
       }),
       getGoogleCalendarAgentIntegrationState({
+        agentId,
+        organizationId: session.organizationId,
+        setupState: baseSetupState,
+      }),
+      getGoogleSheetsAgentIntegrationState({
         agentId,
         organizationId: session.organizationId,
         setupState: baseSetupState,
@@ -198,10 +181,18 @@ export async function PATCH(request: Request, context: RouteContext): Promise<Ne
       );
     }
 
+    if (googleSheetsIntegrationStateResult.error) {
+      return NextResponse.json(
+        { error: "No se pudo validar la vinculacion Google Sheets del agente" },
+        { status: 500 }
+      );
+    }
+
     providerIntegrations = {
       ...buildSalesforceSetupResolutionContext(salesforceIntegrationStateResult.data),
       ...buildGmailSetupResolutionContext(gmailIntegrationStateResult.data),
       ...buildGoogleCalendarSetupResolutionContext(googleCalendarIntegrationStateResult.data),
+      ...buildGoogleSheetsSetupResolutionContext(googleSheetsIntegrationStateResult.data),
     };
 
     if (
@@ -383,79 +374,6 @@ export async function PATCH(request: Request, context: RouteContext): Promise<Ne
   }
 
   const connection = connectionResult.data;
-  const connectionSummary = buildAgentConnectionSummary(connection);
-  const requiresRemoteSync =
-    connectionSummary.classification === "remote_managed" &&
-    hasRemoteManagedFieldChange(updateInput, existingAgent);
-
-  if (requiresRemoteSync && session.role !== "admin") {
-    return NextResponse.json(
-      { error: "Solo los administradores pueden editar campos sincronizados con OpenAI" },
-      { status: 403 }
-    );
-  }
-
-  let syncedAssistant:
-    | Awaited<ReturnType<typeof updateOpenAIAssistant>>
-    | null = null;
-
-  if (connection && requiresRemoteSync) {
-    const integrationResult = await getOpenAIIntegrationById(
-      connection.integration_id,
-      session.organizationId
-    );
-
-    if (integrationResult.error || !integrationResult.data) {
-      return NextResponse.json(
-        { error: "No se pudo cargar la integracion del agente" },
-        { status: integrationResult.error ? 500 : 404 }
-      );
-    }
-
-    const integrationAccess = assertUsableIntegration(integrationResult.data);
-    if (!integrationAccess.ok) {
-      return NextResponse.json({ error: integrationAccess.message }, { status: integrationAccess.status });
-    }
-
-    const apiKeyResult = await getOpenAIIntegrationApiKey(
-      integrationResult.data.id,
-      session.organizationId
-    );
-
-    if (apiKeyResult.error || !apiKeyResult.data) {
-      return NextResponse.json(
-        { error: "No se pudo leer la API key de OpenAI" },
-        { status: 500 }
-      );
-    }
-
-    try {
-      syncedAssistant = await updateOpenAIAssistant(apiKeyResult.data, connection.provider_agent_id, {
-        name: updateInput.name ?? existingAgent.name,
-        description: updateInput.description ?? existingAgent.description ?? undefined,
-        instructions: updateInput.systemPrompt ?? existingAgent.system_prompt,
-        model: updateInput.llmModel ?? existingAgent.llm_model,
-        temperature: updateInput.llmTemperature ?? existingAgent.llm_temperature ?? 0.7,
-      }, {
-        organizationId: session.organizationId,
-        integrationId: integrationResult.data.id,
-        methodKey: "openai.assistants.update",
-      });
-    } catch (error) {
-      console.error("agents.update_connected.remote_error", {
-        organizationId: session.organizationId,
-        agentId,
-        integrationId: connection.integration_id,
-        error: error instanceof Error ? error.message : "unknown",
-      });
-
-      return NextResponse.json(
-        { error: getSafeProviderErrorMessage(error, "No se pudo actualizar el assistant en OpenAI") },
-        { status: 502 }
-      );
-    }
-  }
-
   const { data: agent, error } = await updateAgent(
     agentId,
     updateInput,
@@ -463,40 +381,10 @@ export async function PATCH(request: Request, context: RouteContext): Promise<Ne
   );
 
   if (error || !agent) {
-    if (connection && syncedAssistant && connectionSummary.classification === "remote_managed") {
-      await markAgentConnectionError(
-        connection.id,
-        session.organizationId,
-        "local_sync_failed"
-      );
-    }
-
     return NextResponse.json(
       { error: error ?? "No se pudo actualizar el agente" },
       { status: 500 }
     );
-  }
-
-  if (connection && syncedAssistant && connectionSummary.classification === "remote_managed") {
-    await markAgentConnectionSynced(
-      connection.id,
-      session.organizationId,
-      syncedAssistant.remoteUpdatedAt,
-      buildAssistantConnectionMetadata(syncedAssistant)
-    );
-
-    void insertProviderActionAudit({
-      organizationId: session.organizationId,
-      userId: session.user.id,
-      integrationId: connection.integration_id,
-      agentId,
-      provider: "openai",
-      providerObjectType: "assistant",
-      providerObjectId: connection.provider_agent_id,
-      action: "provider.openai.assistant.updated",
-      requestId: syncedAssistant.providerRequestId,
-      status: "success",
-    });
   }
 
   const oldValues: Json = {

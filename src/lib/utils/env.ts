@@ -131,4 +131,33 @@ export const env = {
   get N8N_API_KEY() {
     return requireServerEnv("N8N_API_KEY");
   },
+
+  get LLM_ROUTER_ENABLED() {
+    return getOptionalServerBooleanEnv("LLM_ROUTER_ENABLED", true);
+  },
+
+  get LLM_ROUTER_ROLLOUT_PERCENT() {
+    return getOptionalServerEnv("LLM_ROUTER_ROLLOUT_PERCENT", "100");
+  },
+
+  get LLM_ROUTER_ORG_IDS() {
+    return getOptionalServerEnv("LLM_ROUTER_ORG_IDS", "");
+  },
+
+  get LITELLM_ROUTER_CHEAP_MODEL() {
+    return getOptionalServerEnv("LITELLM_ROUTER_CHEAP_MODEL", "gpt-4o-mini");
+  },
+
+  get LITELLM_ROUTER_STRONG_MODEL() {
+    return getOptionalServerEnv("LITELLM_ROUTER_STRONG_MODEL", "gpt-4o");
+  },
+
+  get AGENT_COMPACT_PROMPT_ENABLED() {
+    return getOptionalServerBooleanEnv("AGENT_COMPACT_PROMPT_ENABLED", false);
+  },
+
+  get AGENT_COMPACT_PROMPT_ORG_IDS() {
+    return getOptionalServerEnv("AGENT_COMPACT_PROMPT_ORG_IDS", "");
+  },
+
 } as const;

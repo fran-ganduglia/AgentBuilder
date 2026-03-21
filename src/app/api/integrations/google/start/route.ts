@@ -12,7 +12,7 @@ import {
 import { env } from "@/lib/utils/env";
 
 const startGoogleSchema = z.object({
-  surface: z.enum(["gmail", "google_calendar"]),
+  surface: z.enum(["gmail", "google_calendar", "google_sheets"]),
   reconnect: z
     .string()
     .optional()

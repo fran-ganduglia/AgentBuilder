@@ -620,10 +620,84 @@ export async function updateSalesforceOpportunity(
   }, context);
 }
 
+export async function updateSalesforceContact(
+  credentials: SalesforceCredentials,
+  input: { contactId: string; firstName?: string; lastName?: string; email?: string; phone?: string; title?: string; accountId?: string },
+  context: SalesforceProviderContext
+): Promise<SalesforceMutationResult> {
+  return executeUpdate(credentials, "Contact", input.contactId, {
+    FirstName: input.firstName ?? undefined,
+    LastName: input.lastName ?? undefined,
+    Email: input.email ?? undefined,
+    Phone: input.phone ?? undefined,
+    Title: input.title ?? undefined,
+    AccountId: input.accountId ?? undefined,
+  }, context);
+}
+
+export async function updateSalesforceAccount(
+  credentials: SalesforceCredentials,
+  input: { accountId: string; name?: string; phone?: string; website?: string; industry?: string; description?: string },
+  context: SalesforceProviderContext
+): Promise<SalesforceMutationResult> {
+  return executeUpdate(credentials, "Account", input.accountId, {
+    Name: input.name ?? undefined,
+    Phone: input.phone ?? undefined,
+    Website: input.website ?? undefined,
+    Industry: input.industry ?? undefined,
+    Description: input.description ?? undefined,
+  }, context);
+}
+
+export async function createSalesforceOpportunity(
+  credentials: SalesforceCredentials,
+  input: { name: string; stageName: string; closeDate: string; accountId?: string; amount?: number; description?: string; type?: string },
+  context: SalesforceProviderContext
+): Promise<SalesforceMutationResult> {
+  return executeCreate(credentials, "Opportunity", {
+    Name: input.name,
+    StageName: input.stageName,
+    CloseDate: input.closeDate,
+    AccountId: input.accountId ?? undefined,
+    Amount: input.amount ?? undefined,
+    Description: input.description ?? undefined,
+    Type: input.type ?? undefined,
+  }, context);
+}
+
+export async function createSalesforceAccount(
+  credentials: SalesforceCredentials,
+  input: { name: string; phone?: string; website?: string; industry?: string; description?: string; billingCity?: string; billingState?: string; billingCountry?: string },
+  context: SalesforceProviderContext
+): Promise<SalesforceMutationResult> {
+  return executeCreate(credentials, "Account", {
+    Name: input.name,
+    Phone: input.phone ?? undefined,
+    Website: input.website ?? undefined,
+    Industry: input.industry ?? undefined,
+    Description: input.description ?? undefined,
+    BillingCity: input.billingCity ?? undefined,
+    BillingState: input.billingState ?? undefined,
+    BillingCountry: input.billingCountry ?? undefined,
+  }, context);
+}
+
+export async function createSalesforceOpportunityContactRole(
+  credentials: SalesforceCredentials,
+  input: { opportunityId: string; contactId: string; role?: string },
+  context: SalesforceProviderContext
+): Promise<SalesforceMutationResult> {
+  return executeCreate(credentials, "OpportunityContactRole", {
+    OpportunityId: input.opportunityId,
+    ContactId: input.contactId,
+    Role: input.role ?? "Decision Maker",
+  }, context);
+}
+
 export async function deleteSalesforceObject(
   credentials: SalesforceCredentials,
   input: {
-    objectType: "Contact" | "Task";
+    objectType: "Contact" | "Task" | "Opportunity" | "Account" | "OpportunityContactRole";
     recordId: string;
   },
   context: SalesforceProviderContext

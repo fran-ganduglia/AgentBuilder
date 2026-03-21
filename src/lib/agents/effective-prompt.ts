@@ -6,15 +6,21 @@ import {
   type RecommendedPromptVariant,
 } from "@/lib/agents/agent-templates";
 import type { AgentSetupState } from "@/lib/agents/agent-setup";
+import type { PromptVariant } from "@/lib/agents/prompt-compiler";
 import {
   detectSalesforcePromptConflict,
   stripSalesforcePromptConflicts,
 } from "@/lib/integrations/salesforce-selection";
 
+export type SystemPromptProfile = "full" | "compact_v2" | "custom_full";
+
 export type EffectiveAgentPromptResolution = {
   effectivePrompt: string;
   syncMode: PromptSyncMode;
   matchedVariant: RecommendedPromptVariant | null;
+  promptVariant: PromptVariant;
+  systemPromptProfile: SystemPromptProfile;
+  compactPromptCandidate: string | null;
   hadConflictCleanup: boolean;
   hasPromptConflict: boolean;
   promptConflictSnippet: string | null;
@@ -51,21 +57,43 @@ function resolveCustomPromptConflict(input: {
 export function resolveEffectiveAgentPrompt(input: {
   savedPrompt: string;
   setupState: AgentSetupState | null;
+  matchSetupState?: AgentSetupState | null;
   promptEnvironment?: RecommendedPromptEnvironment;
   allowConflictCleanupForCustom?: boolean;
+  promptVariant?: PromptVariant;
 }): EffectiveAgentPromptResolution {
   const promptEnvironment = input.promptEnvironment ?? {};
+  const promptVariant = input.promptVariant ?? "full";
 
   if (input.setupState) {
-    const matchedCandidate = getRecommendedPromptCandidates(input.setupState, promptEnvironment).find(
-      (candidate) => normalizePrompt(candidate.prompt) === normalizePrompt(input.savedPrompt)
+    const candidateSetupStates = [
+      input.matchSetupState,
+      input.setupState,
+    ].filter((setupState, index, array): setupState is AgentSetupState =>
+      Boolean(setupState) && array.findIndex((candidate) => candidate === setupState) === index
     );
 
+    const matchedCandidate = candidateSetupStates
+      .flatMap((setupState) => getRecommendedPromptCandidates(setupState, promptEnvironment))
+      .find((candidate) => normalizePrompt(candidate.prompt) === normalizePrompt(input.savedPrompt));
+
     if (matchedCandidate) {
+      const effectivePromptVariant = promptVariant === "compact" ? "compact" : "full";
       return {
-        effectivePrompt: buildRecommendedSystemPrompt(input.setupState, promptEnvironment),
+        effectivePrompt: buildRecommendedSystemPrompt(input.setupState, promptEnvironment, {
+          promptVariant: effectivePromptVariant,
+        }),
         syncMode: "recommended",
         matchedVariant: matchedCandidate.variant,
+        promptVariant: effectivePromptVariant,
+        systemPromptProfile:
+          effectivePromptVariant === "compact" ? "compact_v2" : "full",
+        compactPromptCandidate:
+          effectivePromptVariant === "full"
+            ? buildRecommendedSystemPrompt(input.setupState, promptEnvironment, {
+                promptVariant: "compact",
+              })
+            : null,
         hadConflictCleanup: false,
         hasPromptConflict: false,
         promptConflictSnippet: null,
@@ -85,6 +113,9 @@ export function resolveEffectiveAgentPrompt(input: {
       : input.savedPrompt,
     syncMode: "custom",
     matchedVariant: null,
+    promptVariant: "full",
+    systemPromptProfile: "custom_full",
+    compactPromptCandidate: null,
     hadConflictCleanup: shouldCleanup,
     hasPromptConflict: promptConflict.hasConflict,
     promptConflictSnippet: promptConflict.snippet,

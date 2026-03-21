@@ -5,7 +5,7 @@ export const GOOGLE_IDENTITY_SCOPES = [
 ] as const;
 
 export const GMAIL_REQUIRED_SCOPES = [
-  "https://www.googleapis.com/auth/gmail.metadata",
+  "https://www.googleapis.com/auth/gmail.readonly",
   "https://www.googleapis.com/auth/gmail.compose",
   "https://www.googleapis.com/auth/gmail.modify",
 ] as const;
@@ -14,7 +14,22 @@ export const GOOGLE_CALENDAR_REQUIRED_SCOPES = [
   "https://www.googleapis.com/auth/calendar",
 ] as const;
 
-export const GOOGLE_SURFACES = ["gmail", "google_calendar"] as const;
+export const GOOGLE_SHEETS_REQUIRED_SCOPES = [
+  "https://www.googleapis.com/auth/spreadsheets",
+  "https://www.googleapis.com/auth/drive.file",
+] as const;
+
+export const GOOGLE_DRIVE_REQUIRED_SCOPES = [
+  "https://www.googleapis.com/auth/drive.readonly",
+  "https://www.googleapis.com/auth/drive.file",
+] as const;
+
+export const GOOGLE_SURFACES = [
+  "gmail",
+  "google_calendar",
+  "google_sheets",
+  "google_drive",
+] as const;
 
 export type GoogleSurface = (typeof GOOGLE_SURFACES)[number];
 
@@ -23,6 +38,14 @@ export function getRequiredGoogleScopesForSurface(
 ): string[] {
   if (surface === "gmail") {
     return [...GMAIL_REQUIRED_SCOPES];
+  }
+
+  if (surface === "google_sheets") {
+    return [...GOOGLE_SHEETS_REQUIRED_SCOPES];
+  }
+
+  if (surface === "google_drive") {
+    return [...GOOGLE_DRIVE_REQUIRED_SCOPES];
   }
 
   return [...GOOGLE_CALENDAR_REQUIRED_SCOPES];

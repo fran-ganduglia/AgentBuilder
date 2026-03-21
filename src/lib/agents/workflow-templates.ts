@@ -43,7 +43,7 @@ export const WORKFLOW_TEMPLATE_IDS = [
 export type WorkflowTemplateId = (typeof WORKFLOW_TEMPLATE_IDS)[number];
 
 export type WorkflowModelRecommendation = {
-  model: "gpt-4o-mini" | "gpt-4o" | "claude-sonnet-4-6" | "gemini-pro";
+  model: "gpt-4o-mini" | "gpt-4o" | "claude-sonnet-4-6" | "claude-haiku-4-5-20251001" | "gemini-pro";
   costBand: "low" | "medium" | "high";
   latencyBand: "fast" | "balanced" | "deliberate";
   reasoningBand: "standard" | "strong";

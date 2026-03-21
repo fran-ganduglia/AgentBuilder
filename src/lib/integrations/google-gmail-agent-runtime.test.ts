@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 
 import {
+  assertAttachmentPathsBelongToOrganization,
+  buildDraftReplyMessage,
+  buildNewEmailMessage,
   createGoogleGmailReadToolExecutor,
   createRecentGmailThreadContext,
   formatGoogleGmailResultForPrompt,
@@ -227,6 +230,66 @@ function runRecentContextSanitizationTest(): void {
   );
 }
 
+function runAttachmentOwnershipValidationTest(): void {
+  assert.deepEqual(
+    assertAttachmentPathsBelongToOrganization(
+      ["org-1/batch-1/archivo.pdf"],
+      "org-1"
+    ),
+    ["org-1/batch-1/archivo.pdf"]
+  );
+
+  assert.throws(
+    () =>
+      assertAttachmentPathsBelongToOrganization(
+        ["org-2/batch-1/archivo.pdf"],
+        "org-1"
+      ),
+    /organizacion autenticada/i
+  );
+}
+
+function runMultipartMimeBuildTest(): void {
+  const rawNewEmail = buildNewEmailMessage({
+    to: ["ana@example.com"],
+    subject: "Propuesta",
+    body: "Adjunto el archivo",
+    workflowStepId: "step-1",
+    attachments: [
+      {
+        fileName: "brief.pdf",
+        mimeType: "application/pdf",
+        base64Content: "JVBERi0xLjQ=",
+      },
+    ],
+  });
+
+  assert.match(rawNewEmail, /Content-Type: multipart\/mixed; boundary=/);
+  assert.match(rawNewEmail, /Content-Disposition: attachment; filename="brief\.pdf"/);
+  assert.match(rawNewEmail, /Content-Transfer-Encoding: base64/);
+  assert.match(rawNewEmail, /QWRqdW50byBlbCBhcmNoaXZv/);
+  assert.match(rawNewEmail, /JVBERi0xLjQ=/);
+
+  const rawReply = buildDraftReplyMessage({
+    to: "ana@example.com",
+    subject: "Propuesta",
+    body: "Te respondo con adjunto",
+    workflowStepId: "step-2",
+    rfcMessageId: "<msg-1@example.com>",
+    attachments: [
+      {
+        fileName: "detalle.csv",
+        mimeType: "text/csv",
+        base64Content: "YSxiLGMKMSwyLDM=",
+      },
+    ],
+  });
+
+  assert.match(rawReply, /In-Reply-To: <msg-1@example\.com>/);
+  assert.match(rawReply, /filename="detalle\.csv"/);
+  assert.match(rawReply, /YSxiLGMKMSwyLDM=/);
+}
+
 async function runArchiveThreadIdempotentTest(): Promise<void> {
   const originalFetch = global.fetch;
   let modifyCalls = 0;
@@ -307,6 +370,8 @@ async function main(): Promise<void> {
   await runRefreshFailureReauthTest();
   await runArchiveThreadIdempotentTest();
   runRecentContextSanitizationTest();
+  runAttachmentOwnershipValidationTest();
+  runMultipartMimeBuildTest();
   console.log("google-gmail-agent-runtime checks passed");
 }
 

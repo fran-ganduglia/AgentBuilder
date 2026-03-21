@@ -15,7 +15,11 @@ import {
   WHATSAPP_INTENT_LABELS,
   type WhatsAppKnownIntent,
 } from "@/lib/chat/whatsapp-intents";
-import { LiteLLMError, sendChatCompletion } from "@/lib/llm/litellm";
+import { LiteLLMError } from "@/lib/llm/litellm";
+import {
+  resolveRuntimeModelRoutePolicy,
+  sendRoutedChatCompletion,
+} from "@/lib/llm/model-routing";
 import type { Agent, Conversation } from "@/types/app";
 
 const ROUTING_OBSERVABILITY_WINDOW = 50;
@@ -129,24 +133,51 @@ async function classifyIntentWithLlm(input: {
   latestUserMessage: string;
   currentActiveIntent: WhatsAppKnownIntent | null;
 }): Promise<ReturnType<typeof normalizeWhatsAppIntentClassification>> {
-  const completion = await sendChatCompletion({
-    model: input.agent.llm_model,
-    systemPrompt: [
-      "Clasifica la intencion de un mensaje entrante de WhatsApp.",
-      "Responde solo JSON valido con las claves intent y confidence.",
-      "Valores permitidos para intent: support, sales, appointment_booking, reminder_follow_up, unknown.",
-      "Usa unknown si la senal no es suficientemente clara.",
-      input.currentActiveIntent
-        ? `Intento activo actual: ${input.currentActiveIntent}.`
-        : "No hay intento activo actual.",
-    ].join("\n"),
-    messages: [{ role: "user", content: input.latestUserMessage }],
-    temperature: 0,
-    maxTokens: CLASSIFIER_MAX_TOKENS,
-    organizationId: input.organizationId,
-    agentId: input.agent.id,
-    conversationId: input.conversation.id,
+  const routed = await sendRoutedChatCompletion({
+    requestedModel: input.agent.llm_model,
+    policy: resolveRuntimeModelRoutePolicy(input.agent.llm_model),
+    signals: {
+      hasTools: false,
+      toolCount: 0,
+      hasRag: false,
+      ragChunkCount: 0,
+      historySize: input.currentActiveIntent ? 1 : 0,
+      surfaceCount: 0,
+      isAmbiguous: false,
+      previousFailures: 0,
+      channel: "whatsapp",
+      turnType: "classifier",
+    },
+    chatInput: {
+      systemPrompt: [
+        "Clasifica la intencion de un mensaje entrante de WhatsApp.",
+        "Responde solo JSON valido con las claves intent y confidence.",
+        "Valores permitidos para intent: support, sales, appointment_booking, reminder_follow_up, unknown.",
+        "Usa unknown si la senal no es suficientemente clara.",
+        input.currentActiveIntent
+          ? `Intento activo actual: ${input.currentActiveIntent}.`
+          : "No hay intento activo actual.",
+      ].join("\n"),
+      messages: [{ role: "user", content: input.latestUserMessage }],
+      temperature: 0,
+      maxTokens: CLASSIFIER_MAX_TOKENS,
+      organizationId: input.organizationId,
+      agentId: input.agent.id,
+      conversationId: input.conversation.id,
+    },
+    evaluateStructuredOutput: (output) => {
+      try {
+        const parsed = JSON.parse(output.content) as { confidence?: number | null };
+        return {
+          parseValid: true,
+          confidence: typeof parsed.confidence === "number" ? parsed.confidence : null,
+        };
+      } catch {
+        return { parseValid: false };
+      }
+    },
   });
+  const completion = routed.output;
 
   try {
     return normalizeWhatsAppIntentClassification(JSON.parse(completion.content) as {

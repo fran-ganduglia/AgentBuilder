@@ -14,6 +14,8 @@ import {
   parseChoiceChipsMarker,
   parseDynamicFormMarker,
   type DynamicFormDefinition,
+  type DynamicFormFieldUi,
+  type FileAttachmentValue,
 } from "@/lib/chat/interactive-markers";
 import {
   resolveInlineFallbackQuickActions,
@@ -30,9 +32,20 @@ type MessageListProps = {
   onFollowUpIntentSelect?: (prompt: string) => void;
   activeUiState?: ActiveChatUiState;
   onFormConfirm?: () => void;
-  onDynamicFormSubmit?: (definition: DynamicFormDefinition, values: Record<string, string>) => void;
+  onDynamicFormSubmit?: (
+    definition: DynamicFormDefinition,
+    initialValues: Record<string, string>,
+    fieldUi: Record<string, DynamicFormFieldUi>,
+    values: Record<string, string>,
+    fileAttachments?: Record<string, FileAttachmentValue[]>,
+    activeFormState?: Extract<ActiveChatUiState, { kind: "dynamic_form" }>
+  ) => void;
   isLoading?: boolean;
 };
+
+function normalizeInlineUiText(value: string): string {
+  return value.trim().replace(/\s+/g, " ");
+}
 
 export function MessageList({
   messages,
@@ -66,6 +79,24 @@ export function MessageList({
 
     return null;
   }, [messages]);
+  const lastAssistantMessage = useMemo(() => {
+    if (!lastAssistantMessageId) {
+      return null;
+    }
+
+    return messages.find((message) => message.id === lastAssistantMessageId) ?? null;
+  }, [lastAssistantMessageId, messages]);
+  const shouldAttachPersistedDynamicFormToLastMessage =
+    activeUiState.kind === "dynamic_form" &&
+    !isLoading &&
+    lastAssistantMessage !== null &&
+    normalizeInlineUiText(lastAssistantMessage.content) ===
+      normalizeInlineUiText(activeUiState.message);
+  const shouldShowPersistedDynamicForm =
+    activeUiState.kind === "dynamic_form" &&
+    !isLoading &&
+    activeUiState.sourceMessageId !== lastAssistantMessageId &&
+    !shouldAttachPersistedDynamicFormToLastMessage;
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -104,7 +135,7 @@ export function MessageList({
 
   return (
     <div className="flex flex-1 flex-col overflow-y-auto">
-      {messages.map((message) => {
+      {messages.filter((m) => m.role !== "tool").map((message) => {
         const isUser = message.role === "user";
         const parsedConfirmationMarker =
           isUser ? null : parseChatConfirmationMarker(message.content);
@@ -130,10 +161,25 @@ export function MessageList({
         const shouldShowDynamicForm =
           !isUser &&
           !isLoading &&
-          parsedDynamicForm !== null &&
-          message.id === lastAssistantMessageId &&
           !dismissedInlineSurfaces.has(message.id) &&
-          !shouldShowConfirmationCard;
+          !shouldShowConfirmationCard &&
+          (
+            (activeUiState.kind === "dynamic_form" && activeUiState.sourceMessageId === message.id) ||
+            (
+              activeUiState.kind === "dynamic_form" &&
+              shouldAttachPersistedDynamicFormToLastMessage &&
+              message.id === lastAssistantMessageId
+            ) ||
+            (parsedDynamicForm !== null && message.id === lastAssistantMessageId)
+          );
+        const inlineDynamicForm =
+          activeUiState.kind === "dynamic_form" &&
+          (
+            activeUiState.sourceMessageId === message.id ||
+            (shouldAttachPersistedDynamicFormToLastMessage && message.id === lastAssistantMessageId)
+          )
+            ? activeUiState
+            : parsedDynamicForm;
         const shouldShowChoiceChips =
           !isUser &&
           parsedChoices !== null &&
@@ -181,14 +227,22 @@ export function MessageList({
                     {renderedContent}
                   </div>
                 ) : null}
-                {shouldShowDynamicForm && parsedDynamicForm ? (
+                {shouldShowDynamicForm && inlineDynamicForm ? (
                   <DynamicChatFormCard
-                    definition={parsedDynamicForm.definition}
+                    definition={inlineDynamicForm.definition}
+                    initialValues={inlineDynamicForm.initialValues}
+                    fieldUi={inlineDynamicForm.fieldUi}
                     disabled={isLoading}
-                    onSubmit={(values) =>
+                    onSubmit={(values, fileAttachments) =>
                       onDynamicFormSubmit?.(
-                        parsedDynamicForm.definition,
-                        values
+                        inlineDynamicForm.definition,
+                        inlineDynamicForm.initialValues,
+                        inlineDynamicForm.fieldUi,
+                        values,
+                        fileAttachments,
+                        activeUiState.kind === "dynamic_form" && activeUiState.sourceMessageId === message.id
+                          ? activeUiState
+                          : undefined
                       )
                     }
                     onDismiss={() => {
@@ -284,6 +338,43 @@ export function MessageList({
           </div>
         );
       })}
+                {shouldShowPersistedDynamicForm ? (
+        <div className="w-full border-y border-emerald-100 bg-emerald-50/40 py-8">
+          <div className="mx-auto flex max-w-4xl gap-6 px-4 sm:px-6 lg:px-8">
+            <div className="shrink-0">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-100 text-emerald-700 shadow-sm ring-1 ring-inset ring-emerald-600/20">
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                </svg>
+              </div>
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="mb-1 text-xs font-bold uppercase tracking-widest text-slate-900">
+                Formulario activo
+              </p>
+              <div className="prose prose-sm prose-slate max-w-none whitespace-pre-wrap text-slate-700 leading-relaxed">
+                {activeUiState.message}
+              </div>
+              <DynamicChatFormCard
+                definition={activeUiState.definition}
+                initialValues={activeUiState.initialValues}
+                fieldUi={activeUiState.fieldUi}
+                disabled={isLoading}
+                onSubmit={(values, fileAttachments) =>
+                  onDynamicFormSubmit?.(
+                    activeUiState.definition,
+                    activeUiState.initialValues,
+                    activeUiState.fieldUi,
+                    values,
+                    fileAttachments,
+                    activeUiState
+                  )
+                }
+              />
+            </div>
+          </div>
+        </div>
+      ) : null}
       <div ref={bottomRef} className="h-6" />
     </div>
   );

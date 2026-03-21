@@ -5,6 +5,7 @@ import { updateConversationMetadata } from "@/lib/db/conversations";
 import { insertMessageWithServiceRole } from "@/lib/db/messages";
 import { insertPlanLimitNotification } from "@/lib/db/notifications-writer";
 import { recordUsage } from "@/lib/db/usage-writer";
+import type { Json } from "@/types/database";
 
 export type PersistedAssistantReplyInput = {
   agentId: string;
@@ -17,6 +18,7 @@ export type PersistedAssistantReplyInput = {
   tokensInput?: number | null;
   tokensOutput?: number | null;
   conversationMetadataPatch?: ConversationMetadata;
+  messageMetadata?: Json;
 };
 
 export async function persistAssistantReply(
@@ -32,6 +34,7 @@ export async function persistAssistantReply(
     responseTimeMs: input.responseTimeMs ?? null,
     tokensInput: input.tokensInput ?? null,
     tokensOutput: input.tokensOutput ?? null,
+    metadata: input.messageMetadata ?? null,
   });
 
   if (assistantInsertResult.error) {

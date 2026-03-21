@@ -38,10 +38,6 @@ export default async function AgentChatPage({ params }: ChatPageProps) {
     redirect(`/agents/${agentId}`);
   }
 
-  if (access.connectionSummary.classification === "remote_managed") {
-    redirect(`/agents/${agentId}`);
-  }
-
   const isTestMode = access.agent.status === "draft";
   const chatMode = isTestMode ? "sandbox" : "live_local";
 

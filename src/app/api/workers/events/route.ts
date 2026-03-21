@@ -11,6 +11,7 @@ import {
   processAgentUpdated,
   processConversationCreated,
   processMessageCreated,
+  processRuntimeQueueDispatch,
   processWorkflowStepExecute,
   processWhatsAppInboundMessageReceived,
 } from "@/lib/workers/event-processor";
@@ -25,7 +26,14 @@ export async function GET(request: Request) {
   }
 
   const events = await claimEvents(
-    ["message.created", "conversation.created", "whatsapp.inbound_message_received", "agent.updated", "workflow.step.execute"],
+    [
+      "message.created",
+      "conversation.created",
+      "whatsapp.inbound_message_received",
+      "agent.updated",
+      "workflow.step.execute",
+      "runtime.queue.dispatch",
+    ],
     10
   );
 
@@ -48,6 +56,8 @@ export async function GET(request: Request) {
         await processAgentUpdated(event);
       } else if (event.event_type === "workflow.step.execute") {
         await processWorkflowStepExecute(event);
+      } else if (event.event_type === "runtime.queue.dispatch") {
+        await processRuntimeQueueDispatch(event);
       }
 
       await markDone(event.id);

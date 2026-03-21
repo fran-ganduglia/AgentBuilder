@@ -9,6 +9,10 @@ import {
   getGoogleCalendarAgentIntegrationState,
 } from "@/lib/agents/google-calendar-agent-integration";
 import {
+  buildGoogleSheetsSetupResolutionContext,
+  getGoogleSheetsAgentIntegrationState,
+} from "@/lib/agents/google-sheets-agent-integration";
+import {
   mergeSetupProgress,
   setupProgressPatchSchema,
   toSetupStateJson,
@@ -65,7 +69,12 @@ export async function PATCH(
   let googleCalendarDetectedTimezone: string | null = null;
 
   if (baseSetupState) {
-    const [salesforceIntegrationStateResult, gmailIntegrationStateResult, googleCalendarIntegrationStateResult] = await Promise.all([
+    const [
+      salesforceIntegrationStateResult,
+      gmailIntegrationStateResult,
+      googleCalendarIntegrationStateResult,
+      googleSheetsIntegrationStateResult,
+    ] = await Promise.all([
       getSalesforceAgentIntegrationState({
         agentId,
         organizationId: session.organizationId,
@@ -77,6 +86,11 @@ export async function PATCH(
         setupState: baseSetupState,
       }),
       getGoogleCalendarAgentIntegrationState({
+        agentId,
+        organizationId: session.organizationId,
+        setupState: baseSetupState,
+      }),
+      getGoogleSheetsAgentIntegrationState({
         agentId,
         organizationId: session.organizationId,
         setupState: baseSetupState,
@@ -104,10 +118,18 @@ export async function PATCH(
       );
     }
 
+    if (googleSheetsIntegrationStateResult.error) {
+      return NextResponse.json(
+        { error: "No se pudo validar la vinculacion Google Sheets del agente" },
+        { status: 500 }
+      );
+    }
+
     providerIntegrations = {
       ...buildSalesforceSetupResolutionContext(salesforceIntegrationStateResult.data),
       ...buildGmailSetupResolutionContext(gmailIntegrationStateResult.data),
       ...buildGoogleCalendarSetupResolutionContext(googleCalendarIntegrationStateResult.data),
+      ...buildGoogleSheetsSetupResolutionContext(googleSheetsIntegrationStateResult.data),
     };
 
     if (
@@ -194,5 +216,4 @@ export async function PATCH(
 
   return NextResponse.json({ data: { setupState: nextSetupState } });
 }
-
 

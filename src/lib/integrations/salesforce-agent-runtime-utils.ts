@@ -23,6 +23,11 @@ export function getSalesforceAuditMetadata(action: ExecuteSalesforceCrmToolInput
     create_case: { auditAction: "provider.salesforce.case.created", providerObjectType: "case" },
     update_case: { auditAction: "provider.salesforce.case.updated", providerObjectType: "case" },
     update_opportunity: { auditAction: "provider.salesforce.opportunity.updated", providerObjectType: "opportunity" },
+    update_contact: { auditAction: "provider.salesforce.contact.updated", providerObjectType: "contact" },
+    update_account: { auditAction: "provider.salesforce.account.updated", providerObjectType: "account" },
+    create_opportunity: { auditAction: "provider.salesforce.opportunity.created", providerObjectType: "opportunity" },
+    create_account: { auditAction: "provider.salesforce.account.created", providerObjectType: "account" },
+    create_opportunity_contact_role: { auditAction: "provider.salesforce.opportunity_contact_role.created", providerObjectType: "opportunity_contact_role" },
   };
 
   return metadata[action];
@@ -94,6 +99,26 @@ export function buildSalesforceConfirmationSummary(input: ExecuteSalesforceCrmTo
 
   if (input.action === "update_opportunity") {
     return `Actualizar la oportunidad ${input.opportunityId}.`;
+  }
+
+  if (input.action === "update_contact") {
+    return `Actualizar el contacto ${input.contactId}.`;
+  }
+
+  if (input.action === "update_account") {
+    return `Actualizar la cuenta ${input.accountId}.`;
+  }
+
+  if (input.action === "create_opportunity") {
+    return `Crear una oportunidad "${input.name}" en etapa "${input.stageName}" con cierre ${input.closeDate}.`;
+  }
+
+  if (input.action === "create_account") {
+    return `Crear una cuenta llamada "${input.name}".`;
+  }
+
+  if (input.action === "create_opportunity_contact_role") {
+    return `Vincular el contacto ${input.contactId} a la oportunidad ${input.opportunityId} con rol "${input.role ?? "Decision Maker"}".`;
   }
 
   return "Confirmar accion de escritura en Salesforce.";

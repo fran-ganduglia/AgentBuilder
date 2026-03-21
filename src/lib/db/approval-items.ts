@@ -1,6 +1,8 @@
 import "server-only";
 
 import { enqueueEvent } from "@/lib/db/event-queue";
+import { buildRuntimeEventInsert, insertRuntimeEvents } from "@/lib/db/runtime-events";
+import { updateRuntimeRun } from "@/lib/db/runtime-runs";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { createServiceSupabaseClient } from "@/lib/supabase/service";
 import type { Tables, TablesInsert } from "@/types/database";
@@ -10,6 +12,17 @@ import {
   type WorkflowRunTransitionDecision,
 } from "@/lib/workflows/execution-engine";
 import { executeWorkflowCompensations } from "@/lib/workflows/compensation";
+import {
+  appendRuntimeWorkflowTraceEvent,
+  getRuntimeRunIdFromWorkflowMetadata,
+  persistRuntimeWorkflowTrace,
+  readRuntimeWorkflowTrace,
+} from "@/lib/runtime/workflow-bridge";
+import {
+  enqueueWorkflowStepRuntimeResume,
+  getRuntimeQueueDispatchPayloadFromMetadata,
+} from "@/lib/runtime/runtime-queue-dispatcher";
+import type { RuntimeActionType } from "@/lib/runtime/types";
 
 type DbResult<T> = { data: T | null; error: string | null };
 
@@ -52,8 +65,27 @@ async function queueWorkflowStepExecution(input: {
   organizationId: string;
   workflowRunId: string;
   workflowStepId: string;
+  runtimeRunId?: string | null;
+  runtimeActionId?: string;
+  runtimeActionType?: RuntimeActionType;
   traceId?: string | null;
 }): Promise<void> {
+  const enqueuedViaRuntime = await enqueueWorkflowStepRuntimeResume({
+    organizationId: input.organizationId,
+    runtimeRunId: input.runtimeRunId ?? null,
+    workflowRunId: input.workflowRunId,
+    workflowStepId: input.workflowStepId,
+    checkpointNode: "execute",
+    resumeReason: "resume_after_approval",
+    traceId: input.traceId ?? input.runtimeRunId ?? input.workflowStepId,
+    actionId: input.runtimeActionId,
+    actionType: input.runtimeActionType,
+  });
+
+  if (enqueuedViaRuntime) {
+    return;
+  }
+
   await enqueueEvent({
     organizationId: input.organizationId,
     eventType: "workflow.step.execute",
@@ -217,6 +249,75 @@ async function markWorkflowExpired(
     errorMessage: "La aprobacion expiro antes de resolverse.",
     stepStatus: "failed_due_to_expired_approval",
   });
+
+  const supabase = createServiceSupabaseClient();
+  const [{ data: workflowRun }, { data: approvalItem }] = await Promise.all([
+    supabase
+      .from("workflow_runs")
+      .select("metadata")
+      .eq("id", workflowRunId)
+      .eq("organization_id", organizationId)
+      .maybeSingle(),
+    supabase
+      .from("approval_items")
+      .select("id")
+      .eq("workflow_run_id", workflowRunId)
+      .eq("workflow_step_id", workflowStepId)
+      .eq("organization_id", organizationId)
+      .maybeSingle(),
+  ]);
+  const trace = appendRuntimeWorkflowTraceEvent({
+    current: readRuntimeWorkflowTrace(workflowRun?.metadata),
+    runtimeRunId: getRuntimeRunIdFromWorkflowMetadata(workflowRun?.metadata),
+    approvalItemId: approvalItem?.id ?? null,
+    workflowRunId,
+    workflowStepId,
+    event: {
+      at: new Date().toISOString(),
+      event: "approval_expired",
+      status: "blocked",
+      reason: "approval_expired",
+      approvalItemId: approvalItem?.id ?? null,
+      workflowRunId,
+      workflowStepId,
+    },
+  });
+  await persistRuntimeWorkflowTrace({
+    organizationId,
+    workflowRunId,
+    workflowStepId,
+    trace,
+    mirrorToStepOutput: true,
+  });
+  if (trace.runtimeRunId) {
+    await insertRuntimeEvents([
+      buildRuntimeEventInsert({
+        organizationId,
+        runtimeRunId: trace.runtimeRunId,
+        event: {
+          type: "runtime.action.blocked",
+          requestId: trace.requestId ?? workflowRunId,
+          traceId: trace.traceId ?? workflowRunId,
+          runtimeRunId: trace.runtimeRunId,
+          actionId: trace.actionId ?? undefined,
+          actionType: (trace.actionType as RuntimeActionType | null) ?? undefined,
+          status: "blocked",
+          reason: "approval_expired",
+          approvalItemId: approvalItem?.id ?? undefined,
+          workflowRunId,
+          workflowStepId,
+        },
+        payload: {
+          workflow_trace_event: "approval_expired",
+        },
+      }),
+    ]);
+    await updateRuntimeRun(organizationId, trace.runtimeRunId, {
+      status: "blocked",
+      checkpoint_node: "execute",
+      finished_at: new Date().toISOString(),
+    });
+  }
 }
 
 export async function insertApprovalItem(
@@ -414,6 +515,75 @@ export async function resolveApprovalItem(
       })
       .eq("id", current.workflow_run_id)
       .eq("organization_id", input.organizationId);
+
+    const { data: workflowRun } = await supabase
+      .from("workflow_runs")
+      .select("metadata")
+      .eq("id", current.workflow_run_id)
+      .eq("organization_id", input.organizationId)
+      .maybeSingle();
+    const runtimeResumeMetadata = getRuntimeQueueDispatchPayloadFromMetadata(workflowRun?.metadata);
+    const trace = appendRuntimeWorkflowTraceEvent({
+      current: readRuntimeWorkflowTrace(workflowRun?.metadata),
+      runtimeRunId: getRuntimeRunIdFromWorkflowMetadata(workflowRun?.metadata),
+      approvalItemId: current.id,
+      workflowRunId: current.workflow_run_id,
+      workflowStepId: current.workflow_step_id,
+      event: {
+        at: now,
+        event: "approval_approved",
+        status: "queued",
+        approvalItemId: current.id,
+        workflowRunId: current.workflow_run_id,
+        workflowStepId: current.workflow_step_id,
+      },
+    });
+    await persistRuntimeWorkflowTrace({
+      organizationId: input.organizationId,
+      workflowRunId: current.workflow_run_id,
+      workflowStepId: current.workflow_step_id,
+      trace,
+      mirrorToStepOutput: true,
+    });
+    if (trace.runtimeRunId) {
+      await insertRuntimeEvents([
+        buildRuntimeEventInsert({
+          organizationId: input.organizationId,
+          runtimeRunId: trace.runtimeRunId,
+          event: {
+            type: "runtime.node.completed",
+            requestId: trace.requestId ?? current.workflow_run_id,
+            traceId: trace.traceId ?? current.workflow_run_id,
+            runtimeRunId: trace.runtimeRunId,
+            actionId: trace.actionId ?? undefined,
+            actionType: (trace.actionType as RuntimeActionType | null) ?? undefined,
+            node: "execute",
+            status: "waiting_async_execution",
+            approvalItemId: current.id,
+            workflowRunId: current.workflow_run_id,
+            workflowStepId: current.workflow_step_id,
+          },
+          payload: {
+            workflow_trace_event: "approval_approved",
+          },
+        }),
+      ]);
+      await updateRuntimeRun(input.organizationId, trace.runtimeRunId, {
+        status: "waiting_async_execution",
+        checkpoint_node: "execute",
+        finished_at: null,
+      });
+    }
+
+    await queueWorkflowStepExecution({
+      organizationId: input.organizationId,
+      workflowRunId: current.workflow_run_id,
+      workflowStepId: current.workflow_step_id,
+      runtimeRunId: trace.runtimeRunId,
+      runtimeActionId: runtimeResumeMetadata.actionId,
+      runtimeActionType: runtimeResumeMetadata.actionType,
+      traceId: current.id,
+    });
   } else {
     await transitionAfterApprovalFailure({
       organizationId: input.organizationId,
@@ -423,6 +593,65 @@ export async function resolveApprovalItem(
       errorMessage: "La aprobacion fue rechazada por un operador.",
       stepStatus: "failed",
     });
+
+    const { data: workflowRun } = await supabase
+      .from("workflow_runs")
+      .select("metadata")
+      .eq("id", current.workflow_run_id)
+      .eq("organization_id", input.organizationId)
+      .maybeSingle();
+    const trace = appendRuntimeWorkflowTraceEvent({
+      current: readRuntimeWorkflowTrace(workflowRun?.metadata),
+      runtimeRunId: getRuntimeRunIdFromWorkflowMetadata(workflowRun?.metadata),
+      approvalItemId: current.id,
+      workflowRunId: current.workflow_run_id,
+      workflowStepId: current.workflow_step_id,
+      event: {
+        at: now,
+        event: "approval_rejected",
+        status: "blocked",
+        reason: "approval_rejected",
+        approvalItemId: current.id,
+        workflowRunId: current.workflow_run_id,
+        workflowStepId: current.workflow_step_id,
+      },
+    });
+    await persistRuntimeWorkflowTrace({
+      organizationId: input.organizationId,
+      workflowRunId: current.workflow_run_id,
+      workflowStepId: current.workflow_step_id,
+      trace,
+      mirrorToStepOutput: true,
+    });
+    if (trace.runtimeRunId) {
+      await insertRuntimeEvents([
+        buildRuntimeEventInsert({
+          organizationId: input.organizationId,
+          runtimeRunId: trace.runtimeRunId,
+          event: {
+            type: "runtime.action.blocked",
+            requestId: trace.requestId ?? current.workflow_run_id,
+            traceId: trace.traceId ?? current.workflow_run_id,
+            runtimeRunId: trace.runtimeRunId,
+            actionId: trace.actionId ?? undefined,
+            actionType: (trace.actionType as RuntimeActionType | null) ?? undefined,
+            status: "blocked",
+            reason: "approval_rejected",
+            approvalItemId: current.id,
+            workflowRunId: current.workflow_run_id,
+            workflowStepId: current.workflow_step_id,
+          },
+          payload: {
+            workflow_trace_event: "approval_rejected",
+          },
+        }),
+      ]);
+      await updateRuntimeRun(input.organizationId, trace.runtimeRunId, {
+        status: "blocked",
+        checkpoint_node: "execute",
+        finished_at: new Date().toISOString(),
+      });
+    }
   }
 
   // Clear pending_crm_action from conversation metadata so the chat rail
@@ -445,7 +674,7 @@ export async function resolveApprovalItem(
       await supabase
         .from("conversations")
         .update({
-          metadata: { ...currentMeta, pending_crm_action: null, pending_tool_action: null },
+          metadata: { ...currentMeta, pending_crm_action: null },
         })
         .eq("id", conversationId)
         .eq("organization_id", input.organizationId);

@@ -198,11 +198,14 @@ export async function getGoogleIntegrationConfig(
     );
     const timezoneMetadata = getGoogleCalendarTimezoneMetadata(integration.metadata);
 
+    const accessToken = decryptSecret(encryptedAccessToken);
+    const refreshToken = encryptedRefreshToken ? decryptSecret(encryptedRefreshToken) : null;
+
     return {
       data: {
         integration,
-        accessToken: decryptSecret(encryptedAccessToken),
-        refreshToken: encryptedRefreshToken ? decryptSecret(encryptedRefreshToken) : null,
+        accessToken,
+        refreshToken,
         grantedScopes: getMetadataStringArray(integration.metadata, "granted_scopes"),
         connectedEmail: getMetadataString(integration.metadata, "connected_email"),
         tokenGeneration: getJsonNumberValue(integration.metadata, "token_generation"),
